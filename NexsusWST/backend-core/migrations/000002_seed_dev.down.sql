@@ -1,0 +1,6 @@
+DELETE FROM user_companies WHERE user_id BETWEEN 1 AND 5;
+DELETE FROM users WHERE id BETWEEN 1 AND 5;
+DELETE FROM products WHERE sku IN ('SKU-001','SKU-002','SKU-SINSTOCK','SKU-900');
+DELETE FROM companies WHERE id IN (1,2);
+DELETE FROM regions;
+DELETE FROM couriers;

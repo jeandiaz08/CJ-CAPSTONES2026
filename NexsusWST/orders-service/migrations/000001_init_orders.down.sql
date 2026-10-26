@@ -1,0 +1,8 @@
+BEGIN;
+DROP TABLE IF EXISTS webhook_inbox;
+DROP TABLE IF EXISTS job_outbox;
+DROP TABLE IF EXISTS stock_committed;
+DROP TABLE IF EXISTS order_events;
+DROP TABLE IF EXISTS order_items;
+DROP TABLE IF EXISTS orders;
+COMMIT;

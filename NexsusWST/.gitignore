@@ -1,0 +1,28 @@
+# Secretos
+.env
+*.pem
+*.key
+infrastructure/traefik/letsencrypt/
+
+# Go
+**/tmp/
+**/bin/
+*.exe
+coverage.out
+
+# Node / Next
+frontend-web/node_modules/
+frontend-web/.next/
+frontend-web/out/
+
+# IDE / SO
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Generados por herramientas
+frontend-web/tsconfig.tsbuildinfo
+frontend-web/AGENTS.md
+frontend-web/CLAUDE.md
