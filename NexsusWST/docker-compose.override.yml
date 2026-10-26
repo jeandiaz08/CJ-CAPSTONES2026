@@ -1,0 +1,97 @@
+# =============================================================================
+#  NexusWST - OVERRIDE DE DESARROLLO (se carga automáticamente con
+#  "docker compose up"). Añade:
+#   - Hot reload: Go con Air, Next.js con "next dev"
+#   - Código montado desde tu equipo (bind mounts)
+#   - Puertos publicados SOLO en 127.0.0.1 para herramientas locales (DAS §7.3)
+#   - Adminer (cliente web de PostgreSQL) en http://127.0.0.1:8089
+#   - Keycloak en modo desarrollo con usuarios de prueba (contraseña Nexus2026!)
+#     Consola: http://localhost/auth/admin  (usuario/contraseña de .env)
+#   - Mailpit: bandeja de correos de prueba en http://127.0.0.1:8025
+# =============================================================================
+
+services:
+  traefik:
+    ports:
+      - "127.0.0.1:${TRAEFIK_DASHBOARD_PORT:-8088}:8080" # dashboard
+
+  frontend:
+    build:
+      target: dev
+    environment:
+      NODE_ENV: development
+      # Necesario en Windows/macOS para detectar cambios en archivos montados
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./frontend-web:/app
+      # Volúmenes anónimos: evitan que node_modules/.next del host pisen los del
+      # contenedor. Si cambias package.json: docker compose up -d --build -V frontend
+      - /app/node_modules
+      - /app/.next
+
+  core:
+    build:
+      target: dev
+    environment:
+      APP_ENV: development
+    volumes:
+      - ./backend-core:/app
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    healthcheck:
+      # En dev el binario lo genera Air en ./tmp
+      test: ["CMD", "/app/tmp/api", "-healthcheck"]
+      start_period: 90s
+
+  orders:
+    build:
+      target: dev
+    environment:
+      APP_ENV: development
+    volumes:
+      - ./orders-service:/app
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    healthcheck:
+      test: ["CMD", "/app/tmp/api", "-healthcheck"]
+      start_period: 90s
+
+  keycloak:
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_WEB_DIRECT_GRANTS: ${KC_WEB_DIRECT_GRANTS:-true} # permite probar con Postman/curl
+    volumes:
+      # Solo en desarrollo: usuarios de prueba (no van a producción)
+      - ./infrastructure/keycloak/dev-users/nexuswst-users-0.json:/opt/keycloak/data/import/nexuswst-users-0.json:ro
+
+  mailpit:
+    image: axllent/mailpit:${MAILPIT_VERSION:-v1.32.0}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025" # bandeja web de correos de prueba
+    networks:
+      - data
+
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432" # para DBeaver / pgAdmin
+
+  redis:
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379" # para RedisInsight
+
+  adminer:
+    image: adminer:${ADMINER_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ADMINER_PORT:-8089}:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      - postgres
+    networks:
+      - data
+
+volumes:
+  go_mod_cache:
+  go_build_cache:

@@ -1,0 +1,65 @@
+# =============================================================================
+#  NexusWST - OVERRIDE DE PRODUCCIÓN (DigitalOcean)
+#  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+#  - HTTPS con Let's Encrypt (requiere APP_DOMAIN con DNS apuntando al servidor)
+#  - Imágenes "prod" (binarios compilados, usuario sin privilegios)
+#  - Red de datos interna: Postgres/Redis sin salida ni entrada externa
+#  - Sin puertos de herramientas publicados
+# =============================================================================
+
+services:
+  traefik:
+    volumes:
+      - ./infrastructure/traefik/traefik.prod.yml:/etc/traefik/traefik.yml:ro
+      - letsencrypt:/letsencrypt
+
+  core:
+    environment:
+      APP_ENV: production
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  orders:
+    environment:
+      APP_ENV: production
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  keycloak:
+    # Unos 1,25 GB de RAM (DAS §7.1): revisar el tamaño del droplet.
+    # Producción: auth.westorage.cl (AUTH_DOMAIN y KEYCLOAK_PUBLIC_URL en .env)
+    # y SMTP real de WeStorage (SMTP_* en .env). Sin usuarios de prueba.
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
+  frontend:
+    logging: *logging
+
+  postgres:
+    logging: *logging
+    # Si WeStorage entrega una instancia administrada de PostgreSQL, elimina
+    # este servicio y apunta DATABASE_URL al host provisto (sslmode=require).
+
+  redis:
+    logging: *logging
+
+networks:
+  data:
+    internal: true
+
+volumes:
+  letsencrypt:

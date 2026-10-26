@@ -1,0 +1,113 @@
+{
+  "realm": "nexuswst",
+  "displayName": "NexusWST",
+  "displayNameHtml": "<b>NexusWST</b> · WeStorage",
+  "enabled": true,
+
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 10,
+  "passwordPolicy": "length(8) and notUsername and notEmail",
+
+  "accessTokenLifespan": 600,
+  "ssoSessionIdleTimeout": 7200,
+  "ssoSessionMaxLifespan": 43200,
+  "actionTokenGeneratedByUserLifespan": 1800,
+  "actionTokenGeneratedByAdminLifespan": 86400,
+
+  "internationalizationEnabled": true,
+  "supportedLocales": ["es"],
+  "defaultLocale": "es",
+
+  "smtpServer": {
+    "host": "${KC_SMTP_HOST:mailpit}",
+    "port": "${KC_SMTP_PORT:1025}",
+    "from": "${KC_SMTP_FROM:no-reply@westorage.cl}",
+    "fromDisplayName": "NexusWST · WeStorage",
+    "replyTo": "",
+    "auth": "${KC_SMTP_AUTH:false}",
+    "user": "${KC_SMTP_USER:}",
+    "password": "${KC_SMTP_PASSWORD:}",
+    "starttls": "${KC_SMTP_STARTTLS:false}",
+    "ssl": "${KC_SMTP_SSL:false}"
+  },
+
+  "roles": {
+    "realm": [
+      { "name": "admin",            "description": "Administrador de NexusWST" },
+      { "name": "jefe_operaciones", "description": "Jefe de Operaciones" },
+      { "name": "analista",         "description": "Analista (fuera del alcance actual)" },
+      { "name": "empaque",          "description": "Personal de empaque" },
+      { "name": "cliente",          "description": "Usuario de una empresa cliente" }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "nexus-web",
+      "name": "NexusWST web",
+      "description": "Interfaz Next.js. Cliente público con código + PKCE (S256).",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": "${KC_WEB_DIRECT_GRANTS:false}",
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "${KC_APP_URL:http://localhost}",
+      "baseUrl": "/",
+      "redirectUris": ["${KC_APP_URL:http://localhost}/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${KC_APP_URL:http://localhost}/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audiencia-nexuswst",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "nexuswst",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "nexus-core",
+      "name": "NexusWST Core (cuenta de servicio)",
+      "description": "El Core administra usuarios con la Admin API. Sin inicio de sesión de personas.",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KC_CORE_CLIENT_SECRET}",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ],
+
+  "users": [
+    {
+      "username": "service-account-nexus-core",
+      "enabled": true,
+      "serviceAccountClientId": "nexus-core",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-users", "view-realm"]
+      }
+    }
+  ]
+}

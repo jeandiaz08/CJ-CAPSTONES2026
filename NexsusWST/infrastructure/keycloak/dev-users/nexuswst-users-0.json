@@ -1,0 +1,41 @@
+{
+  "realm": "nexuswst",
+  "users": [
+    {
+      "username": "admin@nexus.local", "email": "admin@nexus.local", "emailVerified": true, "enabled": true,
+      "firstName": "Admin", "lastName": "Demo",
+      "credentials": [{ "type": "password", "value": "Nexus2026!", "temporary": false }],
+      "realmRoles": ["admin"]
+    },
+    {
+      "username": "jefe@nexus.local", "email": "jefe@nexus.local", "emailVerified": true, "enabled": true,
+      "firstName": "Jefe de Operaciones", "lastName": "Demo",
+      "credentials": [{ "type": "password", "value": "Nexus2026!", "temporary": false }],
+      "realmRoles": ["jefe_operaciones"]
+    },
+    {
+      "username": "empaque@nexus.local", "email": "empaque@nexus.local", "emailVerified": true, "enabled": true,
+      "firstName": "Empaque", "lastName": "Demo",
+      "credentials": [{ "type": "password", "value": "Nexus2026!", "temporary": false }],
+      "realmRoles": ["empaque"]
+    },
+    {
+      "username": "analista@nexus.local", "email": "analista@nexus.local", "emailVerified": true, "enabled": true,
+      "firstName": "Analista", "lastName": "Demo",
+      "credentials": [{ "type": "password", "value": "Nexus2026!", "temporary": false }],
+      "realmRoles": ["analista"]
+    },
+    {
+      "username": "cliente1@nexus.local", "email": "cliente1@nexus.local", "emailVerified": true, "enabled": true,
+      "firstName": "Cliente", "lastName": "Demo Uno",
+      "credentials": [{ "type": "password", "value": "Nexus2026!", "temporary": false }],
+      "realmRoles": ["cliente"]
+    },
+    {
+      "username": "cliente2@nexus.local", "email": "cliente2@nexus.local", "emailVerified": true, "enabled": true,
+      "firstName": "Cliente", "lastName": "Demo Dos",
+      "credentials": [{ "type": "password", "value": "Nexus2026!", "temporary": false }],
+      "realmRoles": ["cliente"]
+    }
+  ]
+}

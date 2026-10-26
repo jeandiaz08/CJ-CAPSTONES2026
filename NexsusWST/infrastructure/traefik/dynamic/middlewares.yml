@@ -1,0 +1,25 @@
+# Middlewares compartidos (configuración DINÁMICA, se recarga en caliente)
+http:
+  middlewares:
+    secure-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        # Nunca confiar en cabeceras de identidad enviadas por el cliente
+        # (DAS §4.5). Se eliminan antes de llegar a los servicios.
+        customRequestHeaders:
+          X-User-Id: ""
+          X-Company-Id: ""
+          X-Roles: ""
+
+    # Límite básico de peticiones por IP (ajustar tras PV-10)
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 200
+
+# NOTA (DAS v1.0, DA-04/DA-13): Traefik SOLO enruta (TLS, rutas y WebSocket).
+# No valida el JWT (lo verifica cada servicio) ni ejecuta caché: el caché de
+# catálogos vive en el Core sobre Redis. Souin y ForwardAuth fueron descartados.

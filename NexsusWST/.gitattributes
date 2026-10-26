@@ -1,0 +1,6 @@
+# Fuerza LF en scripts y configs: evita errores "\r" dentro de contenedores
+# Linux cuando se clona en Windows.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

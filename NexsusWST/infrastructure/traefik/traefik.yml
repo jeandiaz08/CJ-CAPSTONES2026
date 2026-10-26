@@ -1,0 +1,25 @@
+# Traefik - configuración ESTÁTICA para DESARROLLO local
+# http://localhost  -> frontend / /api/core / /api/orders
+# Dashboard en http://127.0.0.1:8088 (solo publicado en localhost por el override)
+
+entryPoints:
+  web:
+    address: ":80"
+
+api:
+  dashboard: true
+  insecure: true # SOLO desarrollo. En prod está deshabilitado (traefik.prod.yml).
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false # Solo se publica lo que tenga traefik.enable=true
+    network: nexuswst_edge
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+log:
+  level: INFO
+
+accessLog: {}

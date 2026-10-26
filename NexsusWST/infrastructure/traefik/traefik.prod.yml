@@ -1,0 +1,45 @@
+# Traefik - configuración ESTÁTICA para PRODUCCIÓN (DigitalOcean)
+# - HTTP :80 redirige a HTTPS :443
+# - Certificados Let's Encrypt automáticos (requiere DNS apuntando al droplet)
+# - Dashboard/API deshabilitados públicamente (DAS §7.3)
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: le
+
+certificatesResolvers:
+  le:
+    acme:
+      # Traefik solo admite UNA fuente de config estática (archivo), así que el
+      # correo se edita aquí directamente antes del primer despliegue.
+      email: cambiar-por-correo@westorage.cl
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web
+
+api:
+  dashboard: false
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: nexuswst_edge
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+log:
+  level: WARN
+
+accessLog: {}
