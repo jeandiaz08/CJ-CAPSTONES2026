@@ -17,6 +17,8 @@ export function cancelBlockReason(order: Pick<Order, "status" | "prevStatus">, r
   return undefined;
 }
 
+export const canManageOrders = (role: Role) => canOperate(role) || role === "cliente";
+
 export function priorityBlockReason(order: Pick<Order, "status" | "priority">): string | undefined {
   if (order.status === "cancelled" || order.status === "handed_over") return "La orden ya terminó su recorrido.";
   if (order.priority) return "Ya tiene prioridad.";

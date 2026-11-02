@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
-export type DropdownItem = { label: string; icon?: ReactNode; danger?: boolean; onSelect: () => void };
+export type DropdownItem = { label: string; icon?: ReactNode; danger?: boolean; disabled?: boolean; onSelect: () => void };
 
 // Menú flotante accesible: flechas para moverse, Esc o clic fuera para cerrar.
 export function DropdownMenu({ trigger, triggerClassName = "btn ghost", disabled = false, className = "", items }: {
@@ -17,7 +17,7 @@ export function DropdownMenu({ trigger, triggerClassName = "btn ghost", disabled
   const id = useId();
   useEffect(() => {
     if (!open) return;
-    const menuItems = () => Array.from(root.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+    const menuItems = () => Array.from(root.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
     menuItems()[0]?.focus();
     const outside = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
     const key = (e: KeyboardEvent) => {
@@ -45,7 +45,7 @@ export function DropdownMenu({ trigger, triggerClassName = "btn ghost", disabled
       {open && (
         <div className="dropdown-menu" role="menu" id={id}>
           {items.map((item) => (
-            <button key={item.label} type="button" role="menuitem" className={item.danger ? "is-danger" : ""} onClick={() => { setOpen(false); item.onSelect(); }}>
+            <button key={item.label} type="button" role="menuitem" disabled={item.disabled} className={item.danger ? "is-danger" : ""} onClick={() => { setOpen(false); item.onSelect(); }}>
               {item.icon}{item.label}
             </button>
           ))}

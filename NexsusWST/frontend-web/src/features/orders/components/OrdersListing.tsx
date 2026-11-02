@@ -4,11 +4,14 @@ import {AssignmentActions} from "./AssignmentActions";
 import {AssignmentSituation} from "./AssignmentSituation";
 import {BulkActions} from "./BulkActions";
 import {OrderFiltersDrawer} from "./OrderFiltersDrawer";
+import {OrderFormModal} from "./OrderFormModal";
+import {ExcelActions} from "./ExcelActions";
+import {canManageOrders} from "../rules";
 import {originLabel} from "../format";
 import {countFilters, readFilters, toOrderFilters, writeFilters, type FilterValues} from "../filters";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { Package, PackageOpen, Archive, AlertCircle, CirclePlus, Filter, FilterX, FileSpreadsheet, Bell } from "lucide-react";
+import { Package, PackageOpen, Archive, AlertCircle, CirclePlus, Filter, FilterX, Bell } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Tabs } from "@/components/Tabs";
 import { KpiCard } from "@/components/KpiCard";
@@ -24,7 +27,7 @@ import { OrderDetail, dateLabel, todoAction } from "./OrderDetail";
 export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     const { session, companyId } = useAuth();
     const params = useSearchParams(), router = useRouter(), pathname = usePathname();
-    const [selected, setSelected] = useState<number | null>(null), [checks, setChecks] = useState<Set<number>>(new Set()), [mobile, setMobile] = useState(false), [revision, setRevision] = useState(0), [filtersOpen, setFiltersOpen] = useState(false);
+    const [selected, setSelected] = useState<number | null>(null), [checks, setChecks] = useState<Set<number>>(new Set()), [mobile, setMobile] = useState(false), [revision, setRevision] = useState(0), [filtersOpen, setFiltersOpen] = useState(false), [creating, setCreating] = useState(false);
     const page = Math.max(0, Number(params.get("page")) || 0);
     const limit = [20, 50, 100].includes(Number(params.get("limit"))) ? Number(params.get("limit")) : 20;
     const urlQuery = params.get("q") ?? "";
@@ -77,7 +80,10 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     const multiCompany = session?.user.allCompanies || (session?.user.companies.length ?? 0) > 1;
     const statusOptions = (refs.data?.[2].statuses ?? []).filter(s => assignment ? s.code === "validated" || s.code === "incident" : s.code !== "cancelled").map(s => ({ value: s.code as string, label: s.label }));
     const selectedOrders = orders.filter(o => checks.has(o.id));
-    const detail = selected && session ? <OrderDetail assignment={assignment} inModal={mobile} companyName={companyName(selectedOrder?.companyId)} courierName={courierName(selectedOrder?.courier)} id={selected} companyId={scopeCompany} role={session.user.role} revision={revision} labels={labels} onChanged={onOrderChanged}/> : <p className="detail-empty">Selecciona una orden para ver su detalle</p>;
+    const companies = refs.data?.[0].data ?? [], couriers = refs.data?.[1].data ?? [];
+    const companyOptions = multiCompany ? companies.map(c => ({ value: String(c.id), label: c.name })) : null;
+    const canCreate = !!session && canManageOrders(session.user.role);
+    const detail = selected && session ? <OrderDetail companies={companies} couriers={couriers} assignment={assignment} inModal={mobile} companyName={companyName(selectedOrder?.companyId)} courierName={courierName(selectedOrder?.courier)} id={selected} companyId={scopeCompany} role={session.user.role} revision={revision} labels={labels} onChanged={onOrderChanged}/> : <p className="detail-empty">Selecciona una orden para ver su detalle</p>;
     return <div className={`orders-view ${assignment?"assignment-view":""}`}>
     <PageHeader title="Órdenes" actions={<>
         <LiveBadge live={live}/>
@@ -95,10 +101,9 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     <Filter size={18}/>Filtros{activeFilters ? ` (${activeFilters})` : ""}</button>
     <button className="btn ghost" onClick={clearAll}>
     <FilterX size={18}/>Limpiar filtros</button>
-    {!assignment&&<>     <button className="btn excel" onClick={todoAction}>
-    <FileSpreadsheet size={18}/>Excel acciones</button>
-    <button className="btn order-primary" onClick={todoAction}>
-    <CirclePlus size={18}/>Nueva orden</button>
+    {!assignment&&<>     <ExcelActions selectedIds={selectedOrders.map(o => o.id)} filters={filters} companies={companies} companyOptions={companyOptions} couriers={couriers} statuses={statusOptions} canImport={canCreate} defaultCompanyId={scopeCompany} onImported={reload}/>
+    {canCreate&&<button className="btn order-primary" onClick={() => setCreating(true)}>
+    <CirclePlus size={18}/>Nueva orden</button>}
     {session&&<BulkActions selected={selectedOrders} role={session.user.role} onDone={() => { setChecks(new Set()); reload(); }}/>}
 </>}    </div>
     {assignment&&<AssignmentActions/>}
@@ -137,6 +142,7 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     <button className="btn ghost" disabled={(page + 1) * limit >= total} onClick={() => updateUrl(next => { next.set("limit", String(limit)); next.set("page", String(page + 1)); })}>Siguiente</button>
     </footer>
     </section>{!mobile && <aside className="orders-detail-panel">{detail}</aside>}</div>{mobile && selected !== null && <Modal title={`Detalle de orden #${selectedOrder?.externalRef??""}`} onClose={() => setSelected(null)}>{detail}</Modal>}
-    {filtersOpen&&<OrderFiltersDrawer assignment={assignment} values={filters} companies={multiCompany ? (refs.data?.[0].data ?? []).map(c => ({ value: String(c.id), label: c.name })) : null} couriers={(refs.data?.[1].data ?? []).map(c => ({ value: c.code, label: c.name }))} statuses={statusOptions} onApply={applyFilters} onClose={() => setFiltersOpen(false)}/>}
+    {filtersOpen&&<OrderFiltersDrawer assignment={assignment} values={filters} companies={companyOptions} couriers={couriers.map(c => ({ value: c.code, label: c.name }))} statuses={statusOptions} onApply={applyFilters} onClose={() => setFiltersOpen(false)}/>}
+    {creating&&<OrderFormModal companies={companies} couriers={couriers} defaultCompanyId={scopeCompany} onClose={() => setCreating(false)} onSaved={order => { setCreating(false); setSelected(order.id); reload(); }}/>}
     </div>;
 }

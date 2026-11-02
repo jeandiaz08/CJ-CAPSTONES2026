@@ -33,7 +33,8 @@ export async function api<T>(service: Service, path: string, init?: RequestInit)
     cache: "no-store",
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      // Con FormData el navegador pone el Content-Type con su boundary.
+      ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
@@ -62,6 +63,27 @@ export function withCompany(path: string, companyId: number | null): string {
 export function wsUrl(path: string): string {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${window.location.host}/api/orders${path}?access_token=${encodeURIComponent(getToken() ?? "")}`;
+}
+
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Descarga con el token de sesión. Conserva el mensaje del servidor si falla (por ejemplo, el tope de filas).
+export async function downloadFile(path: string, fallbackName: string) {
+  const token = getToken();
+  const response = await fetch(`/api/orders${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: "no-store" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new ApiError(body.message || "No se pudo descargar el archivo.", response.status, body.error, [], body.ref);
+  }
+  const name = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1];
+  saveBlob(await response.blob(), name ?? fallbackName);
 }
 
 export async function fetchDocument(path:string){const token=getToken();const response=await fetch(`/api/orders${path}`,{headers:token?{Authorization:`Bearer ${token}`}:{},cache:"no-store"});if(!response.ok)throw new ApiError("No se pudo descargar el documento",response.status);return response.blob()}

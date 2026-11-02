@@ -39,7 +39,7 @@ export function CancelOrderDialog({ order, companyName, courierName, onDone, onC
       onConfirm={async (reason) => {
         const updated = await guarded(() => cancelOrder(order.id, reason), onConflict);
         if (updated.status === "cancelled") showToast(`Orden #${order.externalRef} cancelada.`);
-        else showToast(`Orden #${order.externalRef}: ${updated.incidentLabel || "cancelación por confirmar"}. Ya está en la ola de Invas, quedó en Incidencia.`, "warn");
+        else showToast(`Orden #${order.externalRef}: ${updated.incidentLabel || "cancelación por confirmar"}. Ya está en la ola de Invas, quedó en Incidencia.`, "warning");
         onDone(updated);
       }}
     >

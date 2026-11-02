@@ -45,7 +45,7 @@ export function BulkActions({ selected, role, onDone }: { selected: Order[]; rol
       });
     }
     const done = ok + pendingConfirm;
-    if (done > 0) showToast(`${done} de ${selected.length} ${done === 1 ? "orden procesada" : "órdenes procesadas"}.`, failed.length || skipped.length ? "warn" : "ok");
+    if (done > 0) showToast(`${done} de ${selected.length} ${done === 1 ? "orden procesada" : "órdenes procesadas"}.`, failed.length || skipped.length ? "warning" : "success");
     setOutcome({ kind: action, ok, pendingConfirm, failed, skipped });
     setKind(null);
     onDone();

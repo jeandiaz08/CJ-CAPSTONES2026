@@ -1,5 +1,5 @@
 // Llamadas al servicio de Órdenes (orders-service, Go).
-import { api, withCompany } from "./api";
+import { api, downloadFile, withCompany } from "./api";
 
 export type OrderStatus =
   | "pending"
@@ -40,6 +40,7 @@ export type Order = {
   claimedBy?: number;
   claimedByName?: string;
   editable?: boolean;
+  itemsEditable?: boolean;
   status: OrderStatus;
   statusLabel: string;
   prevStatus?: OrderStatus;
@@ -120,7 +121,6 @@ export const getSummary = (companyId: number | null) =>
 export type NewOrder = {
   companyId: number;
   externalRef?: string; // vacía = Nexus genera una
-  channel?: string;
   courier: string;
   recipientName: string;
   recipientPhone?: string;
@@ -132,6 +132,36 @@ export type NewOrder = {
   customerNotes?: string;
   items: OrderItem[];
 };
+
+export type OrderChanges = {
+  courier?: string;
+  destination?: { recipientName: string; recipientPhone: string; recipientEmail: string; addressLine: string; commune: string; regionCode: string };
+  dispatchType?: string;
+  customerNotes?: string;
+  items?: OrderItem[];
+  reason?: string;
+};
+
+export const updateOrder = (id: number, changes: OrderChanges) => api<Order>("orders", `/v1/orders/${id}`, { method: "PATCH", body: JSON.stringify(changes) });
+
+export function uploadDocument(id: number, file: File, kind: string) {
+  const body = new FormData();
+  body.set("file", file);
+  body.set("kind", kind);
+  return api<OrderDocument>("orders", `/v1/orders/${id}/documents`, { method: "POST", body });
+}
+
+export type ImportResult = { importId: number; totalRows: number; ordersCreated: number; orderIds: number[]; failedRows: number; errors: { row: number; ref: string; message: string }[] };
+
+export function importOrders(companyId: number, file: File) {
+  const body = new FormData();
+  body.set("file", file);
+  body.set("companyId", String(companyId));
+  return api<ImportResult>("orders", "/v1/orders/import", { method: "POST", body });
+}
+
+export const downloadImportTemplate = (companyId: number | null) => downloadFile(`/v1/orders/import/template${companyId ? `?company_id=${companyId}` : ""}`, "plantilla-ordenes.xlsx");
+export const exportOrders = (params: URLSearchParams, fallbackName: string) => downloadFile(`/v1/orders/export?${params}`, fallbackName);
 
 export const createOrder = (body: NewOrder) => api<Order>("orders", "/v1/orders", { method: "POST", body: JSON.stringify(body) });
 
