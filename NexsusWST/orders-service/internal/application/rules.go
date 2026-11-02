@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/nexuswst/orders-service/internal/domain"
 	"github.com/nexuswst/orders-service/internal/ports"
@@ -40,11 +42,67 @@ type RulesEngine struct{ svc *Service }
 
 func NewRulesEngine(svc *Service) *RulesEngine { return &RulesEngine{svc: svc} }
 
+// Candidatas que se evalúan en cada pasada y cuántas se asignan. Las retenidas no se marcan
+// como revisadas: vuelven solas cuando se abre la operación.
+const (
+	maxRuleCandidates = 5000
+	maxRuleAssigned   = 100
+)
+
+type queuedOrder struct {
+	order domain.Order
+	rank  string
+}
+
+// queue deja solo lo que hoy se puede asignar, en orden de cola.
+func queue(schedule domain.OperationSchedule, now time.Time, orders []domain.Order, cutoffs map[string][]string) []queuedOrder {
+	out := make([]queuedOrder, 0, len(orders))
+	for _, o := range orders {
+		if d := schedule.Decide(now, cutoffs[o.Courier], o.Priority); d.Assign {
+			out = append(out, queuedOrder{order: o, rank: d.Rank})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		return domain.QueueLess(a.rank, a.order.Priority, a.order.CreatedAt, a.order.ID, b.rank, b.order.Priority, b.order.CreatedAt, b.order.ID)
+	})
+	return out
+}
+
+func courierCutoffs(cutoffs []ports.Cutoff) map[string][]string {
+	out := map[string][]string{}
+	for _, c := range cutoffs {
+		for _, courier := range c.Couriers {
+			out[courier.Code] = append(out[courier.Code], c.CutoffTime)
+		}
+	}
+	return out
+}
+
 func (e *RulesEngine) RunOnce(ctx context.Context) (assigned int, err error) {
 	s := e.svc
-	orders, err := s.Orders.RuleCandidates(ctx, 100)
-	if err != nil || len(orders) == 0 {
+	schedule, err := s.Rules.OperationSchedule(ctx)
+	if err != nil {
 		return 0, err
+	}
+	now := s.now()
+	if !schedule.IsOperationDay(now) || schedule.BeforeStart(now) {
+		return 0, nil
+	}
+	candidates, err := s.Orders.RuleCandidates(ctx, maxRuleCandidates)
+	if err != nil || len(candidates) == 0 {
+		return 0, err
+	}
+	cutoffs, err := s.Rules.Cutoffs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	ready := queue(schedule, now, candidates, courierCutoffs(cutoffs))
+	if len(ready) == 0 {
+		return 0, nil
+	}
+	if len(ready) > maxRuleAssigned {
+		ready = ready[:maxRuleAssigned]
 	}
 	rules, err := s.Rules.List(ctx, true)
 	if err != nil {
@@ -60,7 +118,8 @@ func (e *RulesEngine) RunOnce(ctx context.Context) (assigned int, err error) {
 		for _, w := range waves {
 			byCode[strings.ToUpper(w.Code)] = w
 		}
-		for _, o := range orders {
+		for _, item := range ready {
+			o := item.order
 			r, ok := FirstMatch(rules, o)
 			if !ok {
 				checked = append(checked, o.ID)
@@ -73,7 +132,7 @@ func (e *RulesEngine) RunOnce(ctx context.Context) (assigned int, err error) {
 					fmt.Sprintf("La regla «%s» pide la ola %s, que hoy no existe en Invas", r.Name, r.WaveCode))
 				continue
 			}
-			ids, err := s.Orders.AssignWave(ctx, nil, []int64{o.ID}, w.ID, ActorRules, fmt.Sprintf("Regla «%s» → %s", r.Name, w.Name))
+			ids, err := s.Orders.AssignWave(ctx, nil, []int64{o.ID}, w.ID, ActorRules, fmt.Sprintf("Regla «%s» → %s", r.Name, w.Name), map[int64]string{o.ID: item.rank})
 			if err != nil {
 				return assigned, err
 			}
@@ -85,8 +144,8 @@ func (e *RulesEngine) RunOnce(ctx context.Context) (assigned int, err error) {
 			}
 		}
 	} else {
-		for _, o := range orders {
-			checked = append(checked, o.ID)
+		for _, item := range ready {
+			checked = append(checked, item.order.ID)
 		}
 	}
 	return assigned, s.Orders.MarkRulesChecked(ctx, checked)
@@ -162,6 +221,14 @@ func (s *Service) ReorderRules(ctx context.Context, id tenant.Identity, ids []in
 	return s.Rules.ResetChecks(ctx)
 }
 
+// Warehouses - sugerencias para el campo Bodega de las reglas.
+func (s *Service) Warehouses(ctx context.Context, id tenant.Identity, scope []int64) ([]string, error) {
+	if !canManageRules(id) {
+		return nil, domain.ErrForbidden
+	}
+	return s.Orders.Warehouses(ctx, scope)
+}
+
 // RunRulesNow - el Jefe puede pedir que se apliquen las reglas de inmediato.
 func (s *Service) RunRulesNow(ctx context.Context, id tenant.Identity) (int, error) {
 	if !canManageRules(id) {
@@ -182,7 +249,7 @@ func (s *Service) ListCourierSettings(ctx context.Context, id tenant.Identity) (
 	return s.Rules.ListCourierSettings(ctx)
 }
 
-// SaveCourierSettings - hora de llegada (corte), máximo de bultos y cobertura.
+// SaveCourierSettings - máximo de bultos y cobertura. La llegada vive en los cortes.
 func (s *Service) SaveCourierSettings(ctx context.Context, id tenant.Identity, cs ports.CourierSettings) error {
 	if !canManageRules(id) {
 		return domain.ErrForbidden
@@ -192,9 +259,6 @@ func (s *Service) SaveCourierSettings(ctx context.Context, id tenant.Identity, c
 		return err
 	} else if !ok {
 		return fail(domain.ErrInvalid, "El courier %s no existe o está inactivo.", cs.Courier)
-	}
-	if cs.ArrivalTime != "" && !reHHMM.MatchString(cs.ArrivalTime) {
-		return fail(domain.ErrInvalid, "La hora de llegada debe tener formato HH:MM.")
 	}
 	if cs.MaxPackages != nil && *cs.MaxPackages <= 0 {
 		return fail(domain.ErrInvalid, "El máximo de bultos debe ser mayor que 0.")

@@ -1,0 +1,1 @@
+export const courierLogos:Record<string,string>={"blueexpress": "/couriers/blueexpress.svg", "chilexpress": "/couriers/chilexpress.svg", "mercadoenvios": "/couriers/mercadoenvios.webp", "recibelo": "/couriers/recibelo.webp", "starken": "/couriers/starken.webp"};

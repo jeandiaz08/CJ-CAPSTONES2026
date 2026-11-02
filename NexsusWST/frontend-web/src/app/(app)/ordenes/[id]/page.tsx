@@ -57,7 +57,7 @@ export default function OrderDetailPage() {
   return (
     <>
       <p className="crumbs">
-        <Link href="/ordenes">Órdenes</Link> <ChevronRight size={14} /> #{order.id}
+        <Link href="/ordenes/todas/listado">Órdenes</Link> <ChevronRight size={14} /> #{order.id}
       </p>
       <PageHeader title={`Orden #${order.id} · ${order.externalRef}`} subtitle={<StatusBadge status={order.status} />} actions={<OrderActions order={order} onDone={load} />} />
       {order.note && <p className="callout">{order.note}</p>}

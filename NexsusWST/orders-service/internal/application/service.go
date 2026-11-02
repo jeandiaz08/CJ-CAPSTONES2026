@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/nexuswst/orders-service/internal/domain"
 	"github.com/nexuswst/orders-service/internal/ports"
@@ -42,7 +43,8 @@ type Deps struct {
 	Channels      ports.ChannelGateway
 	Secrets       SecretBox
 	Log           *slog.Logger
-	DevMode       bool // permite simular eventos de Invas (pick_confirmed) en desarrollo
+	Now           func() time.Time // reloj; en las pruebas se fija
+	DevMode       bool             // permite simular eventos de Invas (pick_confirmed) en desarrollo
 }
 
 type Service struct {
@@ -83,6 +85,13 @@ func holdsCommitted(o domain.Order) bool {
 }
 
 // move persiste una transición y emite los avisos correspondientes.
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
 func (s *Service) move(ctx context.Context, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, opts ports.TransitionOpts) (domain.Order, error) {
 	out, err := s.Orders.Transition(ctx, o, from, ev, actor, reason, opts)
 	if err != nil {
@@ -227,14 +236,95 @@ func (s *Service) Edit(ctx context.Context, id tenant.Identity, scope []int64, o
 	if err != nil {
 		return domain.Order{}, err
 	}
-	// Courier cambiado con la orden en un manifiesto abierto: la línea queda «Movida a».
-	if o.Courier != out.Courier {
-		if mid, err := s.Fulfillment.OpenManifestOf(ctx, o.ID); err == nil && mid > 0 {
-			_ = s.Fulfillment.SetLineStatus(ctx, mid, o.ID, "moved", out.Courier)
-		}
-	}
 	s.Notifier.OrderChanged(ctx, out)
 	return out, nil
+}
+
+// resolveWithCorrections corrige dirección o courier y resuelve en una sola transacción.
+// Antes de llegar a Invas la orden vuelve a validarse; después, el servidor valida aquí
+// lo que el validador ya no revisará y la orden vuelve a la etapa donde estaba.
+func (s *Service) resolveWithCorrections(ctx context.Context, id tenant.Identity, o domain.Order, c domain.Corrections, note string) (domain.Order, error) {
+	after, diff, err := o.ApplyCorrections(c)
+	if err != nil {
+		return domain.Order{}, err
+	}
+	if len(diff) == 0 {
+		return domain.Order{}, fail(domain.ErrInvalid, "Indica la corrección: la dirección y el courier no cambiaron.")
+	}
+	if err := s.checkCorrections(ctx, o, &after); err != nil {
+		return domain.Order{}, err
+	}
+	opts := ports.TransitionOpts{}
+	if o.NeedsRevalidation(after) && o.WaveID == "" {
+		switch o.PrevStatus {
+		case domain.StatusPending, domain.StatusValidating, domain.StatusValidated:
+			opts.ReleaseCommitted = o.PrevStatus == domain.StatusValidated
+			after.PrevStatus = domain.StatusPending
+		}
+	}
+	label := domain.IncidentLabels[o.IncidentKind]
+	if label == "" {
+		label = "Incidencia"
+	}
+	from, err := after.Apply(domain.EvResolve)
+	if err != nil {
+		return domain.Order{}, err
+	}
+	if after.Status == domain.StatusPending || after.Status == domain.StatusValidating {
+		after.ValidationAttempts = 0
+	}
+	reason := fmt.Sprintf("Resuelta (%s): %s", label, note)
+	out, err := s.Orders.SaveResolution(ctx, o, after, from, diff, id.Actor(), reason, opts)
+	if err != nil {
+		return domain.Order{}, err
+	}
+	s.after(ctx, out, reason)
+	return out, nil
+}
+
+// checkCorrections valida contra los catálogos y deja la comuna con su nombre oficial.
+func (s *Service) checkCorrections(ctx context.Context, before domain.Order, after *domain.Order) error {
+	var problems domain.ValidationErrors
+	communes, err := s.Catalog.Communes(ctx)
+	if err != nil {
+		return err
+	}
+	official, suggestion := domain.MatchCommune(after.Commune, communes)
+	switch {
+	case official == "" && suggestion != "":
+		problems = append(problems, domain.FieldError{Field: "commune", Message: fmt.Sprintf("Comuna no reconocida. ¿Quisiste decir «%s»?", suggestion)})
+	case official == "":
+		problems = append(problems, domain.FieldError{Field: "commune", Message: "Comuna no reconocida."})
+	default:
+		after.Commune = official
+	}
+	if after.Courier != before.Courier {
+		ok, err := s.Catalog.CourierActive(ctx, after.Courier)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			problems = append(problems, domain.FieldError{Field: "courier", Message: "El courier no existe o está inactivo."})
+		}
+	}
+	settings, err := s.Rules.CourierSettings(ctx, after.Courier)
+	if err != nil {
+		return err
+	}
+	if official != "" && !settings.CoversAll && !containsFold(settings.Communes, official) {
+		field := "commune"
+		if after.Courier != before.Courier {
+			field = "courier"
+		}
+		problems = append(problems, domain.FieldError{Field: field, Message: fmt.Sprintf("El courier no tiene cobertura en %s.", official)})
+	}
+	if after.Courier != before.Courier && settings.MaxPackages != nil && before.PackagesCount > *settings.MaxPackages {
+		problems = append(problems, domain.FieldError{Field: "courier", Message: fmt.Sprintf("El courier admite %d bulto(s) y la orden tiene %d.", *settings.MaxPackages, before.PackagesCount)})
+	}
+	if len(problems) > 0 {
+		return problems
+	}
+	return nil
 }
 
 // Cancel deja la orden Cancelada (terminal, oculta, no se elimina). Si la
@@ -358,13 +448,16 @@ const (
 
 // Resolve - el Jefe corrige la causa y la orden vuelve al estado donde
 // ocurrió, registrando quién y qué se hizo (CU-03).
-func (s *Service) Resolve(ctx context.Context, id tenant.Identity, scope []int64, orderID int64, action, note string) (domain.Order, error) {
+func (s *Service) Resolve(ctx context.Context, id tenant.Identity, scope []int64, orderID int64, action, note string, corrections *domain.Corrections) (domain.Order, error) {
 	if !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps) {
 		return domain.Order{}, domain.ErrForbidden
 	}
 	note = strings.TrimSpace(note)
 	if note == "" {
 		return domain.Order{}, fail(domain.ErrInvalid, "Deja escrito qué se hizo para resolver la incidencia.")
+	}
+	if corrections != nil && action != ResolveResume {
+		return domain.Order{}, fail(domain.ErrInvalid, "Las correcciones solo se aplican al reanudar la orden.")
 	}
 	if action == ResolveCancel {
 		return s.Cancel(ctx, id, scope, orderID, note)
@@ -378,6 +471,9 @@ func (s *Service) Resolve(ctx context.Context, id tenant.Identity, scope []int64
 	}
 	if o.Status != domain.StatusIncident {
 		return domain.Order{}, fail(domain.ErrInvalidTransition, "La orden no está en Incidencia.")
+	}
+	if corrections != nil {
+		return s.resolveWithCorrections(ctx, id, o, *corrections, note)
 	}
 	kind := o.IncidentKind
 	from, err := o.Apply(domain.EvResolve)
@@ -430,7 +526,7 @@ func (s *Service) SetPriority(ctx context.Context, id tenant.Identity, scope []i
 func (s *Service) Waves(ctx context.Context) ([]ports.Wave, error) { return s.WMS.ListWaves(ctx) }
 
 // AssignWave - asignación MANUAL a ola (RF-17). Asignar es encolar: el Worker
-// envía a Invas en lotes pequeños, primero las órdenes prioritarias.
+// envía a Invas en grupos pequeños, primero las órdenes prioritarias.
 func (s *Service) AssignWave(ctx context.Context, id tenant.Identity, scope []int64, orderIDs []int64, waveID string) ([]int64, error) {
 	if !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps) {
 		return nil, domain.ErrForbidden
@@ -449,7 +545,11 @@ func (s *Service) AssignWave(ctx context.Context, id tenant.Identity, scope []in
 	if !found {
 		return nil, fail(domain.ErrInvalid, "La ola %s no existe en Invas.", waveID)
 	}
-	ids, err := s.Orders.AssignWave(ctx, scope, orderIDs, waveID, id.Actor(), "Asignación manual a "+waveID)
+	orderIDs, ranks, err := s.manualQueue(ctx, scope, orderIDs)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := s.Orders.AssignWave(ctx, scope, orderIDs, waveID, id.Actor(), "Asignación manual a "+waveID, ranks)
 	if err == nil {
 		for _, oid := range ids {
 			if o, e := s.Orders.Get(ctx, nil, oid); e == nil {
@@ -458,6 +558,40 @@ func (s *Service) AssignWave(ctx context.Context, id tenant.Identity, scope []in
 		}
 	}
 	return ids, err
+}
+
+// manualQueue aplica el horario a la asignación del Jefe: fuera de corte y en días sin operación
+// se permite, porque es su decisión; después de la hora límite de un día de operación, no, salvo
+// las prioritarias si priority_overrides_deadline está activo. Comparte el orden de la cola.
+func (s *Service) manualQueue(ctx context.Context, scope, orderIDs []int64) ([]int64, map[int64]string, error) {
+	schedule, err := s.Rules.OperationSchedule(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	cutoffs, err := s.Rules.Cutoffs(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	orders, _, err := s.Orders.List(ctx, ports.ListFilter{CompanyIDs: scope, IDs: orderIDs, View: ports.ViewAll, Limit: len(orderIDs)})
+	if err != nil {
+		return nil, nil, err
+	}
+	now := s.now()
+	closed := schedule.IsOperationDay(now) && schedule.AfterDeadline(now)
+	byCourier := courierCutoffs(cutoffs)
+	ids := make([]int64, 0, len(orders))
+	ranks := make(map[int64]string, len(orders))
+	for _, o := range orders {
+		if closed && !(o.Priority && schedule.PriorityOverridesDeadline) {
+			continue
+		}
+		ids = append(ids, o.ID)
+		ranks[o.ID] = domain.QueueRank(now, byCourier[o.Courier], o.Priority)
+	}
+	if closed && len(ids) == 0 {
+		return nil, nil, fail(domain.ErrInvalid, "Ya pasó la hora límite (%s): no se asignan órdenes hasta el próximo día de operación.", schedule.AssignmentDeadline)
+	}
+	return ids, ranks, nil
 }
 
 // SimulatePicked - SOLO desarrollo: simula que Invas confirmó la preparación.

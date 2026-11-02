@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nexuswst/orders-service/internal/ports"
 )
 
 // CatalogReader lee tablas del Core en SOLO LECTURA (DA-12): products,
@@ -63,6 +64,40 @@ func (p *CatalogReader) CourierActive(ctx context.Context, code string) (bool, e
 		return false, nil
 	}
 	return ok, err
+}
+
+func (p *CatalogReader) ActiveCouriers(ctx context.Context) ([]ports.CourierOption, error) {
+	rows, err := p.db.Query(ctx, `SELECT code, name FROM couriers WHERE active ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ports.CourierOption{}
+	for rows.Next() {
+		var c ports.CourierOption
+		if err := rows.Scan(&c.Code, &c.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (p *CatalogReader) ActiveProducts(ctx context.Context, companyID int64) ([]ports.ProductOption, error) {
+	rows, err := p.db.Query(ctx, `SELECT sku, description FROM products WHERE company_id=$1 AND active ORDER BY sku`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ports.ProductOption{}
+	for rows.Next() {
+		var o ports.ProductOption
+		if err := rows.Scan(&o.SKU, &o.Description); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
 }
 
 // Communes: catálogo poco cambiante; se guarda 10 minutos en memoria.

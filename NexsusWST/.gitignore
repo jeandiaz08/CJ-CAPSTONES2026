@@ -26,3 +26,8 @@ Thumbs.db
 frontend-web/tsconfig.tsbuildinfo
 frontend-web/AGENTS.md
 frontend-web/CLAUDE.md
+
+# trabajo local
+respaldo/
+AGENTS.md
+CLAUDE.md

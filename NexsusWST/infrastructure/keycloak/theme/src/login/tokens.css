@@ -1,0 +1,40 @@
+/* Source: respaldo/pantallas/paleta y demas .png; approved Excel/line heights. */
+:root {
+  --color-background: #f6f8fc;
+  --color-sidebar: #1b1e40;
+  --color-card: #ffffff;
+  --color-surface: #edf2f9;
+  --color-border: #dbe3ef;
+  --color-text: #1f2b42;
+  --color-text-secondary: #65728a;
+  --color-on-dark: #ffffff;
+  --color-on-dark-muted: #b9c6d9;
+  --color-primary: #325fa6;
+  --color-navigation-hover: #26375f;
+  --color-accent: #f78120;
+  --color-active: #2a4779;
+  --color-active-hover: #355a96;
+  --color-active-text: #ffac61;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-info: #3b82f6;
+  --color-neutral: #94a3b8;
+  --color-processing: #8b5cf6;
+  --color-error: #ef4444;
+  --color-excel: #217346;
+  --font-family: Inter, system-ui, sans-serif;
+  --font-size-page-title: 28px;
+  --font-size-section-title: 20px;
+  --font-size-card-title: 16px;
+  --font-size-body: 14px;
+  --font-size-table: 14px;
+  --font-size-label: 13px;
+  --font-size-helper: 12px;
+  --line-height-title: 1.2;
+  --line-height-body: 1.5;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+  --radius-pill: 999px;
+  --shadow-panel: 0 12px 36px rgb(31 43 66 / 8%), 0 3px 8px rgb(31 43 66 / 6%);
+}

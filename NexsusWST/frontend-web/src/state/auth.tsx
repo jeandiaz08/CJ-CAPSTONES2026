@@ -8,6 +8,7 @@
 //  - Se guarda en sessionStorage (se borra al cerrar la pestaña).
 // Puente mínimo: Jean lo reemplaza por Auth.js manteniendo esta interfaz.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { clearProductCache } from "@/services/orderReference";
 import { logoutUrl, refreshTokens, startLogin, type TokenSet } from "@/services/oidc";
 
 export type Role = "admin" | "jefe_operaciones" | "analista" | "empaque" | "cliente";
@@ -57,6 +58,7 @@ function readStored(): Session | null {
 }
 
 function store(s: Session | null) {
+  if (!s) clearProductCache();
   try {
     if (s) sessionStorage.setItem(KEY, JSON.stringify(s));
     else sessionStorage.removeItem(KEY);

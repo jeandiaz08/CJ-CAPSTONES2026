@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listOrders, type Order, type OrderFilters } from "@/services/orders";
 import { useAuth } from "@/state/auth";
 import { useOrdersSocket } from "./useOrdersSocket";
@@ -13,19 +13,23 @@ export function useOrders(filters: OrderFilters) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const key = JSON.stringify(filters);
+  const scope = filters.companyId ?? companyId;
+  const latest = useRef(0);
 
   const reload = useCallback(async () => {
+    const request = ++latest.current; // una respuesta vieja no pisa a una más nueva
     try {
-      const res = await listOrders(JSON.parse(key), companyId);
+      const res = await listOrders(JSON.parse(key), scope);
+      if (request !== latest.current) return;
       setOrders(res.data);
       setTotal(res.total);
       setError(null);
     } catch (e) {
-      setError((e as Error).message);
+      if (request === latest.current) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (request === latest.current) setLoading(false);
     }
-  }, [key, companyId]);
+  }, [key, scope]);
 
   useEffect(() => {
     setLoading(true);

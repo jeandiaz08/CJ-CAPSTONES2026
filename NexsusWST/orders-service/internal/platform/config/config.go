@@ -74,7 +74,7 @@ type Worker struct {
 	Group       string
 	Consumer    string
 	Concurrency int
-	Batch       int // envío a Invas en lotes pequeños (RF-16)
+	Batch       int // envío a Invas en grupos pequeños (RF-16)
 }
 
 func LoadWorker() Worker {

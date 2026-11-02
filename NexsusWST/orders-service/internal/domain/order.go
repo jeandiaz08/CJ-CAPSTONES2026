@@ -19,6 +19,8 @@ var (
 	ErrConflict          = errors.New("la orden fue modificada por otra operación; recarga e intenta de nuevo")
 	ErrDuplicate         = errors.New("ya existe una orden con ese origen y referencia")
 	ErrForbidden         = errors.New("tu rol o permisos no permiten esta acción")
+	ErrCutoffTimeTaken   = fmt.Errorf("%w: ya existe un corte activo a esa hora", ErrInvalid)
+	ErrManifestClosed    = fmt.Errorf("%w: la orden está en un manifiesto cerrado, no se puede cambiar el courier", ErrInvalid)
 	ErrNotEditable       = errors.New("la orden ya fue enviada a preparación: no se puede modificar desde Nexus")
 )
 
@@ -66,10 +68,12 @@ type Order struct {
 	Courier     string // código del catálogo couriers
 	CourierCode string // código o seguimiento que entrega el courier
 	Destination
-	DispatchType  string
-	Warehouse     string
-	CustomerNotes string
-	Source        string // manual, bulk, webhook
+	DispatchType        string
+	Warehouse           string
+	PackagesCount       int
+	AssignmentSituation *string
+	CustomerNotes       string
+	Source              string // manual, bulk, webhook
 
 	Status       Status
 	PrevStatus   Status // estado donde ocurrió la incidencia (para volver)
@@ -276,6 +280,41 @@ func (o Order) ApplyChanges(c Changes) (Order, []string, error) {
 	if c.Items != nil && !o.ItemsEditable() {
 		return o, nil, ErrNotEditable
 	}
+	return o.applyChanges(c)
+}
+
+// Corrections: lo que se puede corregir al resolver una incidencia, aunque la orden
+// ya esté en Invas o lista para retiro. Los productos no se tocan.
+type Corrections struct {
+	AddressLine *string `json:"addressLine"`
+	Commune     *string `json:"commune"`
+	RegionCode  *string `json:"regionCode"`
+	Courier     *string `json:"courier"`
+}
+
+// ApplyCorrections devuelve la orden corregida y la lista legible de cambios.
+func (o Order) ApplyCorrections(c Corrections) (Order, []string, error) {
+	if o.Status != StatusIncident {
+		return o, nil, ErrInvalidTransition
+	}
+	changes := Changes{Courier: c.Courier}
+	if c.AddressLine != nil || c.Commune != nil || c.RegionCode != nil {
+		destination := o.Destination
+		if c.AddressLine != nil {
+			destination.AddressLine = *c.AddressLine
+		}
+		if c.Commune != nil {
+			destination.Commune = *c.Commune
+		}
+		if c.RegionCode != nil {
+			destination.RegionCode = *c.RegionCode
+		}
+		changes.Destination = &destination
+	}
+	return o.applyChanges(changes)
+}
+
+func (o Order) applyChanges(c Changes) (Order, []string, error) {
 	d := Draft{CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Courier: o.Courier,
 		Destination: o.Destination, DispatchType: o.DispatchType, Warehouse: o.Warehouse,
 		CustomerNotes: o.CustomerNotes, Items: append([]Item(nil), o.Items...)}
@@ -320,6 +359,9 @@ func (o Order) ApplyChanges(c Changes) (Order, []string, error) {
 	}
 	if fmtItems(o.Items) != fmtItems(d.Items) {
 		diff = append(diff, fmt.Sprintf("Productos: %s → %s", fmtItems(o.Items), fmtItems(d.Items)))
+	}
+	if d.Courier != o.Courier && c.CourierCode == nil {
+		n.CourierCode = "" // el seguimiento era del courier anterior
 	}
 	n.Courier, n.Destination, n.DispatchType, n.CustomerNotes, n.Items = d.Courier, d.Destination, d.DispatchType, d.CustomerNotes, d.Items
 	return n, diff, nil

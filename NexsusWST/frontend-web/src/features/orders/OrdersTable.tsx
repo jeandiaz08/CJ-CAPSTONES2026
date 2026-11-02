@@ -54,7 +54,7 @@ export function OrdersTable({ orders, loading, onChanged, selectable, selected, 
               <td>{o.channel}</td>
               <td>{o.courier || <span className="muted">—</span>}</td>
               <td>
-                <StatusBadge status={o.status} />
+                <StatusBadge label={o.statusLabel} status={o.status} />
               </td>
               <td className="small">
                 {o.waveId ?? <span className="muted">—</span>}

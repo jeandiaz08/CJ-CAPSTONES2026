@@ -16,6 +16,10 @@ type ListFilter struct {
 
 // UserRepository - perfiles de Nexus en PostgreSQL (dueño: Core).
 type UserRepository interface {
+	ListNotes(ctx context.Context, userID int64) ([]domain.Note, error)
+	CreateNote(ctx context.Context, userID int64, changes domain.NoteChanges) (domain.Note, error)
+	UpdateNote(ctx context.Context, userID, noteID int64, changes domain.NoteChanges) (domain.Note, error)
+	DeleteNote(ctx context.Context, userID, noteID int64) error
 	GetByID(ctx context.Context, id int64) (domain.User, error)
 	GetByEmail(ctx context.Context, email string) (domain.User, error)
 	List(ctx context.Context, f ListFilter) ([]domain.User, int, error)

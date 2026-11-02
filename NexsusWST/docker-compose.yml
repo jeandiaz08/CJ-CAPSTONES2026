@@ -212,6 +212,7 @@ services:
       KC_SMTP_HOST: ${SMTP_HOST:-mailpit}
       KC_SMTP_PORT: ${SMTP_PORT:-1025}
       KC_SMTP_FROM: ${SMTP_FROM:-no-reply@westorage.cl}
+      NEXUS_MAIL_FROM: ${NEXUS_MAIL_FROM:-${SMTP_FROM:-no-reply@westorage.cl}}
       KC_SMTP_AUTH: ${SMTP_AUTH:-false}
       KC_SMTP_USER: ${SMTP_USER:-}
       KC_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
@@ -219,6 +220,7 @@ services:
       KC_SMTP_SSL: ${SMTP_SSL:-false}
     volumes:
       - ./infrastructure/keycloak/import/nexuswst-realm.json:/opt/keycloak/data/import/nexuswst-realm.json:ro
+      - ./infrastructure/keycloak/theme/dist_keycloak/nexuswst-keycloak-theme.jar:/opt/keycloak/providers/nexuswst-keycloak-theme.jar:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -33,7 +33,7 @@ export default function HomePage() {
       {error && <p className="error">{error}</p>}
       <div className="stat-grid">
         {STATUS_ORDER.filter((s) => s !== "cancelled").map((s) => (
-          <Link key={s} href={`/ordenes?status=${s}`} className={`stat tone-${STATUS[s].tone}`}>
+          <Link key={s} href={`/ordenes/todas/listado?status=${s}`} className={`stat tone-${STATUS[s].tone}`}>
             <span className="stat-value">{counts[s] ?? 0}</span>
             <span className="stat-label">{STATUS[s].label}</span>
           </Link>

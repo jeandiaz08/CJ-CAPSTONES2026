@@ -26,7 +26,39 @@ func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
 var _ ports.OrderRepository = (*Repository)(nil)
 
 // La toma de empaque de un usuario deshabilitado se ignora (vuelve a la bandeja).
-const fromOrders = `orders o LEFT JOIN users cu ON cu.id = o.claimed_by AND cu.active`
+const assignmentUniverse = `(o.status='validated' OR (o.status='incident' AND o.incident_kind='invas' AND o.prev_status='validated'))`
+
+// Hora de operación: siempre America/Santiago, a nivel de minuto como en domain.OperationSchedule.
+const nowLocal = `(CURRENT_TIMESTAMP AT TIME ZONE 'America/Santiago')`
+const nowHour = `to_char(` + nowLocal + `,'HH24:MI')`
+
+const fromOrders = `orders o LEFT JOIN users cu ON cu.id = o.claimed_by AND cu.active
+ LEFT JOIN LATERAL (SELECT max(c.cutoff_time) AS cutoff_time FROM cutoffs c JOIN cutoff_couriers cc ON cc.cutoff_id=c.id WHERE c.active AND cc.courier=o.courier) cs ON true
+ LEFT JOIN LATERAL (SELECT min(c.cutoff_time) AS cutoff_time FROM cutoffs c JOIN cutoff_couriers cc ON cc.cutoff_id=c.id WHERE c.active AND cc.courier=o.courier AND to_char(c.cutoff_time,'HH24:MI') >= ` + nowHour + `) nc ON true
+ LEFT JOIN ops_settings os ON os.key='assignment_deadline'
+ LEFT JOIN ops_settings os_start ON os_start.key='operation_start'
+ LEFT JOIN ops_settings os_days ON os_days.key='operation_days'
+ LEFT JOIN ops_settings os_priority ON os_priority.key='priority_overrides_deadline'
+ LEFT JOIN LATERAL (
+   SELECT j.id, j.completed_at, j.failed_at FROM job_outbox j
+   WHERE j.order_id=o.id AND j.type='assign_wave'
+   ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+ ) aj ON true`
+
+// assignmentRetained refleja en SQL domain.OperationSchedule.Decide, para que la pantalla no
+// contradiga al motor: un cambio allá también debe hacerse aquí.
+const assignmentRetained = `(
+ ','||COALESCE(os_days.value,'sun,mon,tue,wed,thu,fri,sat')||',' NOT LIKE '%,'||to_char(` + nowLocal + `,'dy')||',%'
+ OR ` + nowHour + ` < COALESCE(os_start.value,'00:00')
+ OR (` + nowHour + ` > os.value AND NOT (o.priority AND os_priority.value='true'))
+ OR (` + nowHour + ` > to_char(cs.cutoff_time,'HH24:MI') AND NOT o.priority))`
+
+const assignmentSituation = `CASE WHEN ` + assignmentUniverse + ` THEN CASE
+ WHEN aj.id IS NOT NULL AND aj.completed_at IS NULL AND aj.failed_at IS NULL THEN 'en_cola'
+ WHEN aj.failed_at IS NOT NULL THEN 'invas_agotado'
+ WHEN ` + assignmentRetained + ` THEN 'fuera_corte'
+ WHEN o.rules_checked_at IS NOT NULL AND aj.id IS NULL THEN 'sin_regla'
+ END ELSE NULL END`
 
 const cols = `o.id, o.company_id, o.external_ref, o.channel, COALESCE(o.courier,''), COALESCE(o.courier_code,''),
 	COALESCE(o.recipient_name,''), COALESCE(o.recipient_phone,''), COALESCE(o.recipient_email,''),
@@ -36,7 +68,7 @@ const cols = `o.id, o.company_id, o.external_ref, o.channel, COALESCE(o.courier,
 	o.priority, COALESCE(o.wave_id,''), COALESCE(o.wms_ref,''), o.version, COALESCE(o.note,''),
 	o.validation_attempts, o.next_retry_at, COALESCE(o.last_error,''),
 	o.claimed_by, COALESCE(cu.name,''), o.claimed_at, o.created_by, o.import_id,
-	o.created_at, o.updated_at, o.handed_over_at, o.cancelled_at`
+	o.created_at, o.updated_at, o.handed_over_at, o.cancelled_at, (SELECT count(*) FROM order_packages op WHERE op.order_id=o.id), ` + assignmentSituation
 
 func scan(row pgx.Row) (domain.Order, error) {
 	var o domain.Order
@@ -49,7 +81,7 @@ func scan(row pgx.Row) (domain.Order, error) {
 		&o.Priority, &o.WaveID, &o.WMSRef, &o.Version, &o.Note,
 		&o.ValidationAttempts, &o.NextRetryAt, &o.LastError,
 		&o.ClaimedBy, &o.ClaimedByName, &o.ClaimedAt, &o.CreatedBy, &o.ImportID,
-		&o.CreatedAt, &o.UpdatedAt, &o.HandedOverAt, &o.CancelledAt)
+		&o.CreatedAt, &o.UpdatedAt, &o.HandedOverAt, &o.CancelledAt, &o.PackagesCount, &o.AssignmentSituation)
 	o.Status, o.PrevStatus = domain.Status(st), domain.Status(prev)
 	return o, err
 }
@@ -143,8 +175,8 @@ func insertJobs(ctx context.Context, q querier, jobs []ports.Job) error {
 	for _, j := range jobs {
 		payload, _ := json.Marshal(j.Payload)
 		if _, err := q.Exec(ctx, `
-			INSERT INTO job_outbox (id, type, company_id, order_id, priority, payload)
-			VALUES ($1,$2,$3,NULLIF($4,0),$5,$6) ON CONFLICT (id) DO NOTHING`, j.ID, j.Type, j.CompanyID, j.OrderID, j.Priority, payload); err != nil {
+			INSERT INTO job_outbox (id, type, company_id, order_id, priority, payload, next_cutoff)
+			VALUES ($1,$2,$3,NULLIF($4,0),$5,$6,NULLIF($7,'')::time) ON CONFLICT (id) DO NOTHING`, j.ID, j.Type, j.CompanyID, j.OrderID, j.Priority, payload, j.NextCutoff); err != nil {
 			return err
 		}
 	}
@@ -207,13 +239,13 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 		add("o.status = ANY(?::text[])", f.Statuses)
 	}
 	switch f.View {
+	case ports.ViewAssignment:
+		where = append(where, assignmentUniverse)
 	case ports.ViewRegistry:
-		where = append(where, "o.status IN ('handed_over','cancelled')")
+		where = append(where, `(o.status='cancelled' OR (o.status='handed_over' AND o.handed_over_at < now() - interval '365 days'))`)
 	case ports.ViewAll:
 	default:
-		if len(f.Statuses) == 0 || !contains(f.Statuses, "cancelled") {
-			where = append(where, "o.status <> 'cancelled'") // Cancelada: oculta por defecto
-		}
+		where = append(where, `o.status<>'cancelled' AND (o.status<>'handed_over' OR o.handed_over_at IS NULL OR o.handed_over_at >= now() - interval '365 days')`)
 	}
 	if q := strings.TrimSpace(f.Search); q != "" {
 		add(`(o.id::text = ? OR o.external_ref ILIKE '%' || ? || '%' OR o.recipient_name ILIKE '%' || ? || '%' OR o.courier_code = ?)`, q)
@@ -223,6 +255,12 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	}
 	if f.Channel != "" {
 		add("o.channel = ?", strings.ToLower(f.Channel))
+	}
+	if f.Source != "" {
+		add("o.source = ?", f.Source)
+	}
+	if f.Situation != "" {
+		add("("+assignmentSituation+") = ?", f.Situation)
 	}
 	if f.From != nil {
 		add("o.created_at >= ?", *f.From)
@@ -244,11 +282,21 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	}
 	w := strings.Join(where, " AND ")
 	var total int
-	if err := r.db.QueryRow(ctx, `SELECT count(*) FROM orders o WHERE `+w, args...).Scan(&total); err != nil {
+	countFrom := "orders o"
+	if f.Situation != "" {
+		countFrom = fromOrders // la situación depende de los joins de la consulta completa
+	}
+	if err := r.db.QueryRow(ctx, `SELECT count(*) FROM `+countFrom+` WHERE `+w, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	order := "o.priority DESC, o.id DESC"
+	order := "o.id DESC"
+	if f.View == ports.ViewAssignment {
+		// La tabla muestra el orden real de la cola: corte → prioridad → antigüedad.
+		order = "(o.priority AND nc.cutoff_time IS NULL AND cs.cutoff_time IS NOT NULL) DESC, nc.cutoff_time ASC NULLS LAST, o.priority DESC, o.created_at, o.id"
+	}
 	switch f.Sort {
+	case "priority":
+		order = "o.priority DESC, o.id DESC"
 	case "oldest":
 		order = "o.id ASC"
 	case "recent":
@@ -278,13 +326,14 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	return out, total, loadItemsBulk(ctx, r.db, out)
 }
 
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
+// Warehouses: bodegas distintas que ya aparecen en órdenes (no hay catálogo de bodegas).
+func (r *Repository) Warehouses(ctx context.Context, ids []int64) ([]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT DISTINCT warehouse FROM orders
+		WHERE ($1::bigint[] IS NULL OR company_id = ANY($1)) AND warehouse <> '' ORDER BY warehouse`, ids)
+	if err != nil {
+		return nil, err
 	}
-	return false
+	return collect[string](rows)
 }
 
 func (r *Repository) Summary(ctx context.Context, ids []int64) (map[domain.Status]int, error) {
@@ -378,24 +427,86 @@ func transitionTx(ctx context.Context, tx pgx.Tx, o domain.Order, from domain.St
 	return getOne(ctx, tx, o.ID, false)
 }
 
+// leaveManifest saca la orden de su manifiesto abierto al cambiar de courier: la línea queda
+// «Movida a» y el cambio en el historial. Con el manifiesto cerrado, el cambio no se permite.
+func leaveManifest(ctx context.Context, tx pgx.Tx, orderID int64, courier, actor string) error {
+	var manifestID int64
+	var status string
+	err := tx.QueryRow(ctx, `SELECT m.id, m.status FROM manifest_lines l JOIN manifests m ON m.id=l.manifest_id
+		WHERE l.order_id=$1 AND l.status IN ('included','pending_packages') ORDER BY m.id DESC LIMIT 1 FOR UPDATE OF m`, orderID).Scan(&manifestID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if status != "open" {
+		return domain.ErrManifestClosed
+	}
+	if _, err := tx.Exec(ctx, `UPDATE manifest_lines SET status='moved', moved_to=$3 WHERE manifest_id=$1 AND order_id=$2`, manifestID, orderID, courier); err != nil {
+		return err
+	}
+	return addEvent(ctx, tx, orderID, "edit", "manifest_leave", "", "", actor, fmt.Sprintf("Sale del manifiesto #%d por cambio de courier a %s", manifestID, courier))
+}
+
+func saveOrderFields(ctx context.Context, tx pgx.Tx, before, after domain.Order) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE orders SET courier=NULLIF($2,''), courier_code=NULLIF($3,''), recipient_name=NULLIF($4,''),
+			recipient_phone=NULLIF($5,''), recipient_email=NULLIF($6,''), address_line=NULLIF($7,''),
+			commune=NULLIF($8,''), region_code=NULLIF($9,''), dispatch_type=$10, customer_notes=NULLIF($11,''),
+			prev_status=NULLIF($12,''), validation_attempts=$13, rules_checked_at=NULL,
+			version=version+1, updated_at=now()
+		WHERE id=$1 AND version=$14`,
+		before.ID, after.Courier, after.CourierCode, after.RecipientName, after.RecipientPhone, after.RecipientEmail,
+		after.AddressLine, after.Commune, after.RegionCode, after.DispatchType, after.CustomerNotes,
+		string(after.PrevStatus), after.ValidationAttempts, before.Version)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrConflict
+	}
+	return nil
+}
+
+func (r *Repository) SaveResolution(ctx context.Context, before, after domain.Order, from domain.Status, diff []string, actor, reason string, opts ports.TransitionOpts) (domain.Order, error) {
+	var out domain.Order
+	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if before.Courier != after.Courier {
+			if err := leaveManifest(ctx, tx, before.ID, after.Courier, actor); err != nil {
+				return err
+			}
+		}
+		if err := saveOrderFields(ctx, tx, before, after); err != nil {
+			return err
+		}
+		if err := addEvent(ctx, tx, before.ID, "edit", "edit", "", "", actor, strings.Join(diff, "; ")); err != nil {
+			return err
+		}
+		if opts.ReleaseCommitted {
+			if err := releaseCommitted(ctx, tx, before); err != nil {
+				return err
+			}
+		}
+		after.Version = before.Version + 1
+		var err error
+		out, err = transitionTx(ctx, tx, after, from, domain.EvResolve, actor, reason, opts.ClearWave)
+		return err
+	})
+	return out, err
+}
+
 func (r *Repository) SaveEdit(ctx context.Context, before, after domain.Order, diff []string, actor string, ev domain.Event, opts ports.TransitionOpts) (domain.Order, error) {
 	var out domain.Order
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `
-			UPDATE orders SET courier=NULLIF($2,''), courier_code=NULLIF($3,''), recipient_name=NULLIF($4,''),
-				recipient_phone=NULLIF($5,''), recipient_email=NULLIF($6,''), address_line=NULLIF($7,''),
-				commune=NULLIF($8,''), region_code=NULLIF($9,''), dispatch_type=$10, customer_notes=NULLIF($11,''),
-				prev_status=NULLIF($12,''), validation_attempts=$13, rules_checked_at=NULL,
-				version=version+1, updated_at=now()
-			WHERE id=$1 AND version=$14`,
-			before.ID, after.Courier, after.CourierCode, after.RecipientName, after.RecipientPhone, after.RecipientEmail,
-			after.AddressLine, after.Commune, after.RegionCode, after.DispatchType, after.CustomerNotes,
-			string(after.PrevStatus), after.ValidationAttempts, before.Version)
+		if before.Courier != after.Courier {
+			if err := leaveManifest(ctx, tx, before.ID, after.Courier, actor); err != nil {
+				return err
+			}
+		}
+		err := saveOrderFields(ctx, tx, before, after)
 		if err != nil {
 			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return domain.ErrConflict
 		}
 		if err := replaceItems(ctx, tx, before.ID, after.Items); err != nil {
 			return err
@@ -449,7 +560,7 @@ func (r *Repository) SetPriority(ctx context.Context, o domain.Order, priority b
 	return out, err
 }
 
-func (r *Repository) AssignWave(ctx context.Context, ids []int64, orderIDs []int64, waveID, actor, reason string) ([]int64, error) {
+func (r *Repository) AssignWave(ctx context.Context, ids []int64, orderIDs []int64, waveID, actor, reason string, ranks map[int64]string) ([]int64, error) {
 	assigned := []int64{}
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
@@ -481,7 +592,7 @@ func (r *Repository) AssignWave(ctx context.Context, ids []int64, orderIDs []int
 			}
 			if err := insertJobs(ctx, tx, []ports.Job{{
 				ID: fmt.Sprintf("assign_wave:%d:%s", x.id, waveID), Type: "assign_wave",
-				CompanyID: x.company, OrderID: x.id, Priority: x.prio, Payload: map[string]any{"wave_id": waveID},
+				CompanyID: x.company, OrderID: x.id, Priority: x.prio, Payload: map[string]any{"wave_id": waveID}, NextCutoff: ranks[x.id],
 			}}); err != nil {
 				return err
 			}
@@ -648,7 +759,7 @@ func (r *Repository) OrdersInStatus(ctx context.Context, status domain.Status, l
 func (r *Repository) RuleCandidates(ctx context.Context, limit int) ([]domain.Order, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+cols+` FROM `+fromOrders+`
 		WHERE o.status='validated' AND o.wave_id IS NULL AND o.rules_checked_at IS NULL
-		ORDER BY o.priority DESC, o.id LIMIT $1`, limit)
+		ORDER BY o.priority DESC, o.created_at, o.id LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}

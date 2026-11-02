@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -46,11 +47,16 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 	r := func(pattern string, f http.HandlerFunc) { mux.Handle(pattern, auth(f)) }
 
 	r("GET /v1/meta", h.meta)
+	r("GET /v1/cutoffs", h.cutoffs)
+	r("POST /v1/cutoffs", h.saveCutoff)
+	r("PUT /v1/cutoffs/{id}", h.saveCutoff)
+	r("DELETE /v1/cutoffs/{id}", h.deleteCutoff)
 
 	// Órdenes: ingreso, consulta, exportación (CU-01, CU-08)
 	r("GET /v1/orders", h.list)
 	r("GET /v1/orders/summary", h.summary)
 	r("GET /v1/orders/export", h.export)
+	r("GET /v1/orders/warehouses", h.warehouses)
 	r("POST /v1/orders", h.create)
 	r("POST /v1/orders/import", h.importOrders)
 	r("GET /v1/orders/import/template", h.importTemplate)
@@ -85,6 +91,10 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 	r("DELETE /v1/wave-rules/{id}", h.deleteRule)
 	r("POST /v1/wave-rules/reorder", h.reorderRules)
 	r("GET /v1/couriers/settings", h.listCourierSettings)
+	r("GET /v1/ops-settings/operation", h.operationSchedule)
+	r("PUT /v1/ops-settings/operation", h.saveOperationSchedule)
+	r("GET /v1/ops-settings/assignment-deadline", h.assignmentDeadline)
+	r("PUT /v1/ops-settings/assignment-deadline", h.saveAssignmentDeadline)
 	r("PUT /v1/couriers/{code}/settings", h.saveCourierSettings)
 
 	// Retiro y entrega al courier (CU-05)
@@ -112,42 +122,45 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 // ---------------------------------------------------------------------------
 
 type orderDTO struct {
-	ID            int64         `json:"id"`
-	CompanyID     int64         `json:"companyId"`
-	ExternalRef   string        `json:"externalRef"`
-	Channel       string        `json:"channel"`
-	Source        string        `json:"source"`
-	Courier       string        `json:"courier"`
-	CourierCode   string        `json:"courierCode,omitempty"`
-	RecipientName string        `json:"recipientName"`
-	RecipientPh   string        `json:"recipientPhone,omitempty"`
-	RecipientMail string        `json:"recipientEmail,omitempty"`
-	AddressLine   string        `json:"addressLine"`
-	Commune       string        `json:"commune"`
-	RegionCode    string        `json:"regionCode,omitempty"`
-	DispatchType  string        `json:"dispatchType"`
-	Warehouse     string        `json:"warehouse"`
-	CustomerNotes string        `json:"customerNotes,omitempty"`
-	Status        string        `json:"status"`
-	StatusLabel   string        `json:"statusLabel"`
-	PrevStatus    string        `json:"prevStatus,omitempty"`
-	IncidentKind  string        `json:"incidentKind,omitempty"`
-	IncidentLabel string        `json:"incidentLabel,omitempty"`
-	Priority      bool          `json:"priority"`
-	WaveID        string        `json:"waveId,omitempty"`
-	WMSRef        string        `json:"wmsRef,omitempty"`
-	Note          string        `json:"note,omitempty"`
-	LastError     string        `json:"lastError,omitempty"`
-	Attempts      int           `json:"validationAttempts"`
-	ClaimedBy     *int64        `json:"claimedBy,omitempty"`
-	ClaimedByName string        `json:"claimedByName,omitempty"`
-	Editable      bool          `json:"editable"`
-	Version       int           `json:"version"`
-	Items         []domain.Item `json:"items"`
-	CreatedAt     time.Time     `json:"createdAt"`
-	UpdatedAt     time.Time     `json:"updatedAt"`
-	HandedOverAt  *time.Time    `json:"handedOverAt,omitempty"`
-	CancelledAt   *time.Time    `json:"cancelledAt,omitempty"`
+	PackagesCount       int           `json:"packagesCount"`
+	AssignmentSituation *string       `json:"assignmentSituation"`
+	ID                  int64         `json:"id"`
+	CompanyID           int64         `json:"companyId"`
+	ExternalRef         string        `json:"externalRef"`
+	Channel             string        `json:"channel"`
+	Source              string        `json:"source"`
+	Courier             string        `json:"courier"`
+	CourierCode         string        `json:"courierCode,omitempty"`
+	RecipientName       string        `json:"recipientName"`
+	RecipientPh         string        `json:"recipientPhone,omitempty"`
+	RecipientMail       string        `json:"recipientEmail,omitempty"`
+	AddressLine         string        `json:"addressLine"`
+	Commune             string        `json:"commune"`
+	RegionCode          string        `json:"regionCode,omitempty"`
+	DispatchType        string        `json:"dispatchType"`
+	Warehouse           string        `json:"warehouse"`
+	CustomerNotes       string        `json:"customerNotes,omitempty"`
+	Status              string        `json:"status"`
+	StatusLabel         string        `json:"statusLabel"`
+	PrevStatus          string        `json:"prevStatus,omitempty"`
+	IncidentKind        string        `json:"incidentKind,omitempty"`
+	IncidentLabel       string        `json:"incidentLabel,omitempty"`
+	Priority            bool          `json:"priority"`
+	WaveID              string        `json:"waveId,omitempty"`
+	WMSRef              string        `json:"wmsRef,omitempty"`
+	Note                string        `json:"note,omitempty"`
+	LastError           string        `json:"lastError,omitempty"`
+	Attempts            int           `json:"validationAttempts"`
+	ClaimedBy           *int64        `json:"claimedBy,omitempty"`
+	ClaimedByName       string        `json:"claimedByName,omitempty"`
+	Editable            bool          `json:"editable"`
+	ItemsEditable       bool          `json:"itemsEditable"`
+	Version             int           `json:"version"`
+	Items               []domain.Item `json:"items"`
+	CreatedAt           time.Time     `json:"createdAt"`
+	UpdatedAt           time.Time     `json:"updatedAt"`
+	HandedOverAt        *time.Time    `json:"handedOverAt,omitempty"`
+	CancelledAt         *time.Time    `json:"cancelledAt,omitempty"`
 }
 
 func toDTO(o domain.Order) orderDTO {
@@ -155,14 +168,14 @@ func toDTO(o domain.Order) orderDTO {
 	if items == nil {
 		items = []domain.Item{}
 	}
-	return orderDTO{ID: o.ID, CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Source: o.Source,
+	return orderDTO{PackagesCount: o.PackagesCount, AssignmentSituation: o.AssignmentSituation, ID: o.ID, CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Source: o.Source,
 		Courier: o.Courier, CourierCode: o.CourierCode, RecipientName: o.RecipientName, RecipientPh: o.RecipientPhone,
 		RecipientMail: o.RecipientEmail, AddressLine: o.AddressLine, Commune: o.Commune, RegionCode: o.RegionCode,
 		DispatchType: o.DispatchType, Warehouse: o.Warehouse, CustomerNotes: o.CustomerNotes,
 		Status: string(o.Status), StatusLabel: domain.Labels[o.Status], PrevStatus: string(o.PrevStatus),
 		IncidentKind: o.IncidentKind, IncidentLabel: domain.IncidentLabels[o.IncidentKind],
 		Priority: o.Priority, WaveID: o.WaveID, WMSRef: o.WMSRef, Note: o.Note, LastError: o.LastError,
-		Attempts: o.ValidationAttempts, ClaimedBy: o.ClaimedBy, ClaimedByName: o.ClaimedByName, Editable: o.Editable(),
+		Attempts: o.ValidationAttempts, ClaimedBy: o.ClaimedBy, ClaimedByName: o.ClaimedByName, Editable: o.Editable(), ItemsEditable: o.ItemsEditable(),
 		Version: o.Version, Items: items, CreatedAt: o.CreatedAt, UpdatedAt: o.UpdatedAt,
 		HandedOverAt: o.HandedOverAt, CancelledAt: o.CancelledAt}
 }
@@ -273,7 +286,14 @@ func filterFrom(r *http.Request, ids []int64) (ports.ListFilter, error) {
 	q := r.URL.Query()
 	f := ports.ListFilter{CompanyIDs: ids, View: q.Get("view"), Search: q.Get("q"), Courier: q.Get("courier"),
 		Channel: q.Get("channel"), OnlyPriority: q.Get("priority") == "true", WithoutWave: q.Get("without_wave") == "true",
-		IncidentKind: q.Get("incident_kind"), Sort: q.Get("sort"), IDs: splitInts(q.Get("ids"))}
+		IncidentKind: q.Get("incident_kind"), Sort: q.Get("sort"), IDs: splitInts(q.Get("ids")),
+		Source: q.Get("source"), Situation: q.Get("situation")}
+	if f.Source != "" && !slices.Contains([]string{"manual", "bulk", "webhook"}, f.Source) {
+		return f, fmt.Errorf("%w: origen desconocido", domain.ErrInvalid)
+	}
+	if f.Situation != "" && !slices.Contains([]string{"en_cola", "invas_agotado", "fuera_corte", "sin_regla"}, f.Situation) {
+		return f, fmt.Errorf("%w: situación desconocida", domain.ErrInvalid)
+	}
 	if s := q.Get("status"); s != "" {
 		f.Statuses = strings.Split(s, ",")
 	}
@@ -423,12 +443,13 @@ func (h *Handler) importTemplate(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("format") == "csv" {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="plantilla-ordenes.csv"`)
-		_, _ = io.WriteString(w, "\xef\xbb\xbf"+strings.Join(application.ImportColumns, ";")+"\n"+
-			"PED-1001;chilexpress;domicilio;Ana Pérez;+56 9 1234 5678;ana@correo.cl;Av. Irarrázaval 1234;Ñuñoa;RM;;SKU-001;2\n")
+		_, _ = io.WriteString(w, application.ImportTemplateCSV())
 		return
 	}
+	id, _ := tenant.From(r.Context())
+	companyID, _ := strconv.ParseInt(r.URL.Query().Get("company_id"), 10, 64)
 	var buf bytes.Buffer
-	if err := application.ImportTemplate(&buf); err != nil {
+	if err := h.svc.ImportTemplate(r.Context(), id, companyID, &buf); err != nil {
 		h.writeErr(w, r, err)
 		return
 	}
@@ -566,8 +587,9 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Action string `json:"action"`
-		Note   string `json:"note"`
+		Action      string              `json:"action"`
+		Note        string              `json:"note"`
+		Corrections *domain.Corrections `json:"corrections"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -575,7 +597,7 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) {
 	if body.Action == "" {
 		body.Action = application.ResolveResume
 	}
-	o, err := h.svc.Resolve(r.Context(), id, ids, oid, body.Action, body.Note)
+	o, err := h.svc.Resolve(r.Context(), id, ids, oid, body.Action, body.Note, body.Corrections)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
@@ -844,6 +866,19 @@ func (h *Handler) runRules(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	id, _ := tenant.From(r.Context())
 	list, err := h.svc.ListRules(r.Context(), id)
+	if err != nil {
+		h.writeErr(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+func (h *Handler) warehouses(w http.ResponseWriter, r *http.Request) {
+	id, ids, ok := scope(w, r)
+	if !ok {
+		return
+	}
+	list, err := h.svc.Warehouses(r.Context(), id, ids)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return

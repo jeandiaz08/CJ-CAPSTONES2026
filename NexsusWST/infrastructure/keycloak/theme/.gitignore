@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist_keycloak/
+.keycloakify/
+public/keycloakify-dev-resources/
+*.tsbuildinfo
+*.log
+*.jar
+.env
+.env.*
+!.env.example

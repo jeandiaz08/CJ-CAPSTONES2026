@@ -51,13 +51,13 @@ export const MENU: MenuSection[] = [
     title: "Operación",
     items: [
       {
-        href: "/ordenes",
+        href: "/ordenes/todas/listado",
         label: "Órdenes",
         icon: ListOrdered,
         rf: "RF-08 a RF-15",
         children: [
           {
-            href: "/ordenes",
+            href: "/ordenes/todas/listado",
             label: "Todas las órdenes",
             icon: ListOrdered,
           },

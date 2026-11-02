@@ -19,13 +19,16 @@ type Job struct {
 	OrderID   int64
 	Priority  bool
 	Payload   map[string]any
+	// NextCutoff (HH:MM) ordena la cola de Invas; vacío va al final.
+	NextCutoff string
 }
 
 // Vistas del listado.
 const (
-	ViewTray     = ""         // bandeja de trabajo: oculta Canceladas
-	ViewRegistry = "registro" // Registro histórico: Entregadas al courier y Canceladas
-	ViewAll      = "all"
+	ViewTray       = ""         // bandeja: en curso y Entregadas de hasta 365 días; nunca Canceladas
+	ViewRegistry   = "registro" // Registro histórico: Canceladas y Entregadas de más de 365 días
+	ViewAll        = "all"
+	ViewAssignment = "asignacion"
 )
 
 // ListFilter: CompanyIDs nil = todas (solo personal interno).
@@ -36,12 +39,14 @@ type ListFilter struct {
 	Search       string // número, referencia o destinatario
 	Courier      string
 	Channel      string
+	Source       string // manual, bulk o webhook
+	Situation    string // en_cola, invas_agotado, fuera_corte o sin_regla
 	From, To     *time.Time
 	OnlyPriority bool
 	WithoutWave  bool
 	IncidentKind string
 	IDs          []int64 // exportar seleccionados
-	Sort         string  // recent (defecto), oldest, priority
+	Sort         string  // recent (defecto; en Asignación, prioridad primero), oldest, updated, priority
 	Limit        int
 	Offset       int
 }
@@ -70,6 +75,7 @@ type OrderRepository interface {
 	Get(ctx context.Context, companyIDs []int64, id int64) (domain.Order, error)
 	List(ctx context.Context, f ListFilter) ([]domain.Order, int, error)
 	Summary(ctx context.Context, companyIDs []int64) (map[domain.Status]int, error)
+	Warehouses(ctx context.Context, companyIDs []int64) ([]string, error)
 	Events(ctx context.Context, orderID int64) ([]EventRecord, error)
 	AddEvent(ctx context.Context, orderID int64, typ, ev, actor, reason string) error
 
@@ -77,11 +83,15 @@ type OrderRepository interface {
 	// versión + historial + efectos, en UNA transacción. ErrConflict si otra
 	// operación ganó (p. ej. dos personas confirman a la vez).
 	Transition(ctx context.Context, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, opts TransitionOpts) (domain.Order, error)
+	// SaveResolution guarda en una transacción las correcciones de una incidencia y su
+	// resolución. Si cambia el courier, la orden sale del manifiesto abierto.
+	SaveResolution(ctx context.Context, before, after domain.Order, from domain.Status, diff []string, actor, reason string, opts TransitionOpts) (domain.Order, error)
 	// SaveEdit guarda datos editados (y opcionalmente un cambio de estado).
 	SaveEdit(ctx context.Context, before, after domain.Order, diff []string, actor string, ev domain.Event, opts TransitionOpts) (domain.Order, error)
 	SetPriority(ctx context.Context, o domain.Order, priority bool, actor, reason string) (domain.Order, error)
 	// AssignWave marca la ola en órdenes Validadas sin ola y encola el envío a Invas.
-	AssignWave(ctx context.Context, companyIDs []int64, orderIDs []int64, waveID, actor, reason string) ([]int64, error)
+	// AssignWave encola las órdenes; ranks indica el corte de cada una en la cola.
+	AssignWave(ctx context.Context, companyIDs []int64, orderIDs []int64, waveID, actor, reason string, ranks map[int64]string) ([]int64, error)
 	// RetryFailedJobs vuelve a encolar los trabajos fallidos de la orden (reejecución autorizada).
 	RetryFailedJobs(ctx context.Context, orderID int64) (int, error)
 
@@ -103,12 +113,18 @@ type OrderRepository interface {
 
 // CatalogReader lee datos del Core DIRECTO de PostgreSQL (DA-12): Órdenes no
 // llama al Core ni usa su caché.
+// CourierOption y ProductOption: valores activos para las listas de la plantilla.
+type CourierOption struct{ Code, Name string }
+type ProductOption struct{ SKU, Description string }
+
 type CatalogReader interface {
 	MissingSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
 	KitSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
 	CompanyActive(ctx context.Context, companyID int64) (bool, error)
 	CourierActive(ctx context.Context, code string) (bool, error)
 	Communes(ctx context.Context) ([]string, error)
+	ActiveCouriers(ctx context.Context) ([]CourierOption, error)
+	ActiveProducts(ctx context.Context, companyID int64) ([]ProductOption, error)
 	CompanyName(ctx context.Context, companyID int64) (string, error)
 	ClientEmails(ctx context.Context, companyID int64) ([]string, error)
 }
@@ -134,13 +150,27 @@ type WaveRule struct {
 
 type CourierSettings struct {
 	Courier     string   `json:"courier"`
-	ArrivalTime string   `json:"arrivalTime"` // HH:MM, corte del courier
 	MaxPackages *int     `json:"maxPackages"`
 	CoversAll   bool     `json:"coversAll"`
 	Communes    []string `json:"communes"` // cobertura si CoversAll = false
 }
 
+type CutoffCourier struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	ArrivalTime string `json:"arrivalTime"`
+}
+type Cutoff struct {
+	ID         int64           `json:"id"`
+	Number     int             `json:"number"`
+	Name       *string         `json:"name"`
+	CutoffTime string          `json:"cutoffTime"`
+	Couriers   []CutoffCourier `json:"couriers"`
+}
 type RuleRepository interface {
+	Cutoffs(context.Context) ([]Cutoff, error)
+	SaveCutoff(context.Context, Cutoff, string) (Cutoff, error)
+	DeleteCutoff(context.Context, int64, string) error
 	List(ctx context.Context, onlyActive bool) ([]WaveRule, error)
 	Get(ctx context.Context, id int64) (WaveRule, error)
 	Save(ctx context.Context, r WaveRule, actor string) (WaveRule, error) // crea si ID == 0
@@ -151,6 +181,10 @@ type RuleRepository interface {
 	CourierSettings(ctx context.Context, courier string) (CourierSettings, error)
 	ListCourierSettings(ctx context.Context) ([]CourierSettings, error)
 	SaveCourierSettings(ctx context.Context, s CourierSettings, actor string) error
+	AssignmentDeadline(ctx context.Context) (string, error)
+	OperationSchedule(ctx context.Context) (domain.OperationSchedule, error)
+	SaveOperationSchedule(ctx context.Context, s domain.OperationSchedule, actor string) error
+	SaveAssignmentDeadline(ctx context.Context, value, actor string) error
 }
 
 // ---------------------------------------------------------------------------
