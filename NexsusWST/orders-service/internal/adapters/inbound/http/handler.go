@@ -151,6 +151,7 @@ type orderDTO struct {
 	ClaimedBy           *int64        `json:"claimedBy,omitempty"`
 	ClaimedByName       string        `json:"claimedByName,omitempty"`
 	Editable            bool          `json:"editable"`
+	ItemsEditable       bool          `json:"itemsEditable"`
 	Version             int           `json:"version"`
 	Items               []domain.Item `json:"items"`
 	CreatedAt           time.Time     `json:"createdAt"`
@@ -171,7 +172,7 @@ func toDTO(o domain.Order) orderDTO {
 		Status: string(o.Status), StatusLabel: domain.Labels[o.Status], PrevStatus: string(o.PrevStatus),
 		IncidentKind: o.IncidentKind, IncidentLabel: domain.IncidentLabels[o.IncidentKind],
 		Priority: o.Priority, WaveID: o.WaveID, WMSRef: o.WMSRef, Note: o.Note, LastError: o.LastError,
-		Attempts: o.ValidationAttempts, ClaimedBy: o.ClaimedBy, ClaimedByName: o.ClaimedByName, Editable: o.Editable(),
+		Attempts: o.ValidationAttempts, ClaimedBy: o.ClaimedBy, ClaimedByName: o.ClaimedByName, Editable: o.Editable(), ItemsEditable: o.ItemsEditable(),
 		Version: o.Version, Items: items, CreatedAt: o.CreatedAt, UpdatedAt: o.UpdatedAt,
 		HandedOverAt: o.HandedOverAt, CancelledAt: o.CancelledAt}
 }
@@ -439,12 +440,13 @@ func (h *Handler) importTemplate(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("format") == "csv" {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="plantilla-ordenes.csv"`)
-		_, _ = io.WriteString(w, "\xef\xbb\xbf"+strings.Join(application.ImportColumns, ";")+"\n"+
-			"PED-1001;chilexpress;domicilio;Ana Pérez;+56 9 1234 5678;ana@correo.cl;Av. Irarrázaval 1234;Ñuñoa;RM;;SKU-001;2\n")
+		_, _ = io.WriteString(w, application.ImportTemplateCSV())
 		return
 	}
+	id, _ := tenant.From(r.Context())
+	companyID, _ := strconv.ParseInt(r.URL.Query().Get("company_id"), 10, 64)
 	var buf bytes.Buffer
-	if err := application.ImportTemplate(&buf); err != nil {
+	if err := h.svc.ImportTemplate(r.Context(), id, companyID, &buf); err != nil {
 		h.writeErr(w, r, err)
 		return
 	}

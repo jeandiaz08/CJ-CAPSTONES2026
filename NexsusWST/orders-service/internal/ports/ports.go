@@ -106,12 +106,18 @@ type OrderRepository interface {
 
 // CatalogReader lee datos del Core DIRECTO de PostgreSQL (DA-12): Órdenes no
 // llama al Core ni usa su caché.
+// CourierOption y ProductOption: valores activos para las listas de la plantilla.
+type CourierOption struct{ Code, Name string }
+type ProductOption struct{ SKU, Description string }
+
 type CatalogReader interface {
 	MissingSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
 	KitSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
 	CompanyActive(ctx context.Context, companyID int64) (bool, error)
 	CourierActive(ctx context.Context, code string) (bool, error)
 	Communes(ctx context.Context) ([]string, error)
+	ActiveCouriers(ctx context.Context) ([]CourierOption, error)
+	ActiveProducts(ctx context.Context, companyID int64) ([]ProductOption, error)
 	CompanyName(ctx context.Context, companyID int64) (string, error)
 	ClientEmails(ctx context.Context, companyID int64) ([]string, error)
 }

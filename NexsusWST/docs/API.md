@@ -96,7 +96,7 @@ Contiene estos campos:
 | GET | `/v1/orders/export` | Mismos filtros; `format=xlsx` (defecto) o `csv`. Con `ids=` exporta **los seleccionados**. Máx. 10.000 filas |
 | POST | `/v1/orders` | `{companyId, externalRef?, courier, recipientName, recipientPhone?, recipientEmail?, addressLine, commune, regionCode?, dispatchType?, customerNotes?, items[{sku, quantity}]}` → 201 Pendiente. Sin `externalRef` se genera `NX-…`. Roles: admin, jefe, cliente. |
 | POST | `/v1/orders/import` | multipart: `file` (.xlsx o .csv, máx. 5 MB) + `companyId`. **201** todo creado · **207** parte con errores: `{ordersCreated, orderIds, totalRows, failedRows, errors[{row, ref, message}]}`. Varias filas con la misma referencia = una orden con varios productos. |
-| GET | `/v1/orders/import/template` | Plantilla `.xlsx` (o `?format=csv`) |
+| GET | `/v1/orders/import/template` | Plantilla `.xlsx` con hoja «Instrucciones», listas desplegables de couriers, tipos de despacho y comunas activas y filas de ejemplo; con `company_id` agrega los SKU activos de esa empresa. `?format=csv`: mismas columnas y ejemplos, sin listas. Las filas cuya referencia empieza con `EJEMPLO-` no se importan. |
 | GET | `/v1/orders/{id}` | `{order, events[], packages[], documents[], tracking{available, events[]}}` |
 
 ### Edición, anulación y cancelación (H-09, CU-06)
