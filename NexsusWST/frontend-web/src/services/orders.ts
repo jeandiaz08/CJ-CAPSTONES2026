@@ -251,5 +251,8 @@ export type Cutoff = {id:number;number:number;name:string|null;cutoffTime:string
 export const getCutoffs=()=>api<{data:Cutoff[]}>("orders","/v1/cutoffs");
 export const saveCutoff = (id: number | null, body: { name: string | null; cutoffTime: string; couriers: { code: string; arrivalTime: string }[] }) => api<Cutoff>("orders", id ? `/v1/cutoffs/${id}` : "/v1/cutoffs", { method: id ? "PUT" : "POST", body: JSON.stringify(body) });
 export const deleteCutoff = (id: number) => api<void>("orders", `/v1/cutoffs/${id}`, { method: "DELETE" });
+export type OperationSchedule = { assignmentDeadline: string; operationStart: string; operationDays: string[]; priorityOverridesDeadline: boolean; operationDay: boolean; beforeStart: boolean; afterDeadline: boolean; nextRelease: string };
+export const getOperationSchedule = () => api<{ data: OperationSchedule }>("orders", "/v1/ops-settings/operation");
+export const saveOperationSchedule = (body: { operationStart: string; operationDays: string[] }) => api<void>("orders", "/v1/ops-settings/operation", { method: "PUT", body: JSON.stringify(body) });
 export const saveAssignmentDeadline = (assignmentDeadline: string) => api<void>("orders", "/v1/ops-settings/assignment-deadline", { method: "PUT", body: JSON.stringify({ assignmentDeadline }) });
 export const getAssignmentDeadline=()=>api<{data:{assignmentDeadline:string}}>("orders","/v1/ops-settings/assignment-deadline");

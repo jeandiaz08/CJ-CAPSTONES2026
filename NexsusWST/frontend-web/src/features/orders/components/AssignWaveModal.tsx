@@ -4,8 +4,9 @@ import { useId, useState } from "react";
 import { FormModal } from "@/components/FormModal";
 import { showToast } from "@/components/Toast";
 import { ApiError, apiErrorMessage } from "@/services/api";
-import { assignWave, listOrders, listWaves, type Order, type OrderFilters } from "@/services/orders";
+import { assignWave, getOperationSchedule, listOrders, listWaves, type Order, type OrderFilters } from "@/services/orders";
 import { useOrderResource } from "../hooks/useOrderResources";
+import { dateLabel } from "./OrderDetail";
 
 const PAGE = 200;
 
@@ -29,6 +30,7 @@ export function AssignWaveModal({ selected, filters, companyId, onClose, onDone 
   const id = useId();
   const usingSelection = selected.length > 0;
   const waves = useOrderResource(listWaves, "assign-waves");
+  const operation = useOrderResource(getOperationSchedule, "assign-operation");
   const candidates = useOrderResource(() => (usingSelection ? Promise.resolve(selected) : allAssignable(filters, companyId)), "assign-candidates");
   const [waveId, setWaveId] = useState("");
   const [waveError, setWaveError] = useState<string | null>(null);
@@ -36,8 +38,13 @@ export function AssignWaveModal({ selected, filters, companyId, onClose, onDone 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ queued: number; skipped: number } | null>(null);
   const list = candidates.data ?? [];
-  const eligible = list.filter((order) => order.status === "validated" && !order.waveId);
+  const schedule = operation.data?.data;
+  // La regla la decide el servidor; aquí solo se anticipa para avisar.
+  const closed = !!schedule?.operationDay && schedule.afterDeadline;
+  const eligible = list.filter((order) => order.status === "validated" && !order.waveId && (!closed || (schedule.priorityOverridesDeadline && order.priority)));
   const omitted = list.length - eligible.length;
+  const outOfCutoff = eligible.filter((order) => order.assignmentSituation === "fuera_corte").length;
+  const nextRelease = schedule?.nextRelease ? dateLabel(schedule.nextRelease) : "";
 
   const submit = async () => {
     setFormError(null);
@@ -82,6 +89,10 @@ export function AssignWaveModal({ selected, filters, companyId, onClose, onDone 
     >
       <div className="filter-fields">
         {candidates.error && <p className="modal-field-error" role="alert">No se pudieron cargar las órdenes: {candidates.error}</p>}
+        {closed && <p className="form-notice form-notice-danger" role="alert">Ya pasó la hora límite ({schedule.assignmentDeadline}). {schedule.priorityOverridesDeadline ? "Solo se pueden asignar órdenes prioritarias." : "No se asignan órdenes"} hasta el próximo día de operación{nextRelease ? `: ${nextRelease}` : ""}.</p>}
+        {schedule && !schedule.operationDay && <p className="form-notice form-notice-warning" role="status">Hoy no es día de operación. Puedes asignar igual: las órdenes se envían a Invas de inmediato.</p>}
+        {schedule?.operationDay && schedule.beforeStart && <p className="form-notice form-notice-warning" role="status">Aún no comienza la operación ({schedule.operationStart}). Puedes asignar igual: las órdenes se envían a Invas de inmediato.</p>}
+        {!closed && outOfCutoff > 0 && <p className="form-notice form-notice-warning" role="status">{outOfCutoff} {outOfCutoff === 1 ? "orden está" : "órdenes están"} fuera de corte: {outOfCutoff === 1 ? "pasará" : "pasarán"} a la cola por tu decisión.</p>}
         {candidates.loading ? <div className="detail-skeleton config-skeleton" aria-label="Cargando órdenes" /> : (
           <div className="bulk-summary">
             <p>

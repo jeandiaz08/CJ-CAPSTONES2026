@@ -7,15 +7,18 @@ import { FormModal } from "@/components/FormModal";
 import { showToast } from "@/components/Toast";
 import { apiErrorMessage } from "@/services/api";
 import type { CatalogItem } from "@/services/core";
-import { deleteCutoff, getAssignmentDeadline, getCutoffs, saveAssignmentDeadline, saveCutoff, type Cutoff } from "@/services/orders";
+import { deleteCutoff, getCutoffs, getOperationSchedule, saveAssignmentDeadline, saveCutoff, saveOperationSchedule, type Cutoff } from "@/services/orders";
 import { useOrderResource } from "../hooks/useOrderResources";
 
 type CourierRow = { key: number; code: string; arrivalTime: string };
 
-function CutoffForm({ cutoff, others, deadline, couriers, onClose, onSaved }: {
+const DAYS = [["mon", "L", "Lunes"], ["tue", "M", "Martes"], ["wed", "X", "Miércoles"], ["thu", "J", "Jueves"], ["fri", "V", "Viernes"], ["sat", "S", "Sábado"], ["sun", "D", "Domingo"]];
+
+function CutoffForm({ cutoff, others, deadline, start, couriers, onClose, onSaved }: {
   cutoff: Cutoff | null;
   others: Cutoff[];
   deadline?: string;
+  start?: string;
   couriers: CatalogItem[];
   onClose: () => void;
   onSaved: () => void;
@@ -38,6 +41,7 @@ function CutoffForm({ cutoff, others, deadline, couriers, onClose, onSaved }: {
     if (!time) found.time = "Indica la hora de corte.";
     else if (others.some((other) => other.cutoffTime === time)) found.time = "Ya existe un corte a esa hora.";
     else if (deadline && time > deadline) found.time = `No puede ser posterior a la hora límite (${deadline}).`;
+    else if (start && time <= start) found.time = `Debe ser posterior al inicio de operación (${start}).`;
     if (!rows.length) found.couriers = "Agrega al menos un courier.";
     rows.forEach((row) => {
       if (!row.code) found[`row-${row.key}`] = "Elige el courier.";
@@ -106,14 +110,19 @@ export function CutoffsModal({ couriers, onClose, onChanged }: { couriers: Catal
   const id = useId();
   const [version, setVersion] = useState(0);
   const cuts = useOrderResource(getCutoffs, `config-cutoffs:${version}`, "config-cutoffs");
-  const deadline = useOrderResource(getAssignmentDeadline, `config-deadline:${version}`, "config-deadline");
+  const schedule = useOrderResource(getOperationSchedule, `config-operation:${version}`, "config-operation");
   const [editing, setEditing] = useState<Cutoff | "new" | null>(null);
   const [removing, setRemoving] = useState<Cutoff | null>(null);
   const [deadlineDraft, setDeadlineDraft] = useState<string | null>(null);
   const [deadlineError, setDeadlineError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [startDraft, setStartDraft] = useState<string | null>(null);
+  const [daysDraft, setDaysDraft] = useState<string[] | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const list = cuts.data?.data ?? [];
-  const currentDeadline = deadline.data?.data.assignmentDeadline;
+  const currentDeadline = schedule.data?.data.assignmentDeadline;
+  const startValue = startDraft ?? schedule.data?.data.operationStart ?? "";
+  const daysValue = daysDraft ?? schedule.data?.data.operationDays ?? [];
   const deadlineValue = deadlineDraft ?? currentDeadline ?? "";
   const refresh = () => { setVersion((v) => v + 1); onChanged(); };
   const saveDeadline = async () => {
@@ -129,6 +138,25 @@ export function CutoffsModal({ couriers, onClose, onChanged }: { couriers: Catal
       refresh();
     } catch (e) {
       setDeadlineError(apiErrorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const saveOperation = async () => {
+    setOperationError(null);
+    const first = list[0]?.cutoffTime;
+    if (!startValue) return setOperationError("Indica el inicio de operación.");
+    if (first && startValue >= first) return setOperationError(`Debe ser anterior al primer corte (${first}).`);
+    if (daysValue.length === 0) return setOperationError("Elige al menos un día de operación.");
+    setSaving(true);
+    try {
+      await saveOperationSchedule({ operationStart: startValue, operationDays: daysValue });
+      showToast("Horario de operación actualizado.");
+      setStartDraft(null);
+      setDaysDraft(null);
+      refresh();
+    } catch (e) {
+      setOperationError(apiErrorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -166,7 +194,25 @@ export function CutoffsModal({ couriers, onClose, onChanged }: { couriers: Catal
         <p className="form-hint">No se asignan órdenes después de esta hora.</p>
         {deadlineError && <p className="modal-field-error" role="alert">{deadlineError}</p>}
       </div>
-      {editing && <CutoffForm cutoff={editing === "new" ? null : editing} others={list.filter((c) => editing === "new" || c.id !== editing.id)} deadline={currentDeadline} couriers={couriers} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
+      <div className="config-deadline">
+        <div className="modal-field">
+          <label htmlFor={`${id}-start`}>Inicio de operación</label>
+          <input id={`${id}-start`} type="time" value={startValue} aria-invalid={!!operationError} onChange={(e) => { setOperationError(null); setStartDraft(e.target.value); }} />
+        </div>
+        <fieldset className="config-days">
+          <legend>Días de operación</legend>
+          {DAYS.map(([code, letter, name]) => (
+            <label key={code} title={name}>
+              <input type="checkbox" aria-label={name} checked={daysValue.includes(code)} onChange={() => { setOperationError(null); setDaysDraft(daysValue.includes(code) ? daysValue.filter((day) => day !== code) : [...daysValue, code]); }} />
+              <span aria-hidden="true">{letter}</span>
+            </label>
+          ))}
+        </fieldset>
+        <button type="button" className="btn ghost" disabled={saving || (startDraft === null && daysDraft === null)} onClick={saveOperation}>Guardar horario</button>
+        <p className="form-hint">Lo retenido sale el próximo día de operación a esta hora, por corte, prioridad y antigüedad.</p>
+        {operationError && <p className="modal-field-error" role="alert">{operationError}</p>}
+      </div>
+      {editing && <CutoffForm cutoff={editing === "new" ? null : editing} others={list.filter((c) => editing === "new" || c.id !== editing.id)} deadline={currentDeadline} start={schedule.data?.data.operationStart} couriers={couriers} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
       {removing && (
         <ConfirmDialog title={`Desactivar ${removing.name || `corte ${removing.number}`}`} confirmLabel="Desactivar corte" destructive onClose={() => setRemoving(null)} onConfirm={async () => {
           await deleteCutoff(removing.id);
