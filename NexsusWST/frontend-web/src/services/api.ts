@@ -2,14 +2,27 @@
 // (/api/core, /api/orders). Nunca nombres internos de Docker (DAS §7.2).
 import { getToken } from "@/state/auth";
 
+export type FieldError = { field: string; message: string };
+
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
     public code?: string,
+    public fields: FieldError[] = [],
+    public ref?: string,
   ) {
     super(message);
   }
+}
+
+// Texto para el usuario según el código de error (AGENTS: 403, 409, 500 con ref).
+export function apiErrorMessage(error: unknown): string {
+  if (!(error instanceof ApiError)) return (error as Error)?.message || "Ocurrió un error inesperado.";
+  if (error.status === 403) return "Sin permiso para realizar esta acción.";
+  if (error.status === 409) return `Otra persona cambió esta orden. ${error.message}`;
+  if (error.status >= 500 && error.ref && !error.message.includes(error.ref)) return `${error.message} (ref: ${error.ref})`;
+  return error.message;
 }
 
 type Service = "core" | "orders";
@@ -33,8 +46,9 @@ export async function api<T>(service: Service, path: string, init?: RequestInit)
   }
   if (!res.ok) {
     // 422 de validación: el servidor indica el motivo por campo
-    const fields = Array.isArray(body.fields) ? body.fields.map((f: { message: string }) => f.message).join(" · ") : "";
-    throw new ApiError(fields || body.message || `HTTP ${res.status}`, res.status, body.error);
+    const fields: FieldError[] = Array.isArray(body.fields) ? body.fields : [];
+    const summary = fields.map((f) => f.message).join(" · ");
+    throw new ApiError(summary || body.message || `HTTP ${res.status}`, res.status, body.error, fields, body.ref);
   }
   return body as T;
 }

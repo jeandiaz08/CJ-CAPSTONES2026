@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
+import { Toaster } from "@/components/Toast";
 import { ChevronRight } from "lucide-react";
 import { useAuth } from "@/state/auth";
 
@@ -40,6 +41,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <div className="content">{children}</div>
       </div>
+      <Toaster />
     </div>
   );
 }

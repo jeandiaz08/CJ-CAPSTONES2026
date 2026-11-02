@@ -74,6 +74,13 @@ export type OrderFilters = {
   view?: "asignacion" | "registro" | "all";
   status?: string;
   q?: string;
+  courier?: string;
+  channel?: string;
+  source?: string;
+  situation?: string;
+  from?: string;
+  to?: string;
+  companyId?: number;
   priority?: boolean;
   withoutWave?: boolean;
   limit?: number;
@@ -85,6 +92,12 @@ export function listOrders(f: OrderFilters, companyId: number | null) {
   if (f.view) p.set("view", f.view);
   if (f.status) p.set("status", f.status);
   if (f.q) p.set("q", f.q);
+  if (f.courier) p.set("courier", f.courier);
+  if (f.channel) p.set("channel", f.channel);
+  if (f.source) p.set("source", f.source);
+  if (f.situation) p.set("situation", f.situation);
+  if (f.from) p.set("from", f.from);
+  if (f.to) p.set("to", f.to);
   if (f.priority) p.set("priority", "true");
   if (f.withoutWave) p.set("without_wave", "true");
   p.set("limit", String(f.limit ?? 50));
