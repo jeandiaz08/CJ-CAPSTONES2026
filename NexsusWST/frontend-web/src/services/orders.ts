@@ -17,6 +17,9 @@ export type OrderStatus =
 export type OrderItem = { sku: string; quantity: number };
 
 export type Order = {
+  packagesCount: number;
+  warehouse: string;
+  assignmentSituation: "en_cola" | "invas_agotado" | "fuera_corte" | "sin_regla" | null;
   id: number;
   companyId: number;
   externalRef: string;
@@ -50,6 +53,8 @@ export type Order = {
   items?: OrderItem[];
   createdAt: string;
   updatedAt: string;
+  handedOverAt?: string;
+  cancelledAt?: string;
 };
 
 export type OrderEvent = {
@@ -66,6 +71,7 @@ export type OrderEvent = {
 export type Wave = { id: string; name: string; type: string };
 
 export type OrderFilters = {
+  view?: "asignacion" | "registro" | "all";
   status?: string;
   q?: string;
   priority?: boolean;
@@ -76,6 +82,7 @@ export type OrderFilters = {
 
 export function listOrders(f: OrderFilters, companyId: number | null) {
   const p = new URLSearchParams();
+  if (f.view) p.set("view", f.view);
   if (f.status) p.set("status", f.status);
   if (f.q) p.set("q", f.q);
   if (f.priority) p.set("priority", "true");
@@ -85,7 +92,7 @@ export function listOrders(f: OrderFilters, companyId: number | null) {
   return api<{ data: Order[]; total: number }>("orders", withCompany(`/v1/orders?${p}`, companyId));
 }
 
-export type Package = { id: number; code: string; weightKg?: number };
+export type Package = { manifestId: number | null; id: number; code: string; weightKg?: number };
 export type OrderDocument = { id: number; kind: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string };
 
 export const getOrder = (id: number, companyId: number | null) =>
@@ -178,3 +185,13 @@ export const listWaves = () => api<{ data: Wave[] }>("orders", "/v1/waves");
 
 export const assignWave = (orderIds: number[], waveId: string) =>
   api<{ queued: number[] }>("orders", "/v1/waves/assign", { method: "POST", body: JSON.stringify({ orderIds, waveId }) });
+
+export const getOrderMeta = () => api<{statuses:{code:OrderStatus;label:string}[]}>("orders","/v1/meta");
+
+export async function downloadOrderDocument(orderId:number,document:OrderDocument){
+ const {fetchDocument}=await import("./api");const blob=await fetchDocument(`/v1/orders/${orderId}/documents/${document.id}/download`);const url=URL.createObjectURL(blob);const a=window.document.createElement("a");a.href=url;a.download=document.filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+export type Cutoff = {id:number;number:number;name:string|null;cutoffTime:string;couriers:{code:string;name:string;arrivalTime:string}[]};
+export const getCutoffs=()=>api<{data:Cutoff[]}>("orders","/v1/cutoffs");
+export const getAssignmentDeadline=()=>api<{data:{assignmentDeadline:string}}>("orders","/v1/ops-settings/assignment-deadline");

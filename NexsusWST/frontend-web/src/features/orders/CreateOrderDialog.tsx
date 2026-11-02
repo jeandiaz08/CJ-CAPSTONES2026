@@ -6,6 +6,7 @@ import { Modal } from "@/components/Modal";
 import { getCatalog, listCompanies, type CatalogItem, type Company } from "@/services/core";
 import { createOrder, type OrderItem } from "@/services/orders";
 import { useAuth } from "@/state/auth";
+import { DISPATCH_LABELS } from "./format";
 
 // Ingreso manual de una orden (RF-08). La validación es automática al guardar
 // (productos, comuna, cobertura y stock). Carga masiva y documentos: ver
@@ -130,9 +131,7 @@ export function CreateOrderDialog({ onClose, onCreated }: { onClose: () => void;
             <label>
               Tipo de despacho
               <select value={form.dispatchType} onChange={(e) => setForm({ ...form, dispatchType: e.target.value })}>
-                <option value="domicilio">Despacho a domicilio</option>
-                <option value="retiro_oficina">Retiro en oficina del courier</option>
-                <option value="express">Express (mismo día)</option>
+                {Object.entries(DISPATCH_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
           </div>

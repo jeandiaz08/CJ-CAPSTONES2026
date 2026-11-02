@@ -5,13 +5,16 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
-import { Topbar } from "@/components/Topbar";
+import { ChevronRight } from "lucide-react";
 import { useAuth } from "@/state/auth";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { session, ready, logout } = useAuth();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [collapsed,setCollapsed]=useState(false);
+  useEffect(()=>{try{setCollapsed(localStorage.getItem("nexus.sidebar.collapsed")==="true")}catch{}},[]);
+  const toggleCollapsed=()=>setCollapsed(value=>{try{localStorage.setItem("nexus.sidebar.collapsed",String(!value))}catch{}return !value});
 
   useEffect(() => {
     if (ready && !session) router.replace("/login");
@@ -30,10 +33,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!ready || !session) return <p className="muted pad">Cargando…</p>;
 
   return (
-    <div className="shell">
-      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
+    <div className={`shell ${collapsed?"sidebar-is-collapsed":""}`}>
+      <Sidebar collapsed={collapsed} onCollapse={toggleCollapsed} open={menuOpen} onClose={() => setMenuOpen(false)} />
+      {!menuOpen&&<button className="floating-menu" aria-label="Abrir menú" aria-expanded={menuOpen} onClick={()=>setMenuOpen(true)}><ChevronRight/></button>}
       <div className="main">
-        <Topbar onMenu={() => setMenuOpen(true)} />
+
         <div className="content">{children}</div>
       </div>
     </div>

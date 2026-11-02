@@ -49,3 +49,5 @@ export function wsUrl(path: string): string {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${window.location.host}/api/orders${path}?access_token=${encodeURIComponent(getToken() ?? "")}`;
 }
+
+export async function fetchDocument(path:string){const token=getToken();const response=await fetch(`/api/orders${path}`,{headers:token?{Authorization:`Bearer ${token}`}:{},cache:"no-store"});if(!response.ok)throw new ApiError("No se pudo descargar el documento",response.status);return response.blob()}

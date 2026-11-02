@@ -57,7 +57,7 @@ export const MENU: MenuSection[] = [
         rf: "RF-08 a RF-15",
         children: [
           {
-            href: "/ordenes",
+            href: "/ordenes/todas/listado",
             label: "Todas las órdenes",
             icon: ListOrdered,
           },
