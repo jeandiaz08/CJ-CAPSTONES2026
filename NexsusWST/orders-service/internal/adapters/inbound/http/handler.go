@@ -91,6 +91,8 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 	r("DELETE /v1/wave-rules/{id}", h.deleteRule)
 	r("POST /v1/wave-rules/reorder", h.reorderRules)
 	r("GET /v1/couriers/settings", h.listCourierSettings)
+	r("GET /v1/ops-settings/operation", h.operationSchedule)
+	r("PUT /v1/ops-settings/operation", h.saveOperationSchedule)
 	r("GET /v1/ops-settings/assignment-deadline", h.assignmentDeadline)
 	r("PUT /v1/ops-settings/assignment-deadline", h.saveAssignmentDeadline)
 	r("PUT /v1/couriers/{code}/settings", h.saveCourierSettings)

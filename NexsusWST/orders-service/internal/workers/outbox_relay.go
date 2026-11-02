@@ -46,15 +46,19 @@ func (r *OutboxRelay) Run(ctx context.Context) {
 	}
 }
 
+// claimJobsSQL: la cola de Invas va por corte → prioridad → antigüedad. Los demás trabajos
+// (webhooks) no dependen de los cortes y no se retrasan.
+const claimJobsSQL = `
+	SELECT id, type, company_id, COALESCE(order_id,0), payload::text FROM job_outbox
+	WHERE published_at IS NULL
+	ORDER BY (type = 'assign_wave'), next_cutoff ASC NULLS LAST, priority DESC, created_at
+	LIMIT $1
+	FOR UPDATE SKIP LOCKED`
+
 func (r *OutboxRelay) publishBatch(ctx context.Context) (int, error) {
 	count := 0
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
-			SELECT id, type, company_id, COALESCE(order_id,0), payload::text FROM job_outbox
-			WHERE published_at IS NULL
-			ORDER BY priority DESC, created_at
-			LIMIT $1
-			FOR UPDATE SKIP LOCKED`, r.batch)
+		rows, err := tx.Query(ctx, claimJobsSQL, r.batch)
 		if err != nil {
 			return err
 		}

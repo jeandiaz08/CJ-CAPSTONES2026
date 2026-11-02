@@ -139,13 +139,17 @@ func TestResolveCorrectionsRejected(t *testing.T) {
 
 type deadlineRules struct{ ports.RuleRepository }
 
+func (deadlineRules) OperationSchedule(context.Context) (domain.OperationSchedule, error) {
+	return domain.OperationSchedule{AssignmentDeadline: "12:00", OperationStart: "06:30"}, nil
+}
+
 func (deadlineRules) Cutoffs(context.Context) ([]ports.Cutoff, error) {
 	return []ports.Cutoff{{CutoffTime: "08:00"}, {CutoffTime: "11:00"}}, nil
 }
 
 func TestDeadlineNamesTheLatestCutoff(t *testing.T) {
 	s := NewService(Deps{Rules: deadlineRules{}})
-	err := s.SaveAssignmentDeadline(context.Background(), admin(), "07:00")
+	err := s.SaveAssignmentDeadline(context.Background(), admin(), "09:00")
 	var op OpError
 	if !errors.As(err, &op) || !strings.Contains(op.Msg, "11:00") {
 		t.Fatalf("debe nombrar el último corte: %v", err)

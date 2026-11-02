@@ -27,20 +27,36 @@ var _ ports.OrderRepository = (*Repository)(nil)
 
 // La toma de empaque de un usuario deshabilitado se ignora (vuelve a la bandeja).
 const assignmentUniverse = `(o.status='validated' OR (o.status='incident' AND o.incident_kind='invas' AND o.prev_status='validated'))`
+
+// Hora de operación: siempre America/Santiago, a nivel de minuto como en domain.OperationSchedule.
+const nowLocal = `(CURRENT_TIMESTAMP AT TIME ZONE 'America/Santiago')`
+const nowHour = `to_char(` + nowLocal + `,'HH24:MI')`
+
 const fromOrders = `orders o LEFT JOIN users cu ON cu.id = o.claimed_by AND cu.active
  LEFT JOIN LATERAL (SELECT max(c.cutoff_time) AS cutoff_time FROM cutoffs c JOIN cutoff_couriers cc ON cc.cutoff_id=c.id WHERE c.active AND cc.courier=o.courier) cs ON true
+ LEFT JOIN LATERAL (SELECT min(c.cutoff_time) AS cutoff_time FROM cutoffs c JOIN cutoff_couriers cc ON cc.cutoff_id=c.id WHERE c.active AND cc.courier=o.courier AND to_char(c.cutoff_time,'HH24:MI') >= ` + nowHour + `) nc ON true
  LEFT JOIN ops_settings os ON os.key='assignment_deadline'
+ LEFT JOIN ops_settings os_start ON os_start.key='operation_start'
+ LEFT JOIN ops_settings os_days ON os_days.key='operation_days'
+ LEFT JOIN ops_settings os_priority ON os_priority.key='priority_overrides_deadline'
  LEFT JOIN LATERAL (
    SELECT j.id, j.completed_at, j.failed_at FROM job_outbox j
    WHERE j.order_id=o.id AND j.type='assign_wave'
    ORDER BY j.created_at DESC, j.id DESC LIMIT 1
  ) aj ON true`
+
+// assignmentRetained refleja en SQL domain.OperationSchedule.Decide, para que la pantalla no
+// contradiga al motor: un cambio allá también debe hacerse aquí.
+const assignmentRetained = `(
+ ','||COALESCE(os_days.value,'sun,mon,tue,wed,thu,fri,sat')||',' NOT LIKE '%,'||to_char(` + nowLocal + `,'dy')||',%'
+ OR ` + nowHour + ` < COALESCE(os_start.value,'00:00')
+ OR (` + nowHour + ` > os.value AND NOT (o.priority AND os_priority.value='true'))
+ OR (` + nowHour + ` > to_char(cs.cutoff_time,'HH24:MI') AND NOT o.priority))`
+
 const assignmentSituation = `CASE WHEN ` + assignmentUniverse + ` THEN CASE
  WHEN aj.id IS NOT NULL AND aj.completed_at IS NULL AND aj.failed_at IS NULL THEN 'en_cola'
  WHEN aj.failed_at IS NOT NULL THEN 'invas_agotado'
- WHEN cs.cutoff_time IS NOT NULL AND (o.created_at AT TIME ZONE 'America/Santiago')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'America/Santiago')::date
- AND ((o.created_at AT TIME ZONE 'America/Santiago')::time > cs.cutoff_time
- OR (o.created_at AT TIME ZONE 'America/Santiago')::time > os.value::time) THEN 'fuera_corte'
+ WHEN ` + assignmentRetained + ` THEN 'fuera_corte'
  WHEN o.rules_checked_at IS NOT NULL AND aj.id IS NULL THEN 'sin_regla'
  END ELSE NULL END`
 
@@ -159,8 +175,8 @@ func insertJobs(ctx context.Context, q querier, jobs []ports.Job) error {
 	for _, j := range jobs {
 		payload, _ := json.Marshal(j.Payload)
 		if _, err := q.Exec(ctx, `
-			INSERT INTO job_outbox (id, type, company_id, order_id, priority, payload)
-			VALUES ($1,$2,$3,NULLIF($4,0),$5,$6) ON CONFLICT (id) DO NOTHING`, j.ID, j.Type, j.CompanyID, j.OrderID, j.Priority, payload); err != nil {
+			INSERT INTO job_outbox (id, type, company_id, order_id, priority, payload, next_cutoff)
+			VALUES ($1,$2,$3,NULLIF($4,0),$5,$6,NULLIF($7,'')::time) ON CONFLICT (id) DO NOTHING`, j.ID, j.Type, j.CompanyID, j.OrderID, j.Priority, payload, j.NextCutoff); err != nil {
 			return err
 		}
 	}
@@ -275,7 +291,8 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	}
 	order := "o.id DESC"
 	if f.View == ports.ViewAssignment {
-		order = "o.priority DESC, o.id DESC"
+		// La tabla muestra el orden real de la cola: corte → prioridad → antigüedad.
+		order = "(o.priority AND nc.cutoff_time IS NULL AND cs.cutoff_time IS NOT NULL) DESC, nc.cutoff_time ASC NULLS LAST, o.priority DESC, o.created_at, o.id"
 	}
 	switch f.Sort {
 	case "priority":
@@ -543,7 +560,7 @@ func (r *Repository) SetPriority(ctx context.Context, o domain.Order, priority b
 	return out, err
 }
 
-func (r *Repository) AssignWave(ctx context.Context, ids []int64, orderIDs []int64, waveID, actor, reason string) ([]int64, error) {
+func (r *Repository) AssignWave(ctx context.Context, ids []int64, orderIDs []int64, waveID, actor, reason string, ranks map[int64]string) ([]int64, error) {
 	assigned := []int64{}
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
@@ -575,7 +592,7 @@ func (r *Repository) AssignWave(ctx context.Context, ids []int64, orderIDs []int
 			}
 			if err := insertJobs(ctx, tx, []ports.Job{{
 				ID: fmt.Sprintf("assign_wave:%d:%s", x.id, waveID), Type: "assign_wave",
-				CompanyID: x.company, OrderID: x.id, Priority: x.prio, Payload: map[string]any{"wave_id": waveID},
+				CompanyID: x.company, OrderID: x.id, Priority: x.prio, Payload: map[string]any{"wave_id": waveID}, NextCutoff: ranks[x.id],
 			}}); err != nil {
 				return err
 			}
@@ -742,7 +759,7 @@ func (r *Repository) OrdersInStatus(ctx context.Context, status domain.Status, l
 func (r *Repository) RuleCandidates(ctx context.Context, limit int) ([]domain.Order, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+cols+` FROM `+fromOrders+`
 		WHERE o.status='validated' AND o.wave_id IS NULL AND o.rules_checked_at IS NULL
-		ORDER BY o.priority DESC, o.id LIMIT $1`, limit)
+		ORDER BY o.priority DESC, o.created_at, o.id LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}

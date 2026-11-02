@@ -19,6 +19,8 @@ type Job struct {
 	OrderID   int64
 	Priority  bool
 	Payload   map[string]any
+	// NextCutoff (HH:MM) ordena la cola de Invas; vacío va al final.
+	NextCutoff string
 }
 
 // Vistas del listado.
@@ -88,7 +90,8 @@ type OrderRepository interface {
 	SaveEdit(ctx context.Context, before, after domain.Order, diff []string, actor string, ev domain.Event, opts TransitionOpts) (domain.Order, error)
 	SetPriority(ctx context.Context, o domain.Order, priority bool, actor, reason string) (domain.Order, error)
 	// AssignWave marca la ola en órdenes Validadas sin ola y encola el envío a Invas.
-	AssignWave(ctx context.Context, companyIDs []int64, orderIDs []int64, waveID, actor, reason string) ([]int64, error)
+	// AssignWave encola las órdenes; ranks indica el corte de cada una en la cola.
+	AssignWave(ctx context.Context, companyIDs []int64, orderIDs []int64, waveID, actor, reason string, ranks map[int64]string) ([]int64, error)
 	// RetryFailedJobs vuelve a encolar los trabajos fallidos de la orden (reejecución autorizada).
 	RetryFailedJobs(ctx context.Context, orderID int64) (int, error)
 
@@ -179,6 +182,8 @@ type RuleRepository interface {
 	ListCourierSettings(ctx context.Context) ([]CourierSettings, error)
 	SaveCourierSettings(ctx context.Context, s CourierSettings, actor string) error
 	AssignmentDeadline(ctx context.Context) (string, error)
+	OperationSchedule(ctx context.Context) (domain.OperationSchedule, error)
+	SaveOperationSchedule(ctx context.Context, s domain.OperationSchedule, actor string) error
 	SaveAssignmentDeadline(ctx context.Context, value, actor string) error
 }
 

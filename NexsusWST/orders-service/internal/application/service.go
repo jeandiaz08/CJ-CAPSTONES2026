@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/nexuswst/orders-service/internal/domain"
 	"github.com/nexuswst/orders-service/internal/ports"
@@ -42,7 +43,8 @@ type Deps struct {
 	Channels      ports.ChannelGateway
 	Secrets       SecretBox
 	Log           *slog.Logger
-	DevMode       bool // permite simular eventos de Invas (pick_confirmed) en desarrollo
+	Now           func() time.Time // reloj; en las pruebas se fija
+	DevMode       bool             // permite simular eventos de Invas (pick_confirmed) en desarrollo
 }
 
 type Service struct {
@@ -83,6 +85,13 @@ func holdsCommitted(o domain.Order) bool {
 }
 
 // move persiste una transición y emite los avisos correspondientes.
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
 func (s *Service) move(ctx context.Context, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, opts ports.TransitionOpts) (domain.Order, error) {
 	out, err := s.Orders.Transition(ctx, o, from, ev, actor, reason, opts)
 	if err != nil {
@@ -536,7 +545,11 @@ func (s *Service) AssignWave(ctx context.Context, id tenant.Identity, scope []in
 	if !found {
 		return nil, fail(domain.ErrInvalid, "La ola %s no existe en Invas.", waveID)
 	}
-	ids, err := s.Orders.AssignWave(ctx, scope, orderIDs, waveID, id.Actor(), "Asignación manual a "+waveID)
+	orderIDs, ranks, err := s.manualQueue(ctx, scope, orderIDs)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := s.Orders.AssignWave(ctx, scope, orderIDs, waveID, id.Actor(), "Asignación manual a "+waveID, ranks)
 	if err == nil {
 		for _, oid := range ids {
 			if o, e := s.Orders.Get(ctx, nil, oid); e == nil {
@@ -545,6 +558,40 @@ func (s *Service) AssignWave(ctx context.Context, id tenant.Identity, scope []in
 		}
 	}
 	return ids, err
+}
+
+// manualQueue aplica el horario a la asignación del Jefe: fuera de corte y en días sin operación
+// se permite, porque es su decisión; después de la hora límite de un día de operación, no, salvo
+// las prioritarias si priority_overrides_deadline está activo. Comparte el orden de la cola.
+func (s *Service) manualQueue(ctx context.Context, scope, orderIDs []int64) ([]int64, map[int64]string, error) {
+	schedule, err := s.Rules.OperationSchedule(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	cutoffs, err := s.Rules.Cutoffs(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	orders, _, err := s.Orders.List(ctx, ports.ListFilter{CompanyIDs: scope, IDs: orderIDs, View: ports.ViewAll, Limit: len(orderIDs)})
+	if err != nil {
+		return nil, nil, err
+	}
+	now := s.now()
+	closed := schedule.IsOperationDay(now) && schedule.AfterDeadline(now)
+	byCourier := courierCutoffs(cutoffs)
+	ids := make([]int64, 0, len(orders))
+	ranks := make(map[int64]string, len(orders))
+	for _, o := range orders {
+		if closed && !(o.Priority && schedule.PriorityOverridesDeadline) {
+			continue
+		}
+		ids = append(ids, o.ID)
+		ranks[o.ID] = domain.QueueRank(now, byCourier[o.Courier], o.Priority)
+	}
+	if closed && len(ids) == 0 {
+		return nil, nil, fail(domain.ErrInvalid, "Ya pasó la hora límite (%s): no se asignan órdenes hasta el próximo día de operación.", schedule.AssignmentDeadline)
+	}
+	return ids, ranks, nil
 }
 
 // SimulatePicked - SOLO desarrollo: simula que Invas confirmó la preparación.

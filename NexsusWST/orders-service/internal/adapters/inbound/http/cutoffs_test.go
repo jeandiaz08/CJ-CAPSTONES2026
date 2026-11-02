@@ -31,8 +31,10 @@ func (cutoffFake) SaveCutoff(_ context.Context, c ports.Cutoff, _ string) (ports
 	}
 	return c, nil
 }
-func (cutoffFake) AssignmentDeadline(context.Context) (string, error) { return "12:00", nil }
-func (cutoffFake) DeleteCutoff(context.Context, int64, string) error  { return nil }
+func (cutoffFake) OperationSchedule(context.Context) (domain.OperationSchedule, error) {
+	return domain.OperationSchedule{AssignmentDeadline: "12:00", OperationStart: "06:30", OperationDays: []string{"mon"}}, nil
+}
+func (cutoffFake) DeleteCutoff(context.Context, int64, string) error { return nil }
 func TestCutoffHandlers(t *testing.T) {
 	for _, tc := range []struct {
 		method, path, body, role string
@@ -45,6 +47,7 @@ func TestCutoffHandlers(t *testing.T) {
 		{"POST", "/v1/cutoffs", `{"cutoffTime":"08:00","couriers":[{"code":"starken","arrivalTime":"09:30"}]}`, "admin", 422},
 		{"POST", "/v1/cutoffs", `{"cutoffTime":"13:00","couriers":[{"code":"starken","arrivalTime":"13:30"}]}`, "admin", 422},
 		{"POST", "/v1/cutoffs", `{"cutoffTime":"25:00","couriers":[]}`, "admin", 422},
+		{"POST", "/v1/cutoffs", `{"cutoffTime":"06:30","couriers":[{"code":"starken","arrivalTime":"09:30"}]}`, "admin", 422},
 		{"POST", "/v1/cutoffs", `{"cutoffTime":"09:00","couriers":[{"code":"starken","arrivalTime":"08:00"}]}`, "admin", 422},
 		{"DELETE", "/v1/cutoffs/1", "", "admin", 204}, {"DELETE", "/v1/cutoffs/1", "", "empaque", 403},
 	} {

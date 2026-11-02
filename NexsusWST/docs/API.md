@@ -91,7 +91,7 @@ Contiene estos campos:
 
 | Método | Ruta | Detalle |
 | --- | --- | --- |
-| GET | `/v1/orders` | Filtros: `status=a,b`, `view=` (vacío = bandeja: órdenes en curso y Entregadas de hasta 365 días desde `handed_over_at`; nunca Canceladas · `registro` = Canceladas y Entregadas de más de 365 días · `all`), `q` (n°, referencia, destinatario o código courier), `courier`, `channel`, `source=manual\|bulk\|webhook`, `situation=en_cola\|invas_agotado\|fuera_corte\|sin_regla` (valor desconocido: 422), `from`/`to` (AAAA-MM-DD), `priority=true`, `without_wave=true`, `incident_kind`, `ids=1,2`, `sort=recent\|oldest\|updated\|priority` (por defecto, lo más reciente primero; en `view=asignacion`, prioridad y luego lo más reciente), `limit` (≤200), `offset`. Respuesta `{data, total, limit, offset}` |
+| GET | `/v1/orders` | Filtros: `status=a,b`, `view=` (vacío = bandeja: órdenes en curso y Entregadas de hasta 365 días desde `handed_over_at`; nunca Canceladas · `registro` = Canceladas y Entregadas de más de 365 días · `all`), `q` (n°, referencia, destinatario o código courier), `courier`, `channel`, `source=manual\|bulk\|webhook`, `situation=en_cola\|invas_agotado\|fuera_corte\|sin_regla` (valor desconocido: 422), `from`/`to` (AAAA-MM-DD), `priority=true`, `without_wave=true`, `incident_kind`, `ids=1,2`, `sort=recent\|oldest\|updated\|priority` (por defecto, lo más reciente primero; en `view=asignacion`, el orden de la cola: corte, prioridad y antigüedad), `limit` (≤200), `offset`. Respuesta `{data, total, limit, offset}` |
 | GET | `/v1/orders/summary` | Conteo por estado de todas las órdenes del alcance; respeta `company_id` y no aplica los demás filtros |
 | GET | `/v1/orders/export` | Mismos filtros; `format=xlsx` (defecto) o `csv`. Con `ids=` exporta **los seleccionados**. Máx. 10.000 filas |
 | GET | `/v1/orders/warehouses` | Bodegas distintas que ya aparecen en órdenes del alcance. Solo Jefe/Admin. Sugerencias para las reglas de ola. |
@@ -121,13 +121,15 @@ Contiene estos campos:
 | --- | --- | --- |
 | POST | `/v1/orders/{id}/priority` | `{priority, reason}` «Enviar primero a la cola» |
 | GET | `/v1/waves` | Olas de Invas `{id, code, name, type}` |
-| POST | `/v1/waves/assign` | `{orderIds, waveId}` → 202 `{queued, skipped}` (asignar = encolar; pasa a En preparación cuando Invas confirma) |
+| POST | `/v1/waves/assign` | `{orderIds, waveId}` → 202 `{queued, skipped}` (asignar = encolar; pasa a En preparación cuando Invas confirma). Fuera de corte y en días sin operación se permite; después de la hora límite de un día de operación responde 422, salvo prioritarias con `priority_overrides_deadline` |
 | POST | `/v1/waves/run-rules` | Aplica las reglas ahora |
 | GET/POST | `/v1/wave-rules` | `{name, position?, active, courier?, companyId?, channel?, dispatchType?, warehouse?, waveCode}` — gana la primera que coincide; sin regla queda Validada sin ola |
 | PUT/DELETE | `/v1/wave-rules/{id}` | |
 | POST | `/v1/wave-rules/reorder` | `{ids:[…]}` en el orden deseado |
 | GET | `/v1/couriers/settings` | Máximo de bultos y cobertura por courier |
 | PUT | `/v1/couriers/{code}/settings` | `{maxPackages?, coversAll, communes[]}` — solo Jefe/Admin. La llegada vive en los cortes (`/v1/cutoffs`); enviar `arrivalTime` responde 400. |
+| GET | `/v1/ops-settings/operation` | `{assignmentDeadline, operationStart, operationDays[], priorityOverridesDeadline, operationDay, beforeStart, afterDeadline, nextRelease}`. Solo Jefe/Admin. Los últimos cuatro describen el momento actual, en hora de America/Santiago. |
+| PUT | `/v1/ops-settings/operation` | `{operationStart:"HH:MM", operationDays:["mon",…], priorityOverridesDeadline?}` — inicio anterior al primer corte y a la hora límite, y al menos un día (422). Solo Jefe/Admin. |
 
 ### Empaque (H-12, CU-04)
 
@@ -182,3 +184,13 @@ Contiene estos campos:
   - `{"type":"order.changed", orderId, companyId, status, version, priority}`
   - `{"type":"notification", audience, notification}`
   - Al reconectar, volver a consultar la API.
+
+### Cola de Invas y situación (regla de cortes)
+
+Hora de operación: America/Santiago. El motor automático evalúa cada orden Validada sin ola:
+
+1. Fuera de `operation_days` o antes de `operation_start`: no asigna.
+2. Después de `assignment_deadline`: no asigna, salvo prioritarias con `priority_overrides_deadline=true`.
+3. Pasado el último corte activo de su courier: queda retenida, salvo prioritarias. Un corte vale hasta su minuto exacto. Un courier sin cortes activos se asigna al final de la cola.
+
+Orden: próximo corte del courier (el más temprano primero), prioridad y antigüedad (`created_at`). Una prioritaria fuera de corte va al inicio. Lo retenido se libera el próximo día de operación a `operation_start`, en ese mismo orden. `assignmentSituation` es `fuera_corte` mientras la orden está retenida por cualquiera de estas reglas. Los trabajos ya encolados terminan aunque pase la hora límite.

@@ -19,12 +19,25 @@ type settingsFake struct {
 	ports.RuleRepository
 	deadline string
 	settings ports.CourierSettings
+	schedule domain.OperationSchedule
 }
 
 func (f *settingsFake) AssignmentDeadline(context.Context) (string, error) { return f.deadline, nil }
 
 func (f *settingsFake) SaveAssignmentDeadline(_ context.Context, v, _ string) error {
 	f.deadline = v
+	return nil
+}
+
+func (f *settingsFake) OperationSchedule(context.Context) (domain.OperationSchedule, error) {
+	if f.schedule.OperationStart == "" {
+		f.schedule = domain.OperationSchedule{AssignmentDeadline: f.deadline, OperationStart: "06:30", OperationDays: []string{"mon", "tue"}}
+	}
+	return f.schedule, nil
+}
+
+func (f *settingsFake) SaveOperationSchedule(_ context.Context, s domain.OperationSchedule, _ string) error {
+	f.schedule = s
 	return nil
 }
 
@@ -71,6 +84,14 @@ func TestSettingsHandlers(t *testing.T) {
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"13:05"}`, "jefe_operaciones", 204},
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"24:00"}`, "admin", 422},
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"10:59"}`, "admin", 422},
+		{"GET", "/v1/ops-settings/operation", "", "jefe_operaciones", 200},
+		{"GET", "/v1/ops-settings/operation", "", "cliente", 403},
+		{"PUT", "/v1/ops-settings/operation", `{"operationStart":"07:00","operationDays":["sun","mon"]}`, "jefe_operaciones", 204},
+		{"PUT", "/v1/ops-settings/operation", `{"operationStart":"11:00","operationDays":["mon"]}`, "admin", 422},
+		{"PUT", "/v1/ops-settings/operation", `{"operationStart":"07:00","operationDays":[]}`, "admin", 422},
+		{"PUT", "/v1/ops-settings/operation", `{"operationStart":"07:00","operationDays":["lunes"]}`, "admin", 422},
+		{"PUT", "/v1/ops-settings/operation", `{"operationStart":"7","operationDays":["mon"]}`, "admin", 422},
+		{"PUT", "/v1/ops-settings/operation", `{"operationStart":"07:00","operationDays":["mon"]}`, "cliente", 403},
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"9:00"}`, "admin", 422},
 		{"GET", "/v1/ops-settings/assignment-deadline", "", "cliente", 403},
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"12:00"}`, "empaque", 403},
@@ -111,5 +132,8 @@ func TestSettingsHandlers(t *testing.T) {
 	}
 	if f.deadline != "13:05" {
 		t.Fatal(f.deadline)
+	}
+	if f.schedule.OperationStart != "07:00" || strings.Join(f.schedule.OperationDays, ",") != "mon,sun" {
+		t.Fatalf("horario guardado: %+v", f.schedule)
 	}
 }
