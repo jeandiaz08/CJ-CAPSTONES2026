@@ -70,6 +70,9 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     }, [debouncedQuery]);
     const applyFilters = (values: FilterValues) => { setFiltersOpen(false); updateUrl(next => { writeFilters(next, values); next.delete("page"); }); };
     const clearAll = () => { lastQuery.current = ""; setQuery(""); router.push(pathname); };
+    // Filtro rápido: reemplaza buscador y filtros. Un segundo clic vuelve a la bandeja completa.
+    const kpiActive = (status: string) => filters.statuses.length === 1 && filters.statuses[0] === status;
+    const toggleKpi = (status: string) => { lastQuery.current = ""; setQuery(""); router.push(kpiActive(status) ? pathname : `${pathname}?status=${status}`); };
     const canAssign = session?.user.role === "admin" || session?.user.role === "jefe_operaciones";
     const toggle = (id: number) => setChecks(previous => { const next = new Set(previous); if (next.has(id))
         next.delete(id);
@@ -93,7 +96,7 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
         </button>
         </>}/>
     <Tabs items={[{ href: "/ordenes/todas/listado", label: "Listado", active: !assignment }, ...(canAssign ? [{ href: "/ordenes/todas/asignacion", label: "Asignación de órdenes", active: assignment }] : [])]}/>
-    {assignment?<CutoffCards revision={revision}/>:<>     <div className="orders-kpis">{([{ status: "pending", label: "Pendiente", tone: "neutral", icon: PackageOpen }, { status: "picking", label: "En preparación", tone: "processing", icon: Package }, { status: "packing", label: "En empaque", tone: "warn", icon: PackageOpen }, { status: "ready_pickup", label: "Lista para retiro", tone: "ok", icon: Archive }, { status: "incident", label: "Incidencias", tone: "danger", icon: AlertCircle }] as const).map(k => <KpiCard key={k.status} label={k.label} count={summary.loading ? undefined : summary.data?.data[k.status] ?? 0} tone={k.tone} icon={<k.icon size={30}/>}/>)}</div>{summary.error && <p role="alert">No se pudieron cargar los indicadores.</p>}</>}<div className="orders-toolbar">
+    {assignment?<CutoffCards revision={revision}/>:<>     <div className="orders-kpis">{([{ status: "pending", label: "Pendiente", tone: "neutral", icon: PackageOpen }, { status: "picking", label: "En preparación", tone: "processing", icon: Package }, { status: "packing", label: "En empaque", tone: "warn", icon: PackageOpen }, { status: "ready_pickup", label: "Lista para retiro", tone: "ok", icon: Archive }, { status: "incident", label: "Incidencias", tone: "danger", icon: AlertCircle }] as const).map(k => <KpiCard key={k.status} label={k.label} count={summary.loading ? undefined : summary.data?.data[k.status] ?? 0} tone={k.tone} icon={<k.icon size={30}/>} active={kpiActive(k.status)} onClick={() => toggleKpi(k.status)}/>)}</div>{summary.error && <p role="alert">No se pudieron cargar los indicadores.</p>}</>}<div className="orders-toolbar">
     <label className="orders-search">
     <span className="sr-only">Buscar n° de orden</span>
     <input placeholder="Buscar n° de orden" value={query} onChange={e => setQuery(e.target.value)}/>

@@ -176,8 +176,9 @@ export const confirmPacking = (id: number, items: OrderItem[], version: number) 
 export const cancelOrder = (id: number, reason: string) => post<Order>(`/v1/orders/${id}/cancel`, { reason });
 export const recoverVoided = (id: number, note: string) => post<Order>(`/v1/orders/${id}/recover`, { note });
 export const reportIncident = (id: number, kind: string, reason: string) => post<Order>(`/v1/orders/${id}/incident`, { kind, reason });
-export const resolveIncident = (id: number, action: "resume" | "retry" | "cancel", note: string) =>
-  post<Order>(`/v1/orders/${id}/resolve`, { action, note });
+export type ResolveCorrections = { addressLine?: string; commune?: string; regionCode?: string; courier?: string };
+export const resolveIncident = (id: number, action: "resume" | "retry" | "cancel", note: string, corrections?: ResolveCorrections) =>
+  post<Order>(`/v1/orders/${id}/resolve`, { action, note, ...(corrections ? { corrections } : {}) });
 
 /**
  * Puente para los botones actuales (OrderActions). Las pantallas definitivas

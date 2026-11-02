@@ -203,6 +203,7 @@ export function OrderFormModal({ order, companies, couriers, defaultCompanyId, o
       else saved = await createOrder({ companyId, externalRef: form.externalRef.trim(), courier: form.courier, ...destination(), dispatchType: form.dispatchType, customerNotes: form.customerNotes.trim(), items: items() });
       const failedDocuments = await uploadAll(saved);
       if (failedDocuments.length) showToast(`${order ? "Orden guardada" : "Orden creada"}, pero no se pudo subir: ${failedDocuments.join(", ")}.`, "warning");
+      else if (order && edits.courier && order.status === "incident" && order.prevStatus === "ready_pickup") showToast("Courier cambiado. Reimprime la etiqueta y vuelve a agregarla al retiro");
       else if (order) showToast(edits.items || edits.destination || edits.courier ? `Orden #${order.externalRef} actualizada. Se volverá a validar.` : `Orden #${order.externalRef} actualizada.`);
       else showToast("Orden creada (Pendiente).");
       onSaved(saved);
