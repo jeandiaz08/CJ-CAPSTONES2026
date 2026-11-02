@@ -1,5 +1,5 @@
 "use client";
-import { ArrowBigRight, Star } from "lucide-react";
+import { ArrowBigRight, Star, StarOff } from "lucide-react";
 import {originLabel,channelLabel,dispatchLabel,warehouseLabel} from "../format";
 import {useState} from "react";
 import { getOrder,downloadOrderDocument,type Order } from "@/services/orders";
@@ -9,6 +9,7 @@ import { useOrderResource } from "../hooks/useOrderResources";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CancelOrderDialog, PriorityDialog } from "./OrderActionDialogs";
 import { OrderFormModal } from "./OrderFormModal";
+import { PriorityBadge } from "./PriorityMark";
 import { cancelBlockReason, canManageOrders } from "../rules";
 import type { CatalogItem, Company } from "@/services/core";
 export function todoAction() { }
@@ -47,7 +48,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
     const documentLinks=documents.map(d=><a key={d.id} href={`/api/orders/v1/orders/${order.id}/documents/${d.id}/download`} className="document-link" onClick={event=>{event.preventDefault();setDownloadError(null);downloadOrderDocument(order.id,d).catch(e=>setDownloadError(e.message))}}>{d.filename}</a>);
     return <div className="order-detail">
     {!inModal&&<h2>Detalle de orden #{order.externalRef}</h2>}
-    <div className="order-detail-content"><StatusBadge status={order.status} label={order.statusLabel}/>
+    <div className="order-detail-content"><div className="detail-status-row"><StatusBadge status={order.status} label={order.statusLabel}/>{order.priority&&<PriorityBadge/>}</div>
     <section>
     <h3>Información adicional</h3>
     <div className="detail-scroll">
@@ -99,7 +100,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
         </table>
         </div> : <><p>Sin bultos registrados</p>{documentLinks}</>}{downloadError&&<p role="alert">{downloadError}</p>}</section>
     </div><div className="detail-actions">
-    {assignment?<button className="btn order-primary" onClick={()=>setDialog("priority")}><Star size={18}/>{order.priority?"Quitar prioridad":"Enviar primero a la cola"}</button>:<button className="btn order-primary" aria-disabled={!['incident', 'voided'].includes(order.status)} disabled={!['incident', 'voided'].includes(order.status)} onClick={todoAction}>Resolver incidencia</button>}
+    {assignment?<button className={order.priority?"btn priority-remove":"btn order-primary"} onClick={()=>setDialog("priority")}>{order.priority?<><StarOff size={18}/>Quitar prioridad</>:<><Star size={18}/>Enviar primero a la cola</>}</button>:<button className="btn order-primary" aria-disabled={!['incident', 'voided'].includes(order.status)} disabled={!['incident', 'voided'].includes(order.status)} onClick={todoAction}>Resolver incidencia</button>}
     <div>
     <button className="btn ghost" aria-disabled={!canEdit} disabled={!canEdit} title={order.editable ? undefined : "Ya no se puede editar: fue enviada a preparación."} onClick={()=>setDialog("edit")}>Editar</button>
     <span title={cancelReason} tabIndex={cancelReason ? 0 : undefined}>

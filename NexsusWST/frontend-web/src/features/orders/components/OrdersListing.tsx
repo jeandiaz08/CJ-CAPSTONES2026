@@ -5,6 +5,7 @@ import {AssignmentSituation} from "./AssignmentSituation";
 import {BulkActions} from "./BulkActions";
 import {OrderFiltersDrawer} from "./OrderFiltersDrawer";
 import {OrderFormModal} from "./OrderFormModal";
+import {PrioritySlot} from "./PriorityMark";
 import {ExcelActions} from "./ExcelActions";
 import {canManageOrders} from "../rules";
 import {originLabel} from "../format";
@@ -122,8 +123,8 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
             <input type="checkbox" aria-label={`Seleccionar orden ${o.id}`} checked={checks.has(o.id)} onChange={() => toggle(o.id)}/>
             </td>
             <td>
-            <button className="order-number" aria-label={`Ver detalle de orden ${o.id}`} onClick={() => setSelected(o.id)}>{o.externalRef}
-            </button>
+            <span className="order-number-cell"><PrioritySlot priority={o.priority}/><button className="order-number" aria-label={`Ver detalle de orden ${o.id}`} onClick={() => setSelected(o.id)}>{o.externalRef}
+            </button></span>
             </td>
             <td><span className="client-name" title={companyName(o.companyId)??`Empresa ${o.companyId}`}>{companyName(o.companyId)??`Empresa ${o.companyId}`}</span></td>
             <td>{assignment?<AssignmentSituation value={o.assignmentSituation}/>:originLabel(o)}</td>
