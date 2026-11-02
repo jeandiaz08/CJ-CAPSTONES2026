@@ -1,5 +1,38 @@
 "use client";
-import {useEffect,useRef,useState,useId} from "react";
+import {useState} from "react";
 import {Clock, Flag, ListPlus, MonitorCog, Truck} from "lucide-react";
-import {todoAction} from "./OrderDetail";
-export function AssignmentActions(){const [open,setOpen]=useState(false);const root=useRef<HTMLDivElement>(null);const id=useId();useEffect(()=>{if(!open)return;root.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();const outside=(e:PointerEvent)=>{if(!root.current?.contains(e.target as Node))setOpen(false)};const key=(e:KeyboardEvent)=>{if(e.key==="Escape"){setOpen(false);root.current?.querySelector('button')?.focus()}if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();const items=Array.from(root.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')??[]);const index=items.indexOf(document.activeElement as HTMLButtonElement);items[(index+(e.key==="ArrowDown"?1:items.length-1))%items.length]?.focus()}};document.addEventListener("pointerdown",outside);document.addEventListener("keydown",key);return()=>{document.removeEventListener("pointerdown",outside);document.removeEventListener("keydown",key)}},[open]);return <div className="assignment-heading"><h2>Órdenes por asignar</h2><div className="assignment-config" ref={root} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))setOpen(false)}}><button className="btn assignment-config-trigger" aria-haspopup="menu" aria-controls={id} aria-expanded={open} onClick={()=>setOpen(!open)}><MonitorCog size={20}/>Configurar asignaciones</button>{open&&<div className="assignment-menu" role="menu" id={id}>{([["Configurar asignación",Flag],["Configurar cortes",Clock],["Configurar courier",Truck]] as const).map(([label,Icon])=><button key={label} role="menuitem" onClick={todoAction}><Icon size={18} aria-hidden="true"/>{label}</button>)}</div>}</div><button className="btn assignment-wave" onClick={todoAction}>Asignar a ola de Invas <ListPlus size={20}/></button></div>}
+import {DropdownMenu} from "@/components/DropdownMenu";
+import type {CatalogItem, Company} from "@/services/core";
+import type {Order, OrderFilters} from "@/services/orders";
+import {AssignWaveModal} from "./AssignWaveModal";
+import {CourierSettingsModal} from "./CourierSettingsModal";
+import {CutoffsModal} from "./CutoffsModal";
+import {WaveRulesModal} from "./WaveRulesModal";
+
+type Dialog = "rules" | "cutoffs" | "couriers" | "assign";
+
+export function AssignmentActions({selected, filters, companyId, companies, couriers, onChanged, onAssigned}: {
+    selected: Order[];
+    filters: OrderFilters;
+    companyId: number | null;
+    companies: Company[];
+    couriers: CatalogItem[];
+    onChanged: () => void;
+    onAssigned: () => void;
+}) {
+    const [dialog, setDialog] = useState<Dialog | null>(null);
+    const close = () => setDialog(null);
+    return <div className="assignment-heading">
+    <h2>Órdenes por asignar</h2>
+    <DropdownMenu className="assignment-config" menuClassName="assignment-menu" triggerClassName="btn assignment-config-trigger" trigger={<><MonitorCog size={20}/>Configurar asignaciones</>} items={[
+        {label: "Configurar asignación", icon: <Flag size={18} aria-hidden="true"/>, onSelect: () => setDialog("rules")},
+        {label: "Configurar cortes", icon: <Clock size={18} aria-hidden="true"/>, onSelect: () => setDialog("cutoffs")},
+        {label: "Configurar courier", icon: <Truck size={18} aria-hidden="true"/>, onSelect: () => setDialog("couriers")},
+    ]}/>
+    <button className="btn assignment-wave" onClick={() => setDialog("assign")}>Asignar a ola de Invas <ListPlus size={20}/></button>
+    {dialog === "rules" && <WaveRulesModal companies={companies} couriers={couriers} onClose={close} onChanged={onChanged}/>}
+    {dialog === "cutoffs" && <CutoffsModal couriers={couriers} onClose={close} onChanged={onChanged}/>}
+    {dialog === "couriers" && <CourierSettingsModal couriers={couriers} onClose={close} onChanged={onChanged} onOpenCutoffs={() => setDialog("cutoffs")}/>}
+    {dialog === "assign" && <AssignWaveModal selected={selected} filters={filters} companyId={companyId} onClose={close} onDone={onAssigned}/>}
+    </div>;
+}

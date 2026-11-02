@@ -110,7 +110,7 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     <CirclePlus size={18}/>Nueva orden</button>}
     {session&&<BulkActions selected={selectedOrders} role={session.user.role} onDone={() => { setChecks(new Set()); reload(); }}/>}
 </>}    </div>
-    {assignment&&<AssignmentActions/>}
+    {assignment&&<AssignmentActions selected={selectedOrders} filters={{ ...orderFilters, ...(urlQuery ? { q: urlQuery } : {}) }} companyId={scopeCompany} companies={companies} couriers={couriers} onChanged={reload} onAssigned={() => { setChecks(new Set()); reload(); }}/>}
     <div className="orders-workspace">
     <section className="orders-list" aria-label="Listado de órdenes">{refs.error && <p role="alert">No se pudieron cargar los catálogos.</p>}{error && orders.length > 0 && <p role="alert">No se pudo actualizar: {error}</p>}{error && orders.length === 0 ? <div role="alert">{error}<button className="btn ghost" onClick={reload}>Reintentar</button>
         </div> : loading && orders.length === 0 ? <div className="orders-skeleton" aria-label="Cargando órdenes">{Array.from({ length: 6 }, (_, i) => <div key={i}/>)}</div> : orders.length === 0 ? <p className="pad">{activeFilters || urlQuery ? "Ninguna orden coincide con los filtros" : "No hay órdenes"}</p> : <div className="orders-table-scroll" tabIndex={0} aria-label="Tabla de órdenes con desplazamiento horizontal">

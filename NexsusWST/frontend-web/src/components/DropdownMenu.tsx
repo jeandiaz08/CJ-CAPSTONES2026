@@ -5,11 +5,12 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 export type DropdownItem = { label: string; icon?: ReactNode; danger?: boolean; disabled?: boolean; onSelect: () => void };
 
 // Menú flotante accesible: flechas para moverse, Esc o clic fuera para cerrar.
-export function DropdownMenu({ trigger, triggerClassName = "btn ghost", disabled = false, className = "", items }: {
+export function DropdownMenu({ trigger, triggerClassName = "btn ghost", disabled = false, className = "", menuClassName = "", items }: {
   trigger: ReactNode;
   triggerClassName?: string;
   disabled?: boolean;
   className?: string;
+  menuClassName?: string;
   items: DropdownItem[];
 }) {
   const [open, setOpen] = useState(false);
@@ -43,7 +44,7 @@ export function DropdownMenu({ trigger, triggerClassName = "btn ghost", disabled
     <div className={`dropdown ${className}`} ref={root}>
       <button type="button" className={triggerClassName} disabled={disabled} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(!open)}>{trigger}</button>
       {open && (
-        <div className="dropdown-menu" role="menu" id={id}>
+        <div className={`dropdown-menu ${menuClassName}`} role="menu" id={id}>
           {items.map((item) => (
             <button key={item.label} type="button" role="menuitem" disabled={item.disabled} className={item.danger ? "is-danger" : ""} onClick={() => { setOpen(false); item.onSelect(); }}>
               {item.icon}{item.label}

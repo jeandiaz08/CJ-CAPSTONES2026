@@ -69,7 +69,10 @@ export type OrderEvent = {
   occurredAt: string;
 };
 
-export type Wave = { id: string; name: string; type: string };
+export type Wave = { id: string; code: string; name: string; type: string };
+
+export type WaveRule = { id: number; name: string; position: number; active: boolean; courier: string; companyId: number | null; channel: string; dispatchType: string; warehouse: string; waveCode: string };
+export type CourierSettings = { courier: string; maxPackages: number | null; coversAll: boolean; communes: string[] };
 
 export type OrderFilters = {
   view?: "asignacion" | "registro" | "all";
@@ -228,7 +231,15 @@ export const setPriority = (id: number, priority: boolean, reason = "") =>
 export const listWaves = () => api<{ data: Wave[] }>("orders", "/v1/waves");
 
 export const assignWave = (orderIds: number[], waveId: string) =>
-  api<{ queued: number[] }>("orders", "/v1/waves/assign", { method: "POST", body: JSON.stringify({ orderIds, waveId }) });
+  api<{ queued: number[]; skipped: number }>("orders", "/v1/waves/assign", { method: "POST", body: JSON.stringify({ orderIds, waveId }) });
+
+export const listWaveRules = () => api<{ data: WaveRule[] }>("orders", "/v1/wave-rules");
+export const saveWaveRule = (rule: WaveRule) => api<WaveRule>("orders", rule.id ? `/v1/wave-rules/${rule.id}` : "/v1/wave-rules", { method: rule.id ? "PUT" : "POST", body: JSON.stringify(rule) });
+export const deleteWaveRule = (id: number) => api<void>("orders", `/v1/wave-rules/${id}`, { method: "DELETE" });
+export const reorderWaveRules = (ids: number[]) => api<void>("orders", "/v1/wave-rules/reorder", { method: "POST", body: JSON.stringify({ ids }) });
+export const getWarehouses = () => api<{ data: string[] }>("orders", "/v1/orders/warehouses");
+export const listCourierSettings = () => api<{ data: CourierSettings[] }>("orders", "/v1/couriers/settings");
+export const saveCourierSettings = (courier: string, body: Omit<CourierSettings, "courier">) => api<void>("orders", `/v1/couriers/${courier}/settings`, { method: "PUT", body: JSON.stringify(body) });
 
 export const getOrderMeta = () => api<{statuses:{code:OrderStatus;label:string}[]}>("orders","/v1/meta");
 
@@ -238,4 +249,7 @@ export async function downloadOrderDocument(orderId:number,document:OrderDocumen
 
 export type Cutoff = {id:number;number:number;name:string|null;cutoffTime:string;couriers:{code:string;name:string;arrivalTime:string}[]};
 export const getCutoffs=()=>api<{data:Cutoff[]}>("orders","/v1/cutoffs");
+export const saveCutoff = (id: number | null, body: { name: string | null; cutoffTime: string; couriers: { code: string; arrivalTime: string }[] }) => api<Cutoff>("orders", id ? `/v1/cutoffs/${id}` : "/v1/cutoffs", { method: id ? "PUT" : "POST", body: JSON.stringify(body) });
+export const deleteCutoff = (id: number) => api<void>("orders", `/v1/cutoffs/${id}`, { method: "DELETE" });
+export const saveAssignmentDeadline = (assignmentDeadline: string) => api<void>("orders", "/v1/ops-settings/assignment-deadline", { method: "PUT", body: JSON.stringify({ assignmentDeadline }) });
 export const getAssignmentDeadline=()=>api<{data:{assignmentDeadline:string}}>("orders","/v1/ops-settings/assignment-deadline");
