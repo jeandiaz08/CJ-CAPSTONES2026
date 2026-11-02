@@ -43,7 +43,8 @@ func (catalogFake) CourierActive(context.Context, string) (bool, error) { return
 
 type ordersFake struct {
 	ports.OrderRepository
-	filter ports.ListFilter
+	filter     ports.ListFilter
+	summaryIDs []int64
 }
 
 func (f *ordersFake) List(_ context.Context, q ports.ListFilter) ([]domain.Order, int, error) {

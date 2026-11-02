@@ -23,8 +23,8 @@ type Job struct {
 
 // Vistas del listado.
 const (
-	ViewTray       = ""         // bandeja de trabajo: oculta Canceladas
-	ViewRegistry   = "registro" // Registro histórico: Entregadas al courier y Canceladas
+	ViewTray       = ""         // bandeja: en curso y Entregadas de hasta 365 días; nunca Canceladas
+	ViewRegistry   = "registro" // Registro histórico: Canceladas y Entregadas de más de 365 días
 	ViewAll        = "all"
 	ViewAssignment = "asignacion"
 )
@@ -37,12 +37,14 @@ type ListFilter struct {
 	Search       string // número, referencia o destinatario
 	Courier      string
 	Channel      string
+	Source       string // manual, bulk o webhook
+	Situation    string // en_cola, invas_agotado, fuera_corte o sin_regla
 	From, To     *time.Time
 	OnlyPriority bool
 	WithoutWave  bool
 	IncidentKind string
 	IDs          []int64 // exportar seleccionados
-	Sort         string  // recent (defecto), oldest, priority
+	Sort         string  // recent (defecto; en Asignación, prioridad primero), oldest, updated, priority
 	Limit        int
 	Offset       int
 }
@@ -135,7 +137,6 @@ type WaveRule struct {
 
 type CourierSettings struct {
 	Courier     string   `json:"courier"`
-	ArrivalTime string   `json:"arrivalTime"` // HH:MM, llegada del courier
 	MaxPackages *int     `json:"maxPackages"`
 	CoversAll   bool     `json:"coversAll"`
 	Communes    []string `json:"communes"` // cobertura si CoversAll = false

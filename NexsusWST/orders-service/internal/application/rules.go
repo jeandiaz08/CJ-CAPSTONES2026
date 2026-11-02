@@ -182,7 +182,7 @@ func (s *Service) ListCourierSettings(ctx context.Context, id tenant.Identity) (
 	return s.Rules.ListCourierSettings(ctx)
 }
 
-// SaveCourierSettings - horas de llegada y corte, máximo de bultos y cobertura.
+// SaveCourierSettings - máximo de bultos y cobertura. La llegada vive en los cortes.
 func (s *Service) SaveCourierSettings(ctx context.Context, id tenant.Identity, cs ports.CourierSettings) error {
 	if !canManageRules(id) {
 		return domain.ErrForbidden
@@ -192,9 +192,6 @@ func (s *Service) SaveCourierSettings(ctx context.Context, id tenant.Identity, c
 		return err
 	} else if !ok {
 		return fail(domain.ErrInvalid, "El courier %s no existe o está inactivo.", cs.Courier)
-	}
-	if cs.ArrivalTime != "" && !reHHMM.MatchString(cs.ArrivalTime) {
-		return fail(domain.ErrInvalid, "La hora de llegada debe tener formato HH:MM.")
 	}
 	if cs.MaxPackages != nil && *cs.MaxPackages <= 0 {
 		return fail(domain.ErrInvalid, "El máximo de bultos debe ser mayor que 0.")

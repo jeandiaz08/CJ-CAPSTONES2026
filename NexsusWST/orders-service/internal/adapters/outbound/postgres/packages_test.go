@@ -31,8 +31,8 @@ func TestPackageCountAndManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, o := range tray {
-		if o.Status == "handed_over" || o.Status == "cancelled" {
-			t.Fatal("estado final en bandeja")
+		if o.Status == "cancelled" {
+			t.Fatal("Cancelada en bandeja")
 		}
 	}
 	sawEmpty, sawManifest := false, false

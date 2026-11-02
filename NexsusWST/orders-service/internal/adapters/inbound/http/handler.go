@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -281,7 +282,14 @@ func filterFrom(r *http.Request, ids []int64) (ports.ListFilter, error) {
 	q := r.URL.Query()
 	f := ports.ListFilter{CompanyIDs: ids, View: q.Get("view"), Search: q.Get("q"), Courier: q.Get("courier"),
 		Channel: q.Get("channel"), OnlyPriority: q.Get("priority") == "true", WithoutWave: q.Get("without_wave") == "true",
-		IncidentKind: q.Get("incident_kind"), Sort: q.Get("sort"), IDs: splitInts(q.Get("ids"))}
+		IncidentKind: q.Get("incident_kind"), Sort: q.Get("sort"), IDs: splitInts(q.Get("ids")),
+		Source: q.Get("source"), Situation: q.Get("situation")}
+	if f.Source != "" && !slices.Contains([]string{"manual", "bulk", "webhook"}, f.Source) {
+		return f, fmt.Errorf("%w: origen desconocido", domain.ErrInvalid)
+	}
+	if f.Situation != "" && !slices.Contains([]string{"en_cola", "invas_agotado", "fuera_corte", "sin_regla"}, f.Situation) {
+		return f, fmt.Errorf("%w: situación desconocida", domain.ErrInvalid)
+	}
 	if s := q.Get("status"); s != "" {
 		f.Statuses = strings.Split(s, ",")
 	}

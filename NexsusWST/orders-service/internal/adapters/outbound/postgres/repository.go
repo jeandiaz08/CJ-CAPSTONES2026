@@ -226,12 +226,10 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	case ports.ViewAssignment:
 		where = append(where, assignmentUniverse)
 	case ports.ViewRegistry:
-		where = append(where, "o.status IN ('handed_over','cancelled')")
+		where = append(where, `(o.status='cancelled' OR (o.status='handed_over' AND o.handed_over_at < now() - interval '365 days'))`)
 	case ports.ViewAll:
 	default:
-		if len(f.Statuses) == 0 || !contains(f.Statuses, "cancelled") {
-			where = append(where, "o.status NOT IN ('cancelled','handed_over')") // Cancelada: oculta por defecto
-		}
+		where = append(where, `o.status<>'cancelled' AND (o.status<>'handed_over' OR o.handed_over_at IS NULL OR o.handed_over_at >= now() - interval '365 days')`)
 	}
 	if q := strings.TrimSpace(f.Search); q != "" {
 		add(`(o.id::text = ? OR o.external_ref ILIKE '%' || ? || '%' OR o.recipient_name ILIKE '%' || ? || '%' OR o.courier_code = ?)`, q)
@@ -241,6 +239,12 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	}
 	if f.Channel != "" {
 		add("o.channel = ?", strings.ToLower(f.Channel))
+	}
+	if f.Source != "" {
+		add("o.source = ?", f.Source)
+	}
+	if f.Situation != "" {
+		add("("+assignmentSituation+") = ?", f.Situation)
 	}
 	if f.From != nil {
 		add("o.created_at >= ?", *f.From)
@@ -262,11 +266,20 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	}
 	w := strings.Join(where, " AND ")
 	var total int
-	if err := r.db.QueryRow(ctx, `SELECT count(*) FROM orders o WHERE `+w, args...).Scan(&total); err != nil {
+	countFrom := "orders o"
+	if f.Situation != "" {
+		countFrom = fromOrders // la situación depende de los joins de la consulta completa
+	}
+	if err := r.db.QueryRow(ctx, `SELECT count(*) FROM `+countFrom+` WHERE `+w, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	order := "o.priority DESC, o.id DESC"
+	order := "o.id DESC"
+	if f.View == ports.ViewAssignment {
+		order = "o.priority DESC, o.id DESC"
+	}
 	switch f.Sort {
+	case "priority":
+		order = "o.priority DESC, o.id DESC"
 	case "oldest":
 		order = "o.id ASC"
 	case "recent":
@@ -294,15 +307,6 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 		return nil, 0, err
 	}
 	return out, total, loadItemsBulk(ctx, r.db, out)
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *Repository) Summary(ctx context.Context, ids []int64) (map[domain.Status]int, error) {

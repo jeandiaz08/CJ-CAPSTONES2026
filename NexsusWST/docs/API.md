@@ -91,8 +91,8 @@ Contiene estos campos:
 
 | Método | Ruta | Detalle |
 | --- | --- | --- |
-| GET | `/v1/orders` | Filtros: `status=a,b`, `view=` (vacío = bandeja, oculta Canceladas · `registro` = Entregadas + Canceladas · `all`), `q` (n°, referencia, destinatario o código courier), `courier`, `channel`, `from`/`to` (AAAA-MM-DD), `priority=true`, `without_wave=true`, `incident_kind`, `ids=1,2`, `sort=recent\|oldest\|updated`, `limit` (≤200), `offset`. Respuesta `{data, total, limit, offset}` |
-| GET | `/v1/orders/summary` | Conteo por estado |
+| GET | `/v1/orders` | Filtros: `status=a,b`, `view=` (vacío = bandeja: órdenes en curso y Entregadas de hasta 365 días desde `handed_over_at`; nunca Canceladas · `registro` = Canceladas y Entregadas de más de 365 días · `all`), `q` (n°, referencia, destinatario o código courier), `courier`, `channel`, `source=manual\|bulk\|webhook`, `situation=en_cola\|invas_agotado\|fuera_corte\|sin_regla` (valor desconocido: 422), `from`/`to` (AAAA-MM-DD), `priority=true`, `without_wave=true`, `incident_kind`, `ids=1,2`, `sort=recent\|oldest\|updated\|priority` (por defecto, lo más reciente primero; en `view=asignacion`, prioridad y luego lo más reciente), `limit` (≤200), `offset`. Respuesta `{data, total, limit, offset}` |
+| GET | `/v1/orders/summary` | Conteo por estado de todas las órdenes del alcance; respeta `company_id` y no aplica los demás filtros |
 | GET | `/v1/orders/export` | Mismos filtros; `format=xlsx` (defecto) o `csv`. Con `ids=` exporta **los seleccionados**. Máx. 10.000 filas |
 | POST | `/v1/orders` | `{companyId, externalRef?, courier, recipientName, recipientPhone?, recipientEmail?, addressLine, commune, regionCode?, dispatchType?, customerNotes?, items[{sku, quantity}]}` → 201 Pendiente. Sin `externalRef` se genera `NX-…`. Roles: admin, jefe, cliente. |
 | POST | `/v1/orders/import` | multipart: `file` (.xlsx o .csv, máx. 5 MB) + `companyId`. **201** todo creado · **207** parte con errores: `{ordersCreated, orderIds, totalRows, failedRows, errors[{row, ref, message}]}`. Varias filas con la misma referencia = una orden con varios productos. |
@@ -125,8 +125,8 @@ Contiene estos campos:
 | GET/POST | `/v1/wave-rules` | `{name, position?, active, courier?, companyId?, channel?, dispatchType?, warehouse?, waveCode}` — gana la primera que coincide; sin regla queda Validada sin ola |
 | PUT/DELETE | `/v1/wave-rules/{id}` | |
 | POST | `/v1/wave-rules/reorder` | `{ids:[…]}` en el orden deseado |
-| GET | `/v1/couriers/settings` | Hora de llegada, máximo de bultos y cobertura por courier |
-| PUT | `/v1/couriers/{code}/settings` | `{arrivalTime:"HH:MM", maxPackages?, coversAll, communes[]}` |
+| GET | `/v1/couriers/settings` | Máximo de bultos y cobertura por courier |
+| PUT | `/v1/couriers/{code}/settings` | `{maxPackages?, coversAll, communes[]}` — solo Jefe/Admin. La llegada vive en los cortes (`/v1/cutoffs`); enviar `arrivalTime` responde 400. |
 
 ### Empaque (H-12, CU-04)
 
