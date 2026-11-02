@@ -26,8 +26,10 @@ var _ ports.FulfillmentRepository = (*FulfillmentRepository)(nil)
 // ---------------- Bultos ----------------
 
 func (r *FulfillmentRepository) Packages(ctx context.Context, orderID int64) ([]domain.Package, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, code, weight_kg::float8, length_cm::float8, width_cm::float8, height_cm::float8
-		FROM order_packages WHERE order_id=$1 ORDER BY id`, orderID)
+	rows, err := r.db.Query(ctx, `SELECT p.id, p.code, p.weight_kg::float8, p.length_cm::float8, p.width_cm::float8, p.height_cm::float8,
+ COALESCE((SELECT ms.manifest_id FROM manifest_scans ms WHERE ms.package_id=p.id ORDER BY ms.scanned_at DESC, ms.manifest_id DESC LIMIT 1),
+ (SELECT ml.manifest_id FROM manifest_lines ml WHERE ml.order_id=p.order_id AND ml.status IN ('included','pending_packages','delivered') ORDER BY ml.manifest_id DESC LIMIT 1))
+ FROM order_packages p WHERE p.order_id=$1 ORDER BY p.id`, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +37,7 @@ func (r *FulfillmentRepository) Packages(ctx context.Context, orderID int64) ([]
 	out := []domain.Package{}
 	for rows.Next() {
 		var p domain.Package
-		if err := rows.Scan(&p.ID, &p.Code, &p.WeightKg, &p.LengthCm, &p.WidthCm, &p.HeightCm); err != nil {
+		if err := rows.Scan(&p.ID, &p.Code, &p.WeightKg, &p.LengthCm, &p.WidthCm, &p.HeightCm, &p.ManifestID); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

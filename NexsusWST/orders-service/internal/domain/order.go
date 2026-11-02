@@ -66,10 +66,12 @@ type Order struct {
 	Courier     string // código del catálogo couriers
 	CourierCode string // código o seguimiento que entrega el courier
 	Destination
-	DispatchType  string
-	Warehouse     string
-	CustomerNotes string
-	Source        string // manual, bulk, webhook
+	DispatchType        string
+	Warehouse           string
+	PackagesCount       int
+	AssignmentSituation *string
+	CustomerNotes       string
+	Source              string // manual, bulk, webhook
 
 	Status       Status
 	PrevStatus   Status // estado donde ocurrió la incidencia (para volver)

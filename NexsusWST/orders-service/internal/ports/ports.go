@@ -23,9 +23,10 @@ type Job struct {
 
 // Vistas del listado.
 const (
-	ViewTray     = ""         // bandeja de trabajo: oculta Canceladas
-	ViewRegistry = "registro" // Registro histórico: Entregadas al courier y Canceladas
-	ViewAll      = "all"
+	ViewTray       = ""         // bandeja de trabajo: oculta Canceladas
+	ViewRegistry   = "registro" // Registro histórico: Entregadas al courier y Canceladas
+	ViewAll        = "all"
+	ViewAssignment = "asignacion"
 )
 
 // ListFilter: CompanyIDs nil = todas (solo personal interno).
@@ -134,13 +135,28 @@ type WaveRule struct {
 
 type CourierSettings struct {
 	Courier     string   `json:"courier"`
-	ArrivalTime string   `json:"arrivalTime"` // HH:MM, corte del courier
+	ArrivalTime string   `json:"arrivalTime"` // HH:MM, llegada del courier
 	MaxPackages *int     `json:"maxPackages"`
 	CoversAll   bool     `json:"coversAll"`
 	Communes    []string `json:"communes"` // cobertura si CoversAll = false
 }
 
+type CutoffCourier struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	ArrivalTime string `json:"arrivalTime"`
+}
+type Cutoff struct {
+	ID         int64           `json:"id"`
+	Number     int             `json:"number"`
+	Name       *string         `json:"name"`
+	CutoffTime string          `json:"cutoffTime"`
+	Couriers   []CutoffCourier `json:"couriers"`
+}
 type RuleRepository interface {
+	Cutoffs(context.Context) ([]Cutoff, error)
+	SaveCutoff(context.Context, Cutoff, string) (Cutoff, error)
+	DeleteCutoff(context.Context, int64, string) error
 	List(ctx context.Context, onlyActive bool) ([]WaveRule, error)
 	Get(ctx context.Context, id int64) (WaveRule, error)
 	Save(ctx context.Context, r WaveRule, actor string) (WaveRule, error) // crea si ID == 0
@@ -151,6 +167,8 @@ type RuleRepository interface {
 	CourierSettings(ctx context.Context, courier string) (CourierSettings, error)
 	ListCourierSettings(ctx context.Context) ([]CourierSettings, error)
 	SaveCourierSettings(ctx context.Context, s CourierSettings, actor string) error
+	AssignmentDeadline(ctx context.Context) (string, error)
+	SaveAssignmentDeadline(ctx context.Context, value, actor string) error
 }
 
 // ---------------------------------------------------------------------------

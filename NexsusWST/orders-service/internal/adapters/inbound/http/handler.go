@@ -46,6 +46,10 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 	r := func(pattern string, f http.HandlerFunc) { mux.Handle(pattern, auth(f)) }
 
 	r("GET /v1/meta", h.meta)
+	r("GET /v1/cutoffs", h.cutoffs)
+	r("POST /v1/cutoffs", h.saveCutoff)
+	r("PUT /v1/cutoffs/{id}", h.saveCutoff)
+	r("DELETE /v1/cutoffs/{id}", h.deleteCutoff)
 
 	// Órdenes: ingreso, consulta, exportación (CU-01, CU-08)
 	r("GET /v1/orders", h.list)
@@ -85,6 +89,8 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 	r("DELETE /v1/wave-rules/{id}", h.deleteRule)
 	r("POST /v1/wave-rules/reorder", h.reorderRules)
 	r("GET /v1/couriers/settings", h.listCourierSettings)
+	r("GET /v1/ops-settings/assignment-deadline", h.assignmentDeadline)
+	r("PUT /v1/ops-settings/assignment-deadline", h.saveAssignmentDeadline)
 	r("PUT /v1/couriers/{code}/settings", h.saveCourierSettings)
 
 	// Retiro y entrega al courier (CU-05)
@@ -112,42 +118,44 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 // ---------------------------------------------------------------------------
 
 type orderDTO struct {
-	ID            int64         `json:"id"`
-	CompanyID     int64         `json:"companyId"`
-	ExternalRef   string        `json:"externalRef"`
-	Channel       string        `json:"channel"`
-	Source        string        `json:"source"`
-	Courier       string        `json:"courier"`
-	CourierCode   string        `json:"courierCode,omitempty"`
-	RecipientName string        `json:"recipientName"`
-	RecipientPh   string        `json:"recipientPhone,omitempty"`
-	RecipientMail string        `json:"recipientEmail,omitempty"`
-	AddressLine   string        `json:"addressLine"`
-	Commune       string        `json:"commune"`
-	RegionCode    string        `json:"regionCode,omitempty"`
-	DispatchType  string        `json:"dispatchType"`
-	Warehouse     string        `json:"warehouse"`
-	CustomerNotes string        `json:"customerNotes,omitempty"`
-	Status        string        `json:"status"`
-	StatusLabel   string        `json:"statusLabel"`
-	PrevStatus    string        `json:"prevStatus,omitempty"`
-	IncidentKind  string        `json:"incidentKind,omitempty"`
-	IncidentLabel string        `json:"incidentLabel,omitempty"`
-	Priority      bool          `json:"priority"`
-	WaveID        string        `json:"waveId,omitempty"`
-	WMSRef        string        `json:"wmsRef,omitempty"`
-	Note          string        `json:"note,omitempty"`
-	LastError     string        `json:"lastError,omitempty"`
-	Attempts      int           `json:"validationAttempts"`
-	ClaimedBy     *int64        `json:"claimedBy,omitempty"`
-	ClaimedByName string        `json:"claimedByName,omitempty"`
-	Editable      bool          `json:"editable"`
-	Version       int           `json:"version"`
-	Items         []domain.Item `json:"items"`
-	CreatedAt     time.Time     `json:"createdAt"`
-	UpdatedAt     time.Time     `json:"updatedAt"`
-	HandedOverAt  *time.Time    `json:"handedOverAt,omitempty"`
-	CancelledAt   *time.Time    `json:"cancelledAt,omitempty"`
+	PackagesCount       int           `json:"packagesCount"`
+	AssignmentSituation *string       `json:"assignmentSituation"`
+	ID                  int64         `json:"id"`
+	CompanyID           int64         `json:"companyId"`
+	ExternalRef         string        `json:"externalRef"`
+	Channel             string        `json:"channel"`
+	Source              string        `json:"source"`
+	Courier             string        `json:"courier"`
+	CourierCode         string        `json:"courierCode,omitempty"`
+	RecipientName       string        `json:"recipientName"`
+	RecipientPh         string        `json:"recipientPhone,omitempty"`
+	RecipientMail       string        `json:"recipientEmail,omitempty"`
+	AddressLine         string        `json:"addressLine"`
+	Commune             string        `json:"commune"`
+	RegionCode          string        `json:"regionCode,omitempty"`
+	DispatchType        string        `json:"dispatchType"`
+	Warehouse           string        `json:"warehouse"`
+	CustomerNotes       string        `json:"customerNotes,omitempty"`
+	Status              string        `json:"status"`
+	StatusLabel         string        `json:"statusLabel"`
+	PrevStatus          string        `json:"prevStatus,omitempty"`
+	IncidentKind        string        `json:"incidentKind,omitempty"`
+	IncidentLabel       string        `json:"incidentLabel,omitempty"`
+	Priority            bool          `json:"priority"`
+	WaveID              string        `json:"waveId,omitempty"`
+	WMSRef              string        `json:"wmsRef,omitempty"`
+	Note                string        `json:"note,omitempty"`
+	LastError           string        `json:"lastError,omitempty"`
+	Attempts            int           `json:"validationAttempts"`
+	ClaimedBy           *int64        `json:"claimedBy,omitempty"`
+	ClaimedByName       string        `json:"claimedByName,omitempty"`
+	Editable            bool          `json:"editable"`
+	Version             int           `json:"version"`
+	Items               []domain.Item `json:"items"`
+	CreatedAt           time.Time     `json:"createdAt"`
+	UpdatedAt           time.Time     `json:"updatedAt"`
+	HandedOverAt        *time.Time    `json:"handedOverAt,omitempty"`
+	CancelledAt         *time.Time    `json:"cancelledAt,omitempty"`
 }
 
 func toDTO(o domain.Order) orderDTO {
@@ -155,7 +163,7 @@ func toDTO(o domain.Order) orderDTO {
 	if items == nil {
 		items = []domain.Item{}
 	}
-	return orderDTO{ID: o.ID, CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Source: o.Source,
+	return orderDTO{PackagesCount: o.PackagesCount, AssignmentSituation: o.AssignmentSituation, ID: o.ID, CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Source: o.Source,
 		Courier: o.Courier, CourierCode: o.CourierCode, RecipientName: o.RecipientName, RecipientPh: o.RecipientPhone,
 		RecipientMail: o.RecipientEmail, AddressLine: o.AddressLine, Commune: o.Commune, RegionCode: o.RegionCode,
 		DispatchType: o.DispatchType, Warehouse: o.Warehouse, CustomerNotes: o.CustomerNotes,

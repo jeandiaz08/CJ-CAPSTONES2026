@@ -26,7 +26,23 @@ func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
 var _ ports.OrderRepository = (*Repository)(nil)
 
 // La toma de empaque de un usuario deshabilitado se ignora (vuelve a la bandeja).
-const fromOrders = `orders o LEFT JOIN users cu ON cu.id = o.claimed_by AND cu.active`
+const assignmentUniverse = `(o.status='validated' OR (o.status='incident' AND o.incident_kind='invas' AND o.prev_status='validated'))`
+const fromOrders = `orders o LEFT JOIN users cu ON cu.id = o.claimed_by AND cu.active
+ LEFT JOIN LATERAL (SELECT max(c.cutoff_time) AS cutoff_time FROM cutoffs c JOIN cutoff_couriers cc ON cc.cutoff_id=c.id WHERE c.active AND cc.courier=o.courier) cs ON true
+ LEFT JOIN ops_settings os ON os.key='assignment_deadline'
+ LEFT JOIN LATERAL (
+   SELECT j.id, j.completed_at, j.failed_at FROM job_outbox j
+   WHERE j.order_id=o.id AND j.type='assign_wave'
+   ORDER BY j.created_at DESC, j.id DESC LIMIT 1
+ ) aj ON true`
+const assignmentSituation = `CASE WHEN ` + assignmentUniverse + ` THEN CASE
+ WHEN aj.id IS NOT NULL AND aj.completed_at IS NULL AND aj.failed_at IS NULL THEN 'en_cola'
+ WHEN aj.failed_at IS NOT NULL THEN 'invas_agotado'
+ WHEN cs.cutoff_time IS NOT NULL AND (o.created_at AT TIME ZONE 'America/Santiago')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'America/Santiago')::date
+ AND ((o.created_at AT TIME ZONE 'America/Santiago')::time > cs.cutoff_time
+ OR (o.created_at AT TIME ZONE 'America/Santiago')::time > os.value::time) THEN 'fuera_corte'
+ WHEN o.rules_checked_at IS NOT NULL AND aj.id IS NULL THEN 'sin_regla'
+ END ELSE NULL END`
 
 const cols = `o.id, o.company_id, o.external_ref, o.channel, COALESCE(o.courier,''), COALESCE(o.courier_code,''),
 	COALESCE(o.recipient_name,''), COALESCE(o.recipient_phone,''), COALESCE(o.recipient_email,''),
@@ -36,7 +52,7 @@ const cols = `o.id, o.company_id, o.external_ref, o.channel, COALESCE(o.courier,
 	o.priority, COALESCE(o.wave_id,''), COALESCE(o.wms_ref,''), o.version, COALESCE(o.note,''),
 	o.validation_attempts, o.next_retry_at, COALESCE(o.last_error,''),
 	o.claimed_by, COALESCE(cu.name,''), o.claimed_at, o.created_by, o.import_id,
-	o.created_at, o.updated_at, o.handed_over_at, o.cancelled_at`
+	o.created_at, o.updated_at, o.handed_over_at, o.cancelled_at, (SELECT count(*) FROM order_packages op WHERE op.order_id=o.id), ` + assignmentSituation
 
 func scan(row pgx.Row) (domain.Order, error) {
 	var o domain.Order
@@ -49,7 +65,7 @@ func scan(row pgx.Row) (domain.Order, error) {
 		&o.Priority, &o.WaveID, &o.WMSRef, &o.Version, &o.Note,
 		&o.ValidationAttempts, &o.NextRetryAt, &o.LastError,
 		&o.ClaimedBy, &o.ClaimedByName, &o.ClaimedAt, &o.CreatedBy, &o.ImportID,
-		&o.CreatedAt, &o.UpdatedAt, &o.HandedOverAt, &o.CancelledAt)
+		&o.CreatedAt, &o.UpdatedAt, &o.HandedOverAt, &o.CancelledAt, &o.PackagesCount, &o.AssignmentSituation)
 	o.Status, o.PrevStatus = domain.Status(st), domain.Status(prev)
 	return o, err
 }
@@ -207,12 +223,14 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 		add("o.status = ANY(?::text[])", f.Statuses)
 	}
 	switch f.View {
+	case ports.ViewAssignment:
+		where = append(where, assignmentUniverse)
 	case ports.ViewRegistry:
 		where = append(where, "o.status IN ('handed_over','cancelled')")
 	case ports.ViewAll:
 	default:
 		if len(f.Statuses) == 0 || !contains(f.Statuses, "cancelled") {
-			where = append(where, "o.status <> 'cancelled'") // Cancelada: oculta por defecto
+			where = append(where, "o.status NOT IN ('cancelled','handed_over')") // Cancelada: oculta por defecto
 		}
 	}
 	if q := strings.TrimSpace(f.Search); q != "" {

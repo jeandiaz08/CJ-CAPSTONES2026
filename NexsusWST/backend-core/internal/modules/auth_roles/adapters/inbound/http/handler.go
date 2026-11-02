@@ -22,6 +22,10 @@ func NewHandler(svc *application.Service) *Handler { return &Handler{svc: svc} }
 
 func (h *Handler) Register(mux *http.ServeMux, authMW func(http.Handler) http.Handler) {
 	mux.Handle("GET /v1/auth/me", authMW(http.HandlerFunc(h.me)))
+	mux.Handle("GET /v1/me/notes", authMW(http.HandlerFunc(h.listNotes)))
+	mux.Handle("POST /v1/me/notes", authMW(http.HandlerFunc(h.createNote)))
+	mux.Handle("PATCH /v1/me/notes/{id}", authMW(http.HandlerFunc(h.updateNote)))
+	mux.Handle("DELETE /v1/me/notes/{id}", authMW(http.HandlerFunc(h.deleteNote)))
 
 	// Facultad administrativa: solo el perfil Administrador (RF-02).
 	admin := func(f http.HandlerFunc) http.Handler {

@@ -15,7 +15,7 @@ import (
 )
 
 // OutboxRelay publica en Redis Streams las intenciones guardadas en
-// PostgreSQL (bandeja transaccional), en lotes pequeños y PRIMERO las
+// PostgreSQL (bandeja transaccional), en grupos pequeños y PRIMERO las
 // órdenes prioritarias («Enviar primero a la cola», RF-15).
 type OutboxRelay struct {
 	db     *pgxpool.Pool

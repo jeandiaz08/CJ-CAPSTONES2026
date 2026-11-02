@@ -430,7 +430,7 @@ func (s *Service) SetPriority(ctx context.Context, id tenant.Identity, scope []i
 func (s *Service) Waves(ctx context.Context) ([]ports.Wave, error) { return s.WMS.ListWaves(ctx) }
 
 // AssignWave - asignación MANUAL a ola (RF-17). Asignar es encolar: el Worker
-// envía a Invas en lotes pequeños, primero las órdenes prioritarias.
+// envía a Invas en grupos pequeños, primero las órdenes prioritarias.
 func (s *Service) AssignWave(ctx context.Context, id tenant.Identity, scope []int64, orderIDs []int64, waveID string) ([]int64, error) {
 	if !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps) {
 		return nil, domain.ErrForbidden

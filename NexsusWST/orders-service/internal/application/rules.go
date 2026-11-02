@@ -182,7 +182,7 @@ func (s *Service) ListCourierSettings(ctx context.Context, id tenant.Identity) (
 	return s.Rules.ListCourierSettings(ctx)
 }
 
-// SaveCourierSettings - hora de llegada (corte), máximo de bultos y cobertura.
+// SaveCourierSettings - horas de llegada y corte, máximo de bultos y cobertura.
 func (s *Service) SaveCourierSettings(ctx context.Context, id tenant.Identity, cs ports.CourierSettings) error {
 	if !canManageRules(id) {
 		return domain.ErrForbidden
