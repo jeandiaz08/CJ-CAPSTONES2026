@@ -112,7 +112,7 @@ Contiene estos campos:
 | Método | Ruta | Cuerpo |
 | --- | --- | --- |
 | POST | `/v1/orders/{id}/incident` | `{kind, reason}` — `kind`: `datos, invas, diferencia_empaque, courier_cobertura, courier_bultos, cancelacion, retiro, integracion, otro` |
-| POST | `/v1/orders/{id}/resolve` | `{action: resume\|retry\|cancel, note}` — vuelve al estado donde ocurrió; `retry` reencola el trabajo fallido (Invas). Solo Jefe/Admin. |
+| POST | `/v1/orders/{id}/resolve` | `{action: resume\|retry\|cancel, note, corrections?{addressLine?, commune?, regionCode?, courier?}}` — vuelve al estado donde ocurrió; `retry` reencola el trabajo fallido. `corrections` solo con `resume`: se guardan junto con la resolución, aunque la orden ya esté en Invas o lista para retiro, y se validan comuna, courier activo, cobertura y máximo de bultos (422 por campo). Antes de llegar a Invas la orden vuelve a validarse. Si cambia el courier y la orden está en un manifiesto abierto, sale de él (línea `moved`); con el manifiesto cerrado responde 422. Solo Jefe/Admin. |
 
 ### Olas, prioridad y reglas (H-10, CU-02)
 

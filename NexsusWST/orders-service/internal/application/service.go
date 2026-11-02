@@ -227,14 +227,95 @@ func (s *Service) Edit(ctx context.Context, id tenant.Identity, scope []int64, o
 	if err != nil {
 		return domain.Order{}, err
 	}
-	// Courier cambiado con la orden en un manifiesto abierto: la línea queda «Movida a».
-	if o.Courier != out.Courier {
-		if mid, err := s.Fulfillment.OpenManifestOf(ctx, o.ID); err == nil && mid > 0 {
-			_ = s.Fulfillment.SetLineStatus(ctx, mid, o.ID, "moved", out.Courier)
-		}
-	}
 	s.Notifier.OrderChanged(ctx, out)
 	return out, nil
+}
+
+// resolveWithCorrections corrige dirección o courier y resuelve en una sola transacción.
+// Antes de llegar a Invas la orden vuelve a validarse; después, el servidor valida aquí
+// lo que el validador ya no revisará y la orden vuelve a la etapa donde estaba.
+func (s *Service) resolveWithCorrections(ctx context.Context, id tenant.Identity, o domain.Order, c domain.Corrections, note string) (domain.Order, error) {
+	after, diff, err := o.ApplyCorrections(c)
+	if err != nil {
+		return domain.Order{}, err
+	}
+	if len(diff) == 0 {
+		return domain.Order{}, fail(domain.ErrInvalid, "Indica la corrección: la dirección y el courier no cambiaron.")
+	}
+	if err := s.checkCorrections(ctx, o, &after); err != nil {
+		return domain.Order{}, err
+	}
+	opts := ports.TransitionOpts{}
+	if o.NeedsRevalidation(after) && o.WaveID == "" {
+		switch o.PrevStatus {
+		case domain.StatusPending, domain.StatusValidating, domain.StatusValidated:
+			opts.ReleaseCommitted = o.PrevStatus == domain.StatusValidated
+			after.PrevStatus = domain.StatusPending
+		}
+	}
+	label := domain.IncidentLabels[o.IncidentKind]
+	if label == "" {
+		label = "Incidencia"
+	}
+	from, err := after.Apply(domain.EvResolve)
+	if err != nil {
+		return domain.Order{}, err
+	}
+	if after.Status == domain.StatusPending || after.Status == domain.StatusValidating {
+		after.ValidationAttempts = 0
+	}
+	reason := fmt.Sprintf("Resuelta (%s): %s", label, note)
+	out, err := s.Orders.SaveResolution(ctx, o, after, from, diff, id.Actor(), reason, opts)
+	if err != nil {
+		return domain.Order{}, err
+	}
+	s.after(ctx, out, reason)
+	return out, nil
+}
+
+// checkCorrections valida contra los catálogos y deja la comuna con su nombre oficial.
+func (s *Service) checkCorrections(ctx context.Context, before domain.Order, after *domain.Order) error {
+	var problems domain.ValidationErrors
+	communes, err := s.Catalog.Communes(ctx)
+	if err != nil {
+		return err
+	}
+	official, suggestion := domain.MatchCommune(after.Commune, communes)
+	switch {
+	case official == "" && suggestion != "":
+		problems = append(problems, domain.FieldError{Field: "commune", Message: fmt.Sprintf("Comuna no reconocida. ¿Quisiste decir «%s»?", suggestion)})
+	case official == "":
+		problems = append(problems, domain.FieldError{Field: "commune", Message: "Comuna no reconocida."})
+	default:
+		after.Commune = official
+	}
+	if after.Courier != before.Courier {
+		ok, err := s.Catalog.CourierActive(ctx, after.Courier)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			problems = append(problems, domain.FieldError{Field: "courier", Message: "El courier no existe o está inactivo."})
+		}
+	}
+	settings, err := s.Rules.CourierSettings(ctx, after.Courier)
+	if err != nil {
+		return err
+	}
+	if official != "" && !settings.CoversAll && !containsFold(settings.Communes, official) {
+		field := "commune"
+		if after.Courier != before.Courier {
+			field = "courier"
+		}
+		problems = append(problems, domain.FieldError{Field: field, Message: fmt.Sprintf("El courier no tiene cobertura en %s.", official)})
+	}
+	if after.Courier != before.Courier && settings.MaxPackages != nil && before.PackagesCount > *settings.MaxPackages {
+		problems = append(problems, domain.FieldError{Field: "courier", Message: fmt.Sprintf("El courier admite %d bulto(s) y la orden tiene %d.", *settings.MaxPackages, before.PackagesCount)})
+	}
+	if len(problems) > 0 {
+		return problems
+	}
+	return nil
 }
 
 // Cancel deja la orden Cancelada (terminal, oculta, no se elimina). Si la
@@ -358,13 +439,16 @@ const (
 
 // Resolve - el Jefe corrige la causa y la orden vuelve al estado donde
 // ocurrió, registrando quién y qué se hizo (CU-03).
-func (s *Service) Resolve(ctx context.Context, id tenant.Identity, scope []int64, orderID int64, action, note string) (domain.Order, error) {
+func (s *Service) Resolve(ctx context.Context, id tenant.Identity, scope []int64, orderID int64, action, note string, corrections *domain.Corrections) (domain.Order, error) {
 	if !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps) {
 		return domain.Order{}, domain.ErrForbidden
 	}
 	note = strings.TrimSpace(note)
 	if note == "" {
 		return domain.Order{}, fail(domain.ErrInvalid, "Deja escrito qué se hizo para resolver la incidencia.")
+	}
+	if corrections != nil && action != ResolveResume {
+		return domain.Order{}, fail(domain.ErrInvalid, "Las correcciones solo se aplican al reanudar la orden.")
 	}
 	if action == ResolveCancel {
 		return s.Cancel(ctx, id, scope, orderID, note)
@@ -378,6 +462,9 @@ func (s *Service) Resolve(ctx context.Context, id tenant.Identity, scope []int64
 	}
 	if o.Status != domain.StatusIncident {
 		return domain.Order{}, fail(domain.ErrInvalidTransition, "La orden no está en Incidencia.")
+	}
+	if corrections != nil {
+		return s.resolveWithCorrections(ctx, id, o, *corrections, note)
 	}
 	kind := o.IncidentKind
 	from, err := o.Apply(domain.EvResolve)

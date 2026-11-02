@@ -400,24 +400,86 @@ func transitionTx(ctx context.Context, tx pgx.Tx, o domain.Order, from domain.St
 	return getOne(ctx, tx, o.ID, false)
 }
 
+// leaveManifest saca la orden de su manifiesto abierto al cambiar de courier: la línea queda
+// «Movida a» y el cambio en el historial. Con el manifiesto cerrado, el cambio no se permite.
+func leaveManifest(ctx context.Context, tx pgx.Tx, orderID int64, courier, actor string) error {
+	var manifestID int64
+	var status string
+	err := tx.QueryRow(ctx, `SELECT m.id, m.status FROM manifest_lines l JOIN manifests m ON m.id=l.manifest_id
+		WHERE l.order_id=$1 AND l.status IN ('included','pending_packages') ORDER BY m.id DESC LIMIT 1 FOR UPDATE OF m`, orderID).Scan(&manifestID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if status != "open" {
+		return domain.ErrManifestClosed
+	}
+	if _, err := tx.Exec(ctx, `UPDATE manifest_lines SET status='moved', moved_to=$3 WHERE manifest_id=$1 AND order_id=$2`, manifestID, orderID, courier); err != nil {
+		return err
+	}
+	return addEvent(ctx, tx, orderID, "edit", "manifest_leave", "", "", actor, fmt.Sprintf("Sale del manifiesto #%d por cambio de courier a %s", manifestID, courier))
+}
+
+func saveOrderFields(ctx context.Context, tx pgx.Tx, before, after domain.Order) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE orders SET courier=NULLIF($2,''), courier_code=NULLIF($3,''), recipient_name=NULLIF($4,''),
+			recipient_phone=NULLIF($5,''), recipient_email=NULLIF($6,''), address_line=NULLIF($7,''),
+			commune=NULLIF($8,''), region_code=NULLIF($9,''), dispatch_type=$10, customer_notes=NULLIF($11,''),
+			prev_status=NULLIF($12,''), validation_attempts=$13, rules_checked_at=NULL,
+			version=version+1, updated_at=now()
+		WHERE id=$1 AND version=$14`,
+		before.ID, after.Courier, after.CourierCode, after.RecipientName, after.RecipientPhone, after.RecipientEmail,
+		after.AddressLine, after.Commune, after.RegionCode, after.DispatchType, after.CustomerNotes,
+		string(after.PrevStatus), after.ValidationAttempts, before.Version)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrConflict
+	}
+	return nil
+}
+
+func (r *Repository) SaveResolution(ctx context.Context, before, after domain.Order, from domain.Status, diff []string, actor, reason string, opts ports.TransitionOpts) (domain.Order, error) {
+	var out domain.Order
+	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if before.Courier != after.Courier {
+			if err := leaveManifest(ctx, tx, before.ID, after.Courier, actor); err != nil {
+				return err
+			}
+		}
+		if err := saveOrderFields(ctx, tx, before, after); err != nil {
+			return err
+		}
+		if err := addEvent(ctx, tx, before.ID, "edit", "edit", "", "", actor, strings.Join(diff, "; ")); err != nil {
+			return err
+		}
+		if opts.ReleaseCommitted {
+			if err := releaseCommitted(ctx, tx, before); err != nil {
+				return err
+			}
+		}
+		after.Version = before.Version + 1
+		var err error
+		out, err = transitionTx(ctx, tx, after, from, domain.EvResolve, actor, reason, opts.ClearWave)
+		return err
+	})
+	return out, err
+}
+
 func (r *Repository) SaveEdit(ctx context.Context, before, after domain.Order, diff []string, actor string, ev domain.Event, opts ports.TransitionOpts) (domain.Order, error) {
 	var out domain.Order
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `
-			UPDATE orders SET courier=NULLIF($2,''), courier_code=NULLIF($3,''), recipient_name=NULLIF($4,''),
-				recipient_phone=NULLIF($5,''), recipient_email=NULLIF($6,''), address_line=NULLIF($7,''),
-				commune=NULLIF($8,''), region_code=NULLIF($9,''), dispatch_type=$10, customer_notes=NULLIF($11,''),
-				prev_status=NULLIF($12,''), validation_attempts=$13, rules_checked_at=NULL,
-				version=version+1, updated_at=now()
-			WHERE id=$1 AND version=$14`,
-			before.ID, after.Courier, after.CourierCode, after.RecipientName, after.RecipientPhone, after.RecipientEmail,
-			after.AddressLine, after.Commune, after.RegionCode, after.DispatchType, after.CustomerNotes,
-			string(after.PrevStatus), after.ValidationAttempts, before.Version)
+		if before.Courier != after.Courier {
+			if err := leaveManifest(ctx, tx, before.ID, after.Courier, actor); err != nil {
+				return err
+			}
+		}
+		err := saveOrderFields(ctx, tx, before, after)
 		if err != nil {
 			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return domain.ErrConflict
 		}
 		if err := replaceItems(ctx, tx, before.ID, after.Items); err != nil {
 			return err

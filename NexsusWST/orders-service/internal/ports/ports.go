@@ -80,6 +80,9 @@ type OrderRepository interface {
 	// versión + historial + efectos, en UNA transacción. ErrConflict si otra
 	// operación ganó (p. ej. dos personas confirman a la vez).
 	Transition(ctx context.Context, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, opts TransitionOpts) (domain.Order, error)
+	// SaveResolution guarda en una transacción las correcciones de una incidencia y su
+	// resolución. Si cambia el courier, la orden sale del manifiesto abierto.
+	SaveResolution(ctx context.Context, before, after domain.Order, from domain.Status, diff []string, actor, reason string, opts TransitionOpts) (domain.Order, error)
 	// SaveEdit guarda datos editados (y opcionalmente un cambio de estado).
 	SaveEdit(ctx context.Context, before, after domain.Order, diff []string, actor string, ev domain.Event, opts TransitionOpts) (domain.Order, error)
 	SetPriority(ctx context.Context, o domain.Order, priority bool, actor, reason string) (domain.Order, error)

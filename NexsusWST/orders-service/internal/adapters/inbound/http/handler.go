@@ -584,8 +584,9 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Action string `json:"action"`
-		Note   string `json:"note"`
+		Action      string              `json:"action"`
+		Note        string              `json:"note"`
+		Corrections *domain.Corrections `json:"corrections"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -593,7 +594,7 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) {
 	if body.Action == "" {
 		body.Action = application.ResolveResume
 	}
-	o, err := h.svc.Resolve(r.Context(), id, ids, oid, body.Action, body.Note)
+	o, err := h.svc.Resolve(r.Context(), id, ids, oid, body.Action, body.Note, body.Corrections)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
