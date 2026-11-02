@@ -68,7 +68,7 @@ func (r *RuleRepository) SaveCutoff(ctx context.Context, c ports.Cutoff, actor s
 	})
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) && pe.Code == "23505" {
-		return c, domain.ErrConflict
+		return c, domain.ErrCutoffTimeTaken
 	}
 	if err != nil {
 		return c, err

@@ -19,6 +19,7 @@ var (
 	ErrConflict          = errors.New("la orden fue modificada por otra operación; recarga e intenta de nuevo")
 	ErrDuplicate         = errors.New("ya existe una orden con ese origen y referencia")
 	ErrForbidden         = errors.New("tu rol o permisos no permiten esta acción")
+	ErrCutoffTimeTaken   = fmt.Errorf("%w: ya existe un corte activo a esa hora", ErrInvalid)
 	ErrManifestClosed    = fmt.Errorf("%w: la orden está en un manifiesto cerrado, no se puede cambiar el courier", ErrInvalid)
 	ErrNotEditable       = errors.New("la orden ya fue enviada a preparación: no se puede modificar desde Nexus")
 )

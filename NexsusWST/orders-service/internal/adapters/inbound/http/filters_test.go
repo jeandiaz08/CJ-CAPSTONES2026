@@ -20,6 +20,10 @@ func (f *ordersFake) Summary(_ context.Context, ids []int64) (map[domain.Status]
 	return map[domain.Status]int{domain.StatusPending: 1}, nil
 }
 
+func (f *ordersFake) Warehouses(context.Context, []int64) ([]string, error) {
+	return []string{"lo espejo", "principal"}, nil
+}
+
 func TestListFiltersSummaryAndCourierSettings(t *testing.T) {
 	settings := &settingsFake{deadline: "12:00"}
 	orders := &ordersFake{}
@@ -62,6 +66,9 @@ func TestListFiltersSummaryAndCourierSettings(t *testing.T) {
 	}
 	if w := call("PUT", "/v1/couriers/blueexpress/settings", `{"coversAll":true}`); w.Code != 204 {
 		t.Fatalf("ajustes sin arrivalTime: %d %s", w.Code, w.Body)
+	}
+	if w := call("GET", "/v1/orders/warehouses", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "lo espejo") {
+		t.Fatalf("bodegas: %d %s", w.Code, w.Body)
 	}
 	if w := call("GET", "/v1/couriers/settings", ""); w.Code != 200 || strings.Contains(w.Body.String(), "arrivalTime") {
 		t.Fatalf("GET expone arrivalTime: %d %s", w.Code, w.Body)

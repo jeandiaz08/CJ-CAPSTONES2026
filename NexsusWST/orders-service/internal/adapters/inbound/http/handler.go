@@ -56,6 +56,7 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 	r("GET /v1/orders", h.list)
 	r("GET /v1/orders/summary", h.summary)
 	r("GET /v1/orders/export", h.export)
+	r("GET /v1/orders/warehouses", h.warehouses)
 	r("POST /v1/orders", h.create)
 	r("POST /v1/orders/import", h.importOrders)
 	r("GET /v1/orders/import/template", h.importTemplate)
@@ -863,6 +864,19 @@ func (h *Handler) runRules(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	id, _ := tenant.From(r.Context())
 	list, err := h.svc.ListRules(r.Context(), id)
+	if err != nil {
+		h.writeErr(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+func (h *Handler) warehouses(w http.ResponseWriter, r *http.Request) {
+	id, ids, ok := scope(w, r)
+	if !ok {
+		return
+	}
+	list, err := h.svc.Warehouses(r.Context(), id, ids)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return

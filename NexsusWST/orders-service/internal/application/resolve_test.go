@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nexuswst/orders-service/internal/domain"
@@ -133,6 +134,21 @@ func TestResolveCorrectionsRejected(t *testing.T) {
 				t.Fatal("no debe guardar")
 			}
 		})
+	}
+}
+
+type deadlineRules struct{ ports.RuleRepository }
+
+func (deadlineRules) Cutoffs(context.Context) ([]ports.Cutoff, error) {
+	return []ports.Cutoff{{CutoffTime: "08:00"}, {CutoffTime: "11:00"}}, nil
+}
+
+func TestDeadlineNamesTheLatestCutoff(t *testing.T) {
+	s := NewService(Deps{Rules: deadlineRules{}})
+	err := s.SaveAssignmentDeadline(context.Background(), admin(), "07:00")
+	var op OpError
+	if !errors.As(err, &op) || !strings.Contains(op.Msg, "11:00") {
+		t.Fatalf("debe nombrar el último corte: %v", err)
 	}
 }
 

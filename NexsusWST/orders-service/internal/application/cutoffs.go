@@ -21,6 +21,13 @@ func (s *Service) SaveCutoff(ctx context.Context, id tenant.Identity, c ports.Cu
 	if !reHHMM.MatchString(c.CutoffTime) {
 		return c, fail(domain.ErrInvalid, "Hora de corte inválida (HH:MM).")
 	}
+	deadline, err := s.Rules.AssignmentDeadline(ctx)
+	if err != nil {
+		return c, err
+	}
+	if deadline != "" && c.CutoffTime > deadline {
+		return c, fail(domain.ErrInvalid, "El corte no puede ser posterior a la hora límite (%s).", deadline)
+	}
 	if c.Name != nil {
 		v := strings.TrimSpace(*c.Name)
 		if v == "" {

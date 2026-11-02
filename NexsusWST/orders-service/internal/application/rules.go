@@ -162,6 +162,14 @@ func (s *Service) ReorderRules(ctx context.Context, id tenant.Identity, ids []in
 	return s.Rules.ResetChecks(ctx)
 }
 
+// Warehouses - sugerencias para el campo Bodega de las reglas.
+func (s *Service) Warehouses(ctx context.Context, id tenant.Identity, scope []int64) ([]string, error) {
+	if !canManageRules(id) {
+		return nil, domain.ErrForbidden
+	}
+	return s.Orders.Warehouses(ctx, scope)
+}
+
 // RunRulesNow - el Jefe puede pedir que se apliquen las reglas de inmediato.
 func (s *Service) RunRulesNow(ctx context.Context, id tenant.Identity) (int, error) {
 	if !canManageRules(id) {

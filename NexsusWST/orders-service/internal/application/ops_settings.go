@@ -21,5 +21,18 @@ func (s *Service) SaveAssignmentDeadline(ctx context.Context, id tenant.Identity
 	if !reHHMM.MatchString(value) {
 		return fail(domain.ErrInvalid, "La hora límite debe tener formato HH:MM.")
 	}
+	cutoffs, err := s.Rules.Cutoffs(ctx)
+	if err != nil {
+		return err
+	}
+	latest := ""
+	for _, c := range cutoffs {
+		if c.CutoffTime > latest {
+			latest = c.CutoffTime
+		}
+	}
+	if latest > value {
+		return fail(domain.ErrInvalid, "La hora límite no puede ser anterior al último corte (%s). Muévelo o desactívalo primero.", latest)
+	}
 	return s.Rules.SaveAssignmentDeadline(ctx, value, id.Actor())
 }

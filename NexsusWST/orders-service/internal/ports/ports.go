@@ -73,6 +73,7 @@ type OrderRepository interface {
 	Get(ctx context.Context, companyIDs []int64, id int64) (domain.Order, error)
 	List(ctx context.Context, f ListFilter) ([]domain.Order, int, error)
 	Summary(ctx context.Context, companyIDs []int64) (map[domain.Status]int, error)
+	Warehouses(ctx context.Context, companyIDs []int64) ([]string, error)
 	Events(ctx context.Context, orderID int64) ([]EventRecord, error)
 	AddEvent(ctx context.Context, orderID int64, typ, ev, actor, reason string) error
 

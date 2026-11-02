@@ -108,6 +108,20 @@ func TestTrayRegistryAndFilters(t *testing.T) {
 		})
 	}
 
+	if _, err = db.Exec(ctx, `UPDATE orders SET warehouse='principal'; UPDATE orders SET warehouse='lo espejo' WHERE id=9000001; UPDATE orders SET warehouse='' WHERE id=9000002`); err != nil {
+		t.Fatal(err)
+	}
+	warehouses, err := repo.Warehouses(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(warehouses, []string{"lo espejo", "principal"}) {
+		t.Fatalf("bodegas distintas: %v", warehouses)
+	}
+	if warehouses, err = repo.Warehouses(ctx, []int64{2}); err != nil || !slices.Equal(warehouses, []string{"lo espejo"}) {
+		t.Fatalf("bodegas por empresa: %v %v", warehouses, err)
+	}
+
 	s, err := repo.Summary(ctx, []int64{2})
 	if err != nil {
 		t.Fatal(err)

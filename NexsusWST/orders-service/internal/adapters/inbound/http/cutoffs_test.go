@@ -27,14 +27,12 @@ func (cutoffFake) Cutoffs(context.Context) ([]ports.Cutoff, error) {
 }
 func (cutoffFake) SaveCutoff(_ context.Context, c ports.Cutoff, _ string) (ports.Cutoff, error) {
 	if c.CutoffTime == "08:00" {
-		return c, domain.ErrConflict
-	}
-	if c.CutoffTime > "12:00" {
-		return c, domain.ErrInvalid
+		return c, domain.ErrCutoffTimeTaken
 	}
 	return c, nil
 }
-func (cutoffFake) DeleteCutoff(context.Context, int64, string) error { return nil }
+func (cutoffFake) AssignmentDeadline(context.Context) (string, error) { return "12:00", nil }
+func (cutoffFake) DeleteCutoff(context.Context, int64, string) error  { return nil }
 func TestCutoffHandlers(t *testing.T) {
 	for _, tc := range []struct {
 		method, path, body, role string
@@ -44,7 +42,7 @@ func TestCutoffHandlers(t *testing.T) {
 		{"GET", "/v1/cutoffs", "", "admin", 200}, {"GET", "/v1/cutoffs", "", "cliente", 403},
 		{"POST", "/v1/cutoffs", `{"cutoffTime":"09:00","couriers":[{"code":"starken","arrivalTime":"09:30"}]}`, "jefe_operaciones", 201},
 		{"PUT", "/v1/cutoffs/1", `{"cutoffTime":"09:00","couriers":[{"code":"starken","arrivalTime":"09:30"}]}`, "admin", 200},
-		{"POST", "/v1/cutoffs", `{"cutoffTime":"08:00","couriers":[{"code":"starken","arrivalTime":"09:30"}]}`, "admin", 409},
+		{"POST", "/v1/cutoffs", `{"cutoffTime":"08:00","couriers":[{"code":"starken","arrivalTime":"09:30"}]}`, "admin", 422},
 		{"POST", "/v1/cutoffs", `{"cutoffTime":"13:00","couriers":[{"code":"starken","arrivalTime":"13:30"}]}`, "admin", 422},
 		{"POST", "/v1/cutoffs", `{"cutoffTime":"25:00","couriers":[]}`, "admin", 422},
 		{"POST", "/v1/cutoffs", `{"cutoffTime":"09:00","couriers":[{"code":"starken","arrivalTime":"08:00"}]}`, "admin", 422},

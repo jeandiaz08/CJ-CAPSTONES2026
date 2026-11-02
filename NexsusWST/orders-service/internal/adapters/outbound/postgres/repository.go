@@ -309,6 +309,16 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	return out, total, loadItemsBulk(ctx, r.db, out)
 }
 
+// Warehouses: bodegas distintas que ya aparecen en órdenes (no hay catálogo de bodegas).
+func (r *Repository) Warehouses(ctx context.Context, ids []int64) ([]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT DISTINCT warehouse FROM orders
+		WHERE ($1::bigint[] IS NULL OR company_id = ANY($1)) AND warehouse <> '' ORDER BY warehouse`, ids)
+	if err != nil {
+		return nil, err
+	}
+	return collect[string](rows)
+}
+
 func (r *Repository) Summary(ctx context.Context, ids []int64) (map[domain.Status]int, error) {
 	rows, err := r.db.Query(ctx, `SELECT status, count(*) FROM orders
 		WHERE ($1::bigint[] IS NULL OR company_id = ANY($1)) GROUP BY status`, ids)

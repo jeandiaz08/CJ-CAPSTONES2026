@@ -28,6 +28,10 @@ func (f *settingsFake) SaveAssignmentDeadline(_ context.Context, v, _ string) er
 	return nil
 }
 
+func (f *settingsFake) Cutoffs(context.Context) ([]ports.Cutoff, error) {
+	return []ports.Cutoff{{ID: 1, CutoffTime: "11:00"}}, nil
+}
+
 func (f *settingsFake) ListCourierSettings(context.Context) ([]ports.CourierSettings, error) {
 	return []ports.CourierSettings{f.settings}, nil
 }
@@ -66,6 +70,7 @@ func TestSettingsHandlers(t *testing.T) {
 		{"GET", "/v1/ops-settings/assignment-deadline", "", "admin", 200},
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"13:05"}`, "jefe_operaciones", 204},
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"24:00"}`, "admin", 422},
+		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"10:59"}`, "admin", 422},
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"9:00"}`, "admin", 422},
 		{"GET", "/v1/ops-settings/assignment-deadline", "", "cliente", 403},
 		{"PUT", "/v1/ops-settings/assignment-deadline", `{"assignmentDeadline":"12:00"}`, "empaque", 403},
