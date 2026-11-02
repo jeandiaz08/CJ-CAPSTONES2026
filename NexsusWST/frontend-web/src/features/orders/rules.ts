@@ -30,21 +30,3 @@ export function retryBlockReason(order: Pick<Order, "status">): string | undefin
 }
 
 export { canOperate };
-
-export type ResolveOption = "address" | "courier" | "split" | "retry" | "resume" | "cancel";
-
-// Cómo se resuelve cada tipo de incidencia. Reanudar sin cambios no se ofrece cuando
-// volvería a chocar con el mismo problema (cobertura o bultos del courier).
-const RESOLVE_OPTIONS: Record<string, ResolveOption[]> = {
-  datos: ["address", "courier", "resume", "cancel"],
-  courier_cobertura: ["address", "courier", "split", "cancel"],
-  courier_bultos: ["courier", "split", "cancel"],
-  retiro: ["address", "courier", "resume", "cancel"],
-  diferencia_empaque: ["resume", "cancel"],
-  invas: ["retry", "cancel"],
-  integracion: ["retry", "resume", "cancel"],
-  cancelacion: ["resume", "cancel"],
-  otro: ["address", "courier", "resume", "cancel"],
-};
-
-export const resolveOptions = (kind?: string) => RESOLVE_OPTIONS[kind ?? "otro"] ?? RESOLVE_OPTIONS.otro;

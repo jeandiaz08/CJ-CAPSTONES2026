@@ -10,7 +10,7 @@ import { getCatalog, type CatalogItem, type Product } from "@/services/core";
 import { cancelOrder, recoverVoided, resolveIncident, type Order, type OrderEvent, type ResolveCorrections } from "@/services/orders";
 import { originLabel } from "../format";
 import { useOrderResource } from "../hooks/useOrderResources";
-import { resolveOptions, type ResolveOption } from "../rules";
+import { resolveConfig, type ResolveOption } from "../resolveOptions";
 import { dateLabel } from "./OrderDetail";
 
 const MAX_NOTE = 140;
@@ -158,15 +158,16 @@ export function ResolveIncidentDialog({ order, events, courierName, couriers, la
       {errors.courier && <span className="modal-field-error" role="alert">{errors.courier}</span>}
     </div>
   );
+  const config = resolveConfig(order.incidentKind);
   const cards: Record<ResolveOption, CardOption> = {
     address: { value: "address", title: "Corregir dirección", children: addressFields },
     courier: { value: "courier", title: "Cambiar courier", children: courierField },
     split: { value: "split", title: "Dividir envío", badge: "Próximamente", disabled: true },
     retry: { value: "retry", title: "Reintentar", description: "Vuelve a poner en cola el trabajo que falló." },
-    resume: { value: "resume", title: order.incidentKind === "cancelacion" ? "Mantener la orden" : "Reanudar sin cambios", description: "Vuelve a la etapa donde estaba." },
+    resume: { value: "resume", title: config.resumeTitle ?? "Reanudar sin cambios", description: "Vuelve a la etapa donde estaba." },
     cancel: { value: "cancel", title: "Cancelar orden", description: "Definitivo. La orden queda en el Registro histórico.", danger: true },
   };
-  const options = resolveOptions(order.incidentKind).map((value) => cards[value]);
+  const options = config.options.map((value) => cards[value]);
 
   const validate = () => {
     const found: Record<string, string> = {};
