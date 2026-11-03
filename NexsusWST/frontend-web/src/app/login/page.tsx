@@ -7,29 +7,32 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/state/auth";
 
-const DEMO = [
+// La variable se resuelve al compilar: sin ella, esta lista no llega al build.
+const DEMO = process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === "true" ? [
   ["admin@nexus.local", "Administrador"],
   ["jefe@nexus.local", "Jefe de Operaciones"],
   ["empaque@nexus.local", "Empaque (permiso Despacho)"],
   ["analista@nexus.local", "Analista"],
   ["cliente1@nexus.local", "Cliente (Empresa Demo Uno)"],
   ["cliente2@nexus.local", "Cliente (Empresa Demo Dos)"],
-];
+] : [];
 
 function LoginInner() {
   const { login, session, ready } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
   const [busy, setBusy] = useState(false);
-  const message = params.get("error");
+  const message = params.get("error") ? "No se pudo iniciar sesión. Vuelve a intentarlo." : null;
+  const next = params.get("next");
+  const returnTo = next?.startsWith("/") && !next.startsWith("//") ? next : "/";
 
   useEffect(() => {
-    if (ready && session) router.replace("/");
-  }, [ready, session, router]);
+    if (ready && session) router.replace(returnTo);
+  }, [ready, session, router, returnTo]);
 
   const go = async () => {
     setBusy(true);
-    await login(params.get("next") ?? "/");
+    await login(returnTo);
   };
 
   return (
@@ -45,7 +48,7 @@ function LoginInner() {
         <button type="button" className="btn primary block" disabled={busy} onClick={go}>
           {busy ? "Redirigiendo…" : "Ingresar"}
         </button>
-        {process.env.NODE_ENV === "development" && (
+        {process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === "true" && (
           <div className="demo-users">
             <p className="muted small">
               Usuarios de prueba en Keycloak (contraseña <code>Nexus2026!</code>):

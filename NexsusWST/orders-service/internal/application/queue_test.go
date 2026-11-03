@@ -9,6 +9,7 @@ import (
 
 	"github.com/nexuswst/orders-service/internal/domain"
 	"github.com/nexuswst/orders-service/internal/ports"
+	"github.com/nexuswst/orders-service/internal/shared/tenant"
 )
 
 type queueOrders struct {
@@ -258,4 +259,28 @@ func TestManualAssignment(t *testing.T) {
 			t.Fatalf("%v %v", got, err)
 		}
 	})
+}
+
+type packingFulfillment struct {
+	ports.FulfillmentRepository
+	includeDisabled bool
+}
+
+func (f *packingFulfillment) PackingQueue(_ context.Context, _ []int64, _ int64, includeDisabled bool) ([]domain.Order, error) {
+	f.includeDisabled = includeDisabled
+	return nil, nil
+}
+
+func TestPackingQueueDisabledOnlyForManagers(t *testing.T) {
+	for role, want := range map[string]bool{tenant.RoleAdmin: true, tenant.RoleJefeOps: true, tenant.RoleEmpaque: false} {
+		repo := &packingFulfillment{includeDisabled: !want}
+		s := NewService(Deps{Fulfillment: repo})
+		id := tenant.Identity{Profile: tenant.Profile{UserID: 1, Role: role, AllCompanies: true}}
+		if _, err := s.PackingQueue(context.Background(), id, nil); err != nil {
+			t.Fatal(err)
+		}
+		if repo.includeDisabled != want {
+			t.Fatalf("%s: incluye deshabilitados = %v", role, repo.includeDisabled)
+		}
+	}
 }

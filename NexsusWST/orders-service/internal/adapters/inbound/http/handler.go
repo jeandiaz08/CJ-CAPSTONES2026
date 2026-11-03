@@ -43,7 +43,7 @@ func NewHandler(svc *application.Service, rdb *redis.Client, profiles tenant.Pro
 	return &Handler{svc: svc, rdb: rdb, profiles: profiles, log: log, wsOrigins: wsOrigins}
 }
 
-func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) http.Handler) {
+func (h *Handler) Register(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	r := func(pattern string, f http.HandlerFunc) { mux.Handle(pattern, auth(f)) }
 
 	r("GET /v1/meta", h.meta)
@@ -114,15 +114,42 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 	r("GET /v1/notifications", h.notifications)
 	r("POST /v1/notifications/read", h.readNotifications)
 
-	mux.Handle("GET /ws", wsAuth(http.HandlerFunc(h.ws)))
+	r("POST /v1/ws-ticket", h.issueWSTicket)
+	mux.Handle("GET /ws", h.requireWSTicket(http.HandlerFunc(h.ws)))
 }
 
 // ---------------------------------------------------------------------------
 // DTO
 // ---------------------------------------------------------------------------
 
+// labelDTO: estado de la etiqueta. status: none, pending, ready, failed u office («Buscar en oficina»).
+type labelDTO struct {
+	Strategy      string     `json:"strategy"`
+	Status        string     `json:"status"`
+	TrackingCode  string     `json:"trackingCode,omitempty"`
+	DocumentID    *int64     `json:"documentId,omitempty"`
+	DownloadPath  string     `json:"downloadPath,omitempty"`
+	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
+}
+
+func toLabelDTO(o domain.Order) labelDTO {
+	l := labelDTO{Strategy: o.LabelStrategy, Status: o.LabelStatus}
+	switch o.LabelStatus {
+	case domain.LabelPending:
+		l.NextAttemptAt = o.LabelNextAttemptAt
+	case domain.LabelReady:
+		l.TrackingCode, l.DocumentID = o.CourierCode, o.LabelDocumentID
+		if o.LabelDocumentID != nil {
+			l.DownloadPath = fmt.Sprintf("/v1/orders/%d/documents/%d/download", o.ID, *o.LabelDocumentID)
+		}
+	}
+	return l
+}
+
 type orderDTO struct {
 	PackagesCount       int           `json:"packagesCount"`
+	Label               labelDTO      `json:"label"`
+	CourierMaxPackages  *int          `json:"courierMaxPackages"`
 	AssignmentSituation *string       `json:"assignmentSituation"`
 	ID                  int64         `json:"id"`
 	CompanyID           int64         `json:"companyId"`
@@ -153,6 +180,7 @@ type orderDTO struct {
 	Attempts            int           `json:"validationAttempts"`
 	ClaimedBy           *int64        `json:"claimedBy,omitempty"`
 	ClaimedByName       string        `json:"claimedByName,omitempty"`
+	ClaimedAt           *time.Time    `json:"claimedAt,omitempty"`
 	Editable            bool          `json:"editable"`
 	ItemsEditable       bool          `json:"itemsEditable"`
 	Version             int           `json:"version"`
@@ -168,14 +196,14 @@ func toDTO(o domain.Order) orderDTO {
 	if items == nil {
 		items = []domain.Item{}
 	}
-	return orderDTO{PackagesCount: o.PackagesCount, AssignmentSituation: o.AssignmentSituation, ID: o.ID, CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Source: o.Source,
+	return orderDTO{PackagesCount: o.PackagesCount, Label: toLabelDTO(o), CourierMaxPackages: o.CourierMaxPackages, AssignmentSituation: o.AssignmentSituation, ID: o.ID, CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Source: o.Source,
 		Courier: o.Courier, CourierCode: o.CourierCode, RecipientName: o.RecipientName, RecipientPh: o.RecipientPhone,
 		RecipientMail: o.RecipientEmail, AddressLine: o.AddressLine, Commune: o.Commune, RegionCode: o.RegionCode,
 		DispatchType: o.DispatchType, Warehouse: o.Warehouse, CustomerNotes: o.CustomerNotes,
 		Status: string(o.Status), StatusLabel: domain.Labels[o.Status], PrevStatus: string(o.PrevStatus),
 		IncidentKind: o.IncidentKind, IncidentLabel: domain.IncidentLabels[o.IncidentKind],
 		Priority: o.Priority, WaveID: o.WaveID, WMSRef: o.WMSRef, Note: o.Note, LastError: o.LastError,
-		Attempts: o.ValidationAttempts, ClaimedBy: o.ClaimedBy, ClaimedByName: o.ClaimedByName, Editable: o.Editable(), ItemsEditable: o.ItemsEditable(),
+		Attempts: o.ValidationAttempts, ClaimedBy: o.ClaimedBy, ClaimedByName: o.ClaimedByName, ClaimedAt: o.ClaimedAt, Editable: o.Editable(), ItemsEditable: o.ItemsEditable(),
 		Version: o.Version, Items: items, CreatedAt: o.CreatedAt, UpdatedAt: o.UpdatedAt,
 		HandedOverAt: o.HandedOverAt, CancelledAt: o.CancelledAt}
 }
@@ -734,13 +762,17 @@ func (h *Handler) label(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	doc, err := h.svc.PrintLabel(r.Context(), id, ids, oid)
+	res, err := h.svc.PrintLabel(r.Context(), id, ids, oid)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, map[string]any{"document": doc,
-		"downloadPath": fmt.Sprintf("/v1/orders/%d/documents/%d/download", oid, doc.ID)})
+	if res.Document == nil { // pendiente: se reintenta sola y avisa cuando llega
+		httpx.JSON(w, http.StatusAccepted, map[string]any{"label": toLabelDTO(res.Order)})
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, map[string]any{"document": res.Document, "label": toLabelDTO(res.Order),
+		"downloadPath": fmt.Sprintf("/v1/orders/%d/documents/%d/download", oid, res.Document.ID)})
 }
 
 // ---------------------------------------------------------------------------
@@ -1201,7 +1233,7 @@ func (h *Handler) ws(w http.ResponseWriter, r *http.Request) {
 	isClient := id.HasRole(tenant.RoleCliente)
 
 	// La conexión no sobrevive al token (10 min): al vencer se cierra y la
-	// interfaz se reconecta con el token renovado. Además se relee el perfil
+	// interfaz se reconecta con un ticket nuevo. Además se relee el perfil
 	// cada 30 s: un usuario deshabilitado deja de recibir avisos de inmediato.
 	expire := time.NewTimer(time.Until(time.Unix(id.TokenExpiresAt, 0)))
 	defer expire.Stop()

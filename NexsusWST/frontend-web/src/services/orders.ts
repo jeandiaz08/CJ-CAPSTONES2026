@@ -16,8 +16,19 @@ export type OrderStatus =
 
 export type OrderItem = { sku: string; quantity: number };
 
+export type OrderLabel = {
+  strategy: "api" | "office";
+  status: "none" | "pending" | "ready" | "failed" | "office";
+  trackingCode?: string;
+  documentId?: number;
+  downloadPath?: string;
+  nextAttemptAt?: string;
+};
+
 export type Order = {
   packagesCount: number;
+  label: OrderLabel;
+  courierMaxPackages: number | null;
   warehouse: string;
   assignmentSituation: "en_cola" | "invas_agotado" | "fuera_corte" | "sin_regla" | null;
   id: number;
@@ -39,6 +50,7 @@ export type Order = {
   incidentLabel?: string;
   claimedBy?: number;
   claimedByName?: string;
+  claimedAt?: string;
   editable?: boolean;
   itemsEditable?: boolean;
   status: OrderStatus;
@@ -109,7 +121,8 @@ export function listOrders(f: OrderFilters, companyId: number | null) {
   return api<{ data: Order[]; total: number }>("orders", withCompany(`/v1/orders?${p}`, companyId));
 }
 
-export type Package = { manifestId: number | null; id: number; code: string; weightKg?: number };
+export type PackageInput = { weightKg?: number; lengthCm?: number; widthCm?: number; heightCm?: number };
+export type Package = PackageInput & { manifestId: number | null; id: number; code: string };
 export type OrderDocument = { id: number; kind: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string };
 
 export const getOrder = (id: number, companyId: number | null) =>
@@ -171,8 +184,11 @@ export const createOrder = (body: NewOrder) => api<Order>("orders", "/v1/orders"
 const post = <T>(path: string, body: unknown = {}) => api<T>("orders", path, { method: "POST", body: JSON.stringify(body) });
 
 // Acciones por caso de uso (API v1.1). Ver orders-service/API.md.
+export const getPackingQueue = (companyId: number | null) => api<{ data: Order[] }>("orders", withCompany("/v1/packing/queue", companyId));
 export const takeForPacking = (id: number) => post<Order>(`/v1/orders/${id}/packing/take`);
-export const setPackages = (id: number, packages: { weightKg?: number }[]) =>
+export const releasePacking = (id: number) => post<Order>(`/v1/orders/${id}/packing/release`);
+export const printLabel = (id: number) => post<{ document?: OrderDocument; downloadPath?: string; label: OrderLabel }>(`/v1/orders/${id}/label`);
+export const setPackages = (id: number, packages: PackageInput[]) =>
   api<{ data: Package[] }>("orders", `/v1/orders/${id}/packages`, { method: "PUT", body: JSON.stringify({ packages }) });
 export const confirmPacking = (id: number, items: OrderItem[], version: number) =>
   post<{ order: Order; discrepancies: string[] }>(`/v1/orders/${id}/packing/confirm`, { items, version });

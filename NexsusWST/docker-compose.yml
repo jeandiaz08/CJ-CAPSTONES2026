@@ -59,7 +59,16 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      # El navegador SIEMPRE usa rutas relativas /api/... a través de Traefik.
+      # El navegador SIEMPRE usa rutas relativas: /bff/... (Next agrega el token) y /api/orders/ws.
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost}
+      AUTH_URL: ${APP_PUBLIC_URL:-http://localhost}/api/auth
+      AUTH_SECRET: ${AUTH_SECRET:?Define AUTH_SECRET en .env}
+      AUTH_TRUST_HOST: "true"
+      AUTH_KEYCLOAK_ID: nexus-web
+      AUTH_KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://localhost/auth}/realms/nexuswst
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080/auth
+      CORE_INTERNAL_URL: http://core:8080
+      ORDERS_INTERNAL_URL: http://orders:8081
     networks:
       - edge
     labels:

@@ -13,7 +13,8 @@ Base desde el navegador (siempre a través de Traefik, mismo origen):
 
 - La interfaz inicia sesión en **Keycloak** con OIDC **código + PKCE** (cliente público `nexus-web`). El token de acceso dura **10 min**; se renueva con `refresh_token` (sesión de 12 h, se cierra tras 2 h sin uso).
 - Cada petición lleva `Authorization: Bearer <access_token>`. Core y Órdenes verifican el token con las claves públicas de Keycloak (RS256) y leen el **perfil de Nexus** en PostgreSQL en cada petición.
-- El WebSocket recibe el token en `?access_token=`.
+- El WebSocket se abre con un ticket: `POST /v1/ws-ticket` (con Bearer) devuelve `{ticket, expiresIn: 30}`. Sirve una sola vez y cada reconexión pide uno nuevo. `?access_token=` ya no se acepta.
+- La interfaz web no maneja tokens: llama a `/bff/{core|orders}/...` de Next, que agrega el Bearer en el servidor. `/api/core` y `/api/orders` siguen disponibles con Bearer para Postman y curl.
 - Solo en desarrollo (`KC_WEB_DIRECT_GRANTS=true`) se puede pedir un token con usuario y contraseña, para Postman o curl:
 
 ```bash
@@ -84,7 +85,8 @@ Contiene estos campos:
 - **Destino:** `recipientName, recipientPhone, recipientEmail, addressLine, commune, regionCode, dispatchType, customerNotes`.
 - **Estado:** `status, statusLabel, prevStatus, incidentKind, incidentLabel, note (motivo vigente)`.
 - **Cola e Invas:** `priority, waveId, wmsRef`.
-- **Empaque y control:** `claimedBy, claimedByName, editable, version, items[{sku, quantity}]`.
+- **Empaque y control:** `claimedBy, claimedByName, claimedAt, editable, version, items[{sku, quantity}]`.
+- **Etiqueta:** `label{strategy (api|office), status (none|pending|ready|failed|office), trackingCode, documentId, downloadPath, nextAttemptAt}`, `courierMaxPackages`. Sigue disponible con la orden Lista para retiro.
 - **Fechas:** `createdAt, updatedAt, handedOverAt, cancelledAt`.
 
 ### Ingreso y consulta (H-05, H-08, CU-01, CU-08)
@@ -135,12 +137,12 @@ Contiene estos campos:
 
 | Método | Ruta | Detalle |
 | --- | --- | --- |
-| GET | `/v1/packing/queue` | Preparadas + las que tengo En empaque (+ las tomadas por usuarios deshabilitados) |
+| GET | `/v1/packing/queue` | Preparadas + las que tengo En empaque. Jefe/Admin también reciben las tomadas por usuarios deshabilitados. Orden: prioridad y luego `created_at`. |
 | POST | `/v1/orders/{id}/packing/take` | Preparada → En empaque. Si otra persona la tomó: 409 |
 | POST | `/v1/orders/{id}/packing/release` | Devolver a la bandeja |
 | PUT | `/v1/orders/{id}/packages` | `{packages:[{weightKg?, lengthCm?, widthCm?, heightCm?}]}` → códigos `NX-{orden}-{n}` |
 | POST | `/v1/orders/{id}/packing/confirm` | `{items:[{sku, quantity}] contados, version}` → Lista para retiro, o Incidencia si no coincide (`discrepancies[]`) o si el courier no admite esa cantidad de bultos. Dos confirmaciones a la vez: la segunda recibe 409. |
-| POST | `/v1/orders/{id}/label` | Etiqueta del courier (PDF, hoy **simulada**) guardada como documento; deja el código del courier |
+| POST | `/v1/orders/{id}/label` | Etiqueta del courier (PDF, hoy **simulada**). Lista: 201 `{document, downloadPath, label}`. Pendiente: 202 `{label}`; se reintenta sola y avisa por WebSocket y notificación. Courier «Buscar en oficina»: 409. Si cambia la cantidad de bultos, la etiqueta queda sin efecto. |
 
 ### Documentos (H-05 esc. 3)
 
@@ -180,7 +182,7 @@ Contiene estos campos:
 ### Avisos y tiempo real (H-15)
 
 - `GET /v1/notifications?unread=true` → `{data, unread}` · `POST /v1/notifications/read {ids}`
-- `GET /ws?access_token=…` (WebSocket). Mensajes:
+- `POST /v1/ws-ticket` → `{ticket, expiresIn}` · `GET /ws?ticket=…` (WebSocket; ticket inválido, usado o vencido: 401). Mensajes:
   - `{"type":"order.changed", orderId, companyId, status, version, priority}`
   - `{"type":"notification", audience, notification}`
   - Al reconectar, volver a consultar la API.
