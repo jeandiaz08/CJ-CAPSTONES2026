@@ -64,6 +64,20 @@ Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se co
 
 Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni el permiso `despacho`.
 
+### Productos y kits (H-04, RF-06) — Administrador, Jefe de Operaciones y Cliente (su empresa)
+
+| Método | Ruta | Cuerpo / filtros | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/products` | `?search=&limit=&offset=&company_id=` | Listado `{data}` acotado a las empresas autorizadas |
+| GET | `/v1/products/{id}` | | Detalle |
+| POST | `/v1/products` | `{companyId, sku, description, type: simple\|kit}` | Crea. 409 si el SKU ya existe en la empresa |
+| GET | `/v1/products/{id}/components` | | Composición del kit: `{kit, components: [{productId, sku, description, quantity}]}` |
+| PUT | `/v1/products/{id}/components` | `{components: [{sku, quantity}]}` | **Reemplaza** la composición completa (transacción). Responde igual que el GET |
+
+Reglas de la composición (SCRUM-100): solo para productos `kit` (409 `not_kit` si es simple); de 1 a 50 componentes; cada componente debe existir en la **misma empresa**, estar activo y ser `simple` (no se permiten kits dentro de kits); cantidad > 0 y sin SKU repetidos. Si algo no se cumple responde 422 `invalid_component` con el SKU y el motivo, y no se guarda nada. Un kit de otra empresa responde 404.
+
+El kit **no tiene stock propio**: al validar una orden, Órdenes expande cada kit en sus componentes (cantidad del kit × cantidad del componente), consulta su stock y registra el comprometido sobre ellos. Una orden con un kit sin composición pasa a Incidencia con el motivo.
+
 ### Catálogos (caché Redis + ETag)
 
 `GET /v1/catalogs/{regions|couriers|communes|dispatch_types}`

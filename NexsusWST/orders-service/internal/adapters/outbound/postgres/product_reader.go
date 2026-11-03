@@ -34,14 +34,6 @@ func (p *CatalogReader) MissingSKUs(ctx context.Context, companyID int64, skus [
 	return collect[string](rows)
 }
 
-func (p *CatalogReader) KitSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error) {
-	rows, err := p.db.Query(ctx, `SELECT sku FROM products WHERE company_id=$1 AND sku = ANY($2) AND type='kit'`, companyID, skus)
-	if err != nil {
-		return nil, err
-	}
-	return collect[string](rows)
-}
-
 func (p *CatalogReader) CompanyActive(ctx context.Context, companyID int64) (bool, error) {
 	var ok bool
 	err := p.db.QueryRow(ctx, `SELECT active FROM companies WHERE id=$1`, companyID).Scan(&ok)

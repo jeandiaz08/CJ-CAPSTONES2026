@@ -23,6 +23,8 @@ func (h *Handler) Register(mux *http.ServeMux, auth func(http.Handler) http.Hand
 	mux.Handle("GET /v1/products", auth(http.HandlerFunc(h.list)))
 	mux.Handle("GET /v1/products/{id}", auth(http.HandlerFunc(h.get)))
 	mux.Handle("POST /v1/products", auth(write(http.HandlerFunc(h.create))))
+	mux.Handle("GET /v1/products/{id}/components", auth(http.HandlerFunc(h.components)))
+	mux.Handle("PUT /v1/products/{id}/components", auth(write(http.HandlerFunc(h.setComponents))))
 }
 
 type productDTO struct {
@@ -111,4 +113,90 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	default:
 		httpx.JSON(w, http.StatusCreated, toDTO(p))
 	}
+}
+
+// --- Composición de kits (H-04-T01) ---------------------------------------
+
+type componentDTO struct {
+	ProductID   int64  `json:"productId"`
+	SKU         string `json:"sku"`
+	Description string `json:"description"`
+	Quantity    int    `json:"quantity"`
+}
+
+func kitResponse(kit domain.Product, comps []domain.KitComponent) map[string]any {
+	out := make([]componentDTO, 0, len(comps))
+	for _, c := range comps {
+		out = append(out, componentDTO{ProductID: c.ComponentID, SKU: c.SKU, Description: c.Description, Quantity: c.Quantity})
+	}
+	return map[string]any{"kit": toDTO(kit), "components": out}
+}
+
+func (h *Handler) components(w http.ResponseWriter, r *http.Request) {
+	id, _ := tenant.From(r.Context())
+	scope, _, err := id.Scope(r)
+	if err != nil {
+		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+		return
+	}
+	pid, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "id inválido")
+		return
+	}
+	kit, comps, err := h.svc.Components(r.Context(), scope, pid)
+	if writeKitErr(w, err) {
+		return
+	}
+	httpx.JSON(w, http.StatusOK, kitResponse(kit, comps))
+}
+
+func (h *Handler) setComponents(w http.ResponseWriter, r *http.Request) {
+	id, _ := tenant.From(r.Context())
+	scope, _, err := id.Scope(r)
+	if err != nil {
+		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+		return
+	}
+	pid, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "id inválido")
+		return
+	}
+	var body struct {
+		Components []struct {
+			SKU      string `json:"sku"`
+			Quantity int    `json:"quantity"`
+		} `json:"components"`
+	}
+	if err := httpx.Decode(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido")
+		return
+	}
+	in := make([]domain.ComponentInput, 0, len(body.Components))
+	for _, c := range body.Components {
+		in = append(in, domain.ComponentInput{SKU: c.SKU, Quantity: c.Quantity})
+	}
+	kit, comps, err := h.svc.SetComponents(r.Context(), scope, pid, in)
+	if writeKitErr(w, err) {
+		return
+	}
+	httpx.JSON(w, http.StatusOK, kitResponse(kit, comps))
+}
+
+// writeKitErr traduce los errores de composición; devuelve true si respondió.
+func writeKitErr(w http.ResponseWriter, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, domain.ErrNotFound):
+		httpx.Error(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, domain.ErrNotKit):
+		httpx.Error(w, http.StatusConflict, "not_kit", err.Error())
+	case errors.Is(err, domain.ErrInvalidComponent):
+		httpx.Error(w, http.StatusUnprocessableEntity, "invalid_component", err.Error())
+	default:
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "error en la composición del kit")
+	}
+	return true
 }

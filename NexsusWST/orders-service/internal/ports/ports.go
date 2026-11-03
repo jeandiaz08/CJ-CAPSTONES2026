@@ -119,7 +119,10 @@ type ProductOption struct{ SKU, Description string }
 
 type CatalogReader interface {
 	MissingSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
-	KitSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
+	// Kits (SCRUM-100): líneas de stock con los kits expandidos en sus
+	// componentes, y kits que aún no tienen composición.
+	StockLines(ctx context.Context, companyID int64, items []domain.Item) ([]domain.Item, error)
+	EmptyKits(ctx context.Context, companyID int64, skus []string) ([]string, error)
 	CompanyActive(ctx context.Context, companyID int64) (bool, error)
 	CourierActive(ctx context.Context, code string) (bool, error)
 	Communes(ctx context.Context) ([]string, error)

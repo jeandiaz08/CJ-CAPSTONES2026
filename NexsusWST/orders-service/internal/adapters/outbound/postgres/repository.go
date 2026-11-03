@@ -670,8 +670,12 @@ func (r *Repository) FinishValidation(ctx context.Context, orderID int64, invasS
 			out = o
 			return nil // otra operación ya la movió
 		}
-		// Bloquea las filas de comprometido de estos SKU (orden fijo -> sin deadlocks)
-		items := sortedItems(o.Items)
+		// Un kit compromete el stock de sus componentes (SCRUM-100). Las líneas
+		// vienen ordenadas por SKU: bloqueos en orden fijo -> sin deadlocks.
+		items, err := stockLines(ctx, tx, o.CompanyID, o.Items)
+		if err != nil {
+			return err
+		}
 		for _, it := range items {
 			if _, err := tx.Exec(ctx, `INSERT INTO stock_committed (company_id, sku, quantity) VALUES ($1,$2,0)
 				ON CONFLICT DO NOTHING`, o.CompanyID, it.SKU); err != nil {
@@ -696,9 +700,18 @@ func (r *Repository) FinishValidation(ctx context.Context, orderID int64, invasS
 		ev, reason := domain.EvVoid, shortage
 		if ok {
 			ev, reason = domain.EvValidate, ""
-			for _, it := range o.Items {
+			// Se guarda lo comprometido para liberar exactamente lo mismo,
+			// aunque después cambie la composición del kit.
+			if _, err := tx.Exec(ctx, `DELETE FROM order_stock_lines WHERE order_id=$1`, o.ID); err != nil {
+				return err
+			}
+			for _, it := range items {
 				if _, err := tx.Exec(ctx, `UPDATE stock_committed SET quantity=quantity+$3, updated_at=now()
 					WHERE company_id=$1 AND sku=$2`, o.CompanyID, it.SKU, it.Quantity); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO order_stock_lines (order_id, sku, quantity) VALUES ($1,$2,$3)`,
+					o.ID, it.SKU, it.Quantity); err != nil {
 					return err
 				}
 			}
@@ -790,26 +803,38 @@ func (r *Repository) MarkRulesChecked(ctx context.Context, ids []int64) error {
 }
 
 func releaseCommitted(ctx context.Context, q querier, o domain.Order) error {
-	if len(o.Items) == 0 {
-		if err := loadItems(ctx, q, &o); err != nil {
+	// Se libera lo que quedó registrado al validar (con los kits expandidos).
+	// Órdenes validadas antes de SCRUM-100 no tienen registro: se usan sus líneas.
+	rows, err := q.Query(ctx, `DELETE FROM order_stock_lines WHERE order_id=$1 RETURNING sku, quantity`, o.ID)
+	if err != nil {
+		return err
+	}
+	var lines []domain.Item
+	for rows.Next() {
+		var it domain.Item
+		if err := rows.Scan(&it.SKU, &it.Quantity); err != nil {
+			rows.Close()
 			return err
 		}
+		lines = append(lines, it)
 	}
-	for _, it := range o.Items {
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(lines) == 0 {
+		if len(o.Items) == 0 {
+			if err := loadItems(ctx, q, &o); err != nil {
+				return err
+			}
+		}
+		lines = o.Items
+	}
+	for _, it := range lines {
 		if _, err := q.Exec(ctx, `UPDATE stock_committed SET quantity=GREATEST(quantity-$3,0), updated_at=now()
 			WHERE company_id=$1 AND sku=$2`, o.CompanyID, it.SKU, it.Quantity); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func sortedItems(items []domain.Item) []domain.Item {
-	out := append([]domain.Item(nil), items...)
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].SKU < out[j-1].SKU; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
-	return out
 }
