@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Printer } from "lucide-react";
 import { showToast } from "@/components/Toast";
-import { apiErrorMessage, downloadFile } from "@/services/api";
+import { apiErrorMessage, printPdf } from "@/services/api";
 import { printLabel, type Order } from "@/services/orders";
 
 export const LABEL_STATUS_TEXT: Record<Order["label"]["status"], string> = {
@@ -36,7 +36,7 @@ export function LabelStatusAction({ order, packagesCount, disabled, onChanged }:
     setBusy(true);
     try {
       const res = await printLabel(order.id);
-      if (res.document && res.downloadPath) await downloadFile(res.downloadPath, res.document.filename);
+      if (res.document && res.downloadPath) await printPdf(res.downloadPath, res.document.filename);
       else showToast("Etiqueta pendiente: se reintenta sola y avisa cuando llegue.", "info");
       onChanged();
     } catch (e) {

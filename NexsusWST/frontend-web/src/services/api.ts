@@ -74,16 +74,64 @@ export function saveBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-// Descarga con el token de sesión. Conserva el mensaje del servidor si falla (por ejemplo, el tope de filas).
-export async function downloadFile(path: string, fallbackName: string) {
+// Pide un archivo con la sesión. Conserva el mensaje del servidor si falla (por ejemplo, el tope de filas).
+async function fetchWithSession(path: string) {
   const token = getToken();
   const response = await fetch(`/api/orders${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: "no-store" });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new ApiError(body.message || "No se pudo descargar el archivo.", response.status, body.error, [], body.ref);
   }
+  return response;
+}
+
+export async function downloadFile(path: string, fallbackName: string) {
+  const response = await fetchWithSession(path);
   const name = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1];
   saveBlob(await response.blob(), name ?? fallbackName);
+}
+
+const PRINT_LOAD_TIMEOUT_MS = 8000;
+const PRINT_URL_LIFETIME_MS = 60000;
+
+// Si no se puede imprimir: pestaña nueva y, si también la bloquea, descarga.
+function openPdfFallback(url: string, blob: Blob, filename: string) {
+  if (!window.open(url, "_blank")) saveBlob(blob, filename);
+}
+
+// Abre el diálogo de impresión del navegador con el PDF, desde un iframe oculto.
+export async function printPdf(path: string, fallbackName: string) {
+  const response = await fetchWithSession(path);
+  const blob = new Blob([await response.blob()], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const iframe = document.createElement("iframe");
+  iframe.title = "Impresión";
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+  let settled = false;
+  const fallback = () => {
+    if (settled) return;
+    settled = true;
+    openPdfFallback(url, blob, fallbackName);
+  };
+  const timer = setTimeout(fallback, PRINT_LOAD_TIMEOUT_MS);
+  iframe.onload = () => {
+    if (settled) return;
+    clearTimeout(timer);
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      settled = true;
+    } catch {
+      fallback();
+    }
+  };
+  iframe.src = url;
+  document.body.append(iframe);
+  // El diálogo no avisa cuándo termina: se limpia cuando ya no hace falta el archivo.
+  setTimeout(() => {
+    iframe.remove();
+    URL.revokeObjectURL(url);
+  }, PRINT_URL_LIFETIME_MS);
 }
 
 export async function fetchDocument(path:string){const token=getToken();const response=await fetch(`/api/orders${path}`,{headers:token?{Authorization:`Bearer ${token}`}:{},cache:"no-store"});if(!response.ok)throw new ApiError("No se pudo descargar el documento",response.status);return response.blob()}
