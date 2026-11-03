@@ -94,7 +94,23 @@ cp .env.example .env
 
 Abre `.env` y cambia los valores que dicen `CAMBIAR`. Usa contraseñas **sin** `@ : / ? #` (van dentro de una URL de conexión). Para los secretos largos (`KEYCLOAK_CORE_CLIENT_SECRET`, `INTEGRATIONS_KEY`) usa `openssl rand -hex 32`.
 
-### Paso 3. Construir y levantar
+### Paso 3. Compilar el tema de Keycloak
+
+Keycloak monta `infrastructure/keycloak/theme/dist_keycloak/nexuswst-keycloak-theme.jar`. Ese `.jar` es un artefacto y **no va en Git**: cada máquina lo compila antes de levantar Keycloak. Solo requiere Docker.
+
+```bash
+make theme
+```
+
+Sin `make` (PowerShell), desde la carpeta del repositorio:
+
+```powershell
+docker run --rm -v "${PWD}/infrastructure/keycloak/theme:/app" -w /app node:22-bookworm-slim sh docker-build.sh
+```
+
+`make up` y `make prod-up` lo compilan solos si falta. Si cambias el tema, vuelve a ejecutar `make theme` y luego `docker compose restart keycloak`.
+
+### Paso 4. Construir y levantar
 
 ```bash
 docker compose up -d --build
@@ -107,7 +123,7 @@ postgres, redis ──► migrate-core ──► migrate-orders ──► core, 
 postgres ──► keycloak-db-init ──► keycloak (importa el realm la primera vez; tarda ~1 min)
 ```
 
-### Paso 4. Verificar que todo está arriba
+### Paso 5. Verificar que todo está arriba
 
 ```bash
 docker compose ps
@@ -126,7 +142,7 @@ Debes ver `core`, `orders`, `postgres`, `redis` y `keycloak` como **healthy**, y
 | http://localhost/auth/admin | Consola de Keycloak (solo emergencias) → `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` de tu `.env` |
 | http://127.0.0.1:8025 | Mailpit: aquí llegan los correos de prueba (definir/recuperar contraseña, avisos) |
 
-### Paso 5. Guardar `go.sum` en Git
+### Paso 6. Guardar `go.sum` en Git
 
 `backend-core/go.sum` y `orders-service/go.sum` ya vienen en el repositorio (garantizan builds reproducibles). Si agregas una dependencia, regenéralos:
 
@@ -137,7 +153,7 @@ docker compose run --rm --no-deps core go mod tidy
 docker compose run --rm --no-deps orders go mod tidy
 ```
 
-### Paso 6. Entrar a la aplicación
+### Paso 7. Entrar a la aplicación
 
 Abre http://localhost → **/login** → botón **Ingresar** → pantalla de **Keycloak** (en español) → vuelves a NexusWST con tu perfil. Usuarios de prueba (existen solo en desarrollo, contraseña **`Nexus2026!`**):
 
@@ -258,7 +274,8 @@ Cada servicio migra solo **sus** tablas (cada tabla tiene un solo dueño, DA-03)
    - Secretos nuevos y largos para `KEYCLOAK_*` e `INTEGRATIONS_KEY`.
    - Unos 1,25 GB de RAM para Keycloak.
    - Antes de actualizar la versión de Keycloak, respalda la base (incluye el esquema `keycloak`).
-6. Levanta:
+6. Compila el tema de Keycloak con `make theme` (paso 3).
+7. Levanta:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
@@ -282,6 +299,7 @@ En producción: imágenes compiladas sin herramientas de desarrollo, usuario sin
 | Cambié `.env` y no se aplica | `docker compose up -d` recrea los contenedores afectados (no basta `restart`) |
 | Al ingresar: «redirect_uri inválido» o «token inválido» | `APP_PUBLIC_URL` / `KEYCLOAK_PUBLIC_URL` no coinciden con la URL que usas en el navegador (incluye el puerto si `HTTP_PORT` no es 80). El realm se importa **una sola vez**: si cambias la URL, bórralo en la consola de Keycloak o recrea el esquema |
 | 403 `profile_missing` en Órdenes | El usuario aún no entra por la app: el perfil se crea al llamar `GET /api/core/v1/auth/me` (lo hace el login) |
+| `keycloak` no arranca y `nexuswst-keycloak-theme.jar` aparece como carpeta | Se levantó sin compilar el tema y Docker creó una carpeta en su lugar. Bórrala, ejecuta `make theme` y levanta de nuevo |
 | `keycloak` tarda en quedar *healthy* | Normal la primera vez (crea sus tablas e importa el realm, ~1–2 min). `docker compose logs -f keycloak` |
 
 ---
@@ -297,7 +315,6 @@ Rotulado explícitamente para no presentarlo como funcionalidad terminada (DAS �
 | Etiquetas de courier y detalle de Mercado Libre (`courier.Simulated`) | PDF y datos de prueba rotulados «SIMULACIÓN» | PV-08 |
 | Catálogo de comunas | RM completa + principales comunas (113); falta el listado oficial (346) | Carga CUT/SUBDERE |
 | Login con PKCE sin librería (`src/services/oidc.ts`) | Puente funcional hasta Auth.js | H-01 T05/T06 (Jean) |
-| Tema WeStorage en el login de Keycloak | Tema por defecto con el nombre NexusWST · WeStorage | H-01 T07 (Jean) |
 | Alcance por empresa del personal interno (`all_companies`) | Propuesta | PV-02 |
 | `000002_seed_dev`, `000004_seed_dev_v11`, `dev-users` de Keycloak | Datos y usuarios ficticios | Retirar antes de producción |
 
