@@ -157,6 +157,8 @@ docker compose run --rm --no-deps orders go mod tidy
 
 Abre http://localhost → **/login** → botón **Ingresar** → pantalla de **Keycloak** (en español) → vuelves a NexusWST con tu perfil. Usuarios de prueba (existen solo en desarrollo, contraseña **`Nexus2026!`**):
 
+La sesión la maneja Auth.js: los tokens quedan en una cookie httpOnly cifrada y el navegador llama a `/bff/{core|orders}/...`. El WebSocket se abre con un ticket de un solo uso.
+
 | Correo | Rol | Qué ve |
 |---|---|---|
 | `admin@nexus.local` | Administrador | Todo |
@@ -314,7 +316,6 @@ Rotulado explícitamente para no presentarlo como funcionalidad terminada (DAS �
 | Botón "Confirmar preparación (sim.)" | Solo en desarrollo; en producción lo informa Invas | PV-03/PV-04 |
 | Etiquetas de courier y detalle de Mercado Libre (`courier.Simulated`) | PDF y datos de prueba rotulados «SIMULACIÓN» | PV-08 |
 | Catálogo de comunas | RM completa + principales comunas (113); falta el listado oficial (346) | Carga CUT/SUBDERE |
-| Login con PKCE sin librería (`src/services/oidc.ts`) | Puente funcional hasta Auth.js | H-01 T05/T06 (Jean) |
 | Alcance por empresa del personal interno (`all_companies`) | Propuesta | PV-02 |
 | `infrastructure/dev-seed`, `dev-users` de Keycloak | Datos y usuarios ficticios | Solo desarrollo (`docker-compose.override.yml`) |
 

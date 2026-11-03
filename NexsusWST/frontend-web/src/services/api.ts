@@ -1,6 +1,5 @@
-// Cliente HTTP del NAVEGADOR: siempre rutas relativas a través de Traefik
-// (/api/core, /api/orders). Nunca nombres internos de Docker (DAS §7.2).
-import { getToken } from "@/state/auth";
+// Cliente HTTP del NAVEGADOR: siempre rutas relativas al BFF de Next (/bff/core, /bff/orders),
+// que agrega el token en el servidor. Nunca nombres internos de Docker (DAS §7.2).
 
 export type FieldError = { field: string; message: string };
 
@@ -28,21 +27,19 @@ export function apiErrorMessage(error: unknown): string {
 type Service = "core" | "orders";
 
 export async function api<T>(service: Service, path: string, init?: RequestInit): Promise<T> {
-  const token = getToken();
-  const res = await fetch(`/api/${service}${path}`, {
+  const res = await fetch(`/bff/${service}${path}`, {
     cache: "no-store",
     ...init,
     headers: {
       // Con FormData el navegador pone el Content-Type con su boundary.
       ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
   });
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));
   if (res.status === 401 && typeof window !== "undefined") {
-    // Token inválido o vencido, o usuario deshabilitado (perfil inactivo)
+    // El BFF ya intentó renovar una vez: sesión terminada o usuario deshabilitado.
     window.dispatchEvent(new CustomEvent("nexus:unauthorized", { detail: { code: body.error } }));
   }
   if (!res.ok) {
@@ -60,9 +57,10 @@ export function withCompany(path: string, companyId: number | null): string {
   return path + (path.includes("?") ? "&" : "?") + `company_id=${companyId}`;
 }
 
-export function wsUrl(path: string): string {
+// El WebSocket no pasa por el BFF: se abre directo a Órdenes con un ticket de un solo uso.
+export function wsUrl(path: string, ticket: string): string {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${window.location.host}/api/orders${path}?access_token=${encodeURIComponent(getToken() ?? "")}`;
+  return `${proto}://${window.location.host}/api/orders${path}?ticket=${encodeURIComponent(ticket)}`;
 }
 
 export function saveBlob(blob: Blob, filename: string) {
@@ -76,10 +74,10 @@ export function saveBlob(blob: Blob, filename: string) {
 
 // Pide un archivo con la sesión. Conserva el mensaje del servidor si falla (por ejemplo, el tope de filas).
 async function fetchWithSession(path: string) {
-  const token = getToken();
-  const response = await fetch(`/api/orders${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: "no-store" });
+  const response = await fetch(`/bff/orders${path}`, { cache: "no-store" });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    if (response.status === 401) window.dispatchEvent(new CustomEvent("nexus:unauthorized", { detail: { code: body.error } }));
     throw new ApiError(body.message || "No se pudo descargar el archivo.", response.status, body.error, [], body.ref);
   }
   return response;
@@ -134,4 +132,4 @@ export async function printPdf(path: string, fallbackName: string) {
   }, PRINT_URL_LIFETIME_MS);
 }
 
-export async function fetchDocument(path:string){const token=getToken();const response=await fetch(`/api/orders${path}`,{headers:token?{Authorization:`Bearer ${token}`}:{},cache:"no-store"});if(!response.ok)throw new ApiError("No se pudo descargar el documento",response.status);return response.blob()}
+export async function fetchDocument(path:string){const response=await fetch(`/bff/orders${path}`,{cache:"no-store"});if(!response.ok)throw new ApiError("No se pudo descargar el documento",response.status);return response.blob()}

@@ -22,15 +22,17 @@ function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
   const [busy, setBusy] = useState(false);
-  const message = params.get("error");
+  const message = params.get("error") ? "No se pudo iniciar sesión. Vuelve a intentarlo." : null;
+  const next = params.get("next");
+  const returnTo = next?.startsWith("/") && !next.startsWith("//") ? next : "/";
 
   useEffect(() => {
-    if (ready && session) router.replace("/");
-  }, [ready, session, router]);
+    if (ready && session) router.replace(returnTo);
+  }, [ready, session, router, returnTo]);
 
   const go = async () => {
     setBusy(true);
-    await login(params.get("next") ?? "/");
+    await login(returnTo);
   };
 
   return (
