@@ -39,6 +39,7 @@ export type Order = {
   incidentLabel?: string;
   claimedBy?: number;
   claimedByName?: string;
+  claimedAt?: string;
   editable?: boolean;
   itemsEditable?: boolean;
   status: OrderStatus;
@@ -171,6 +172,7 @@ export const createOrder = (body: NewOrder) => api<Order>("orders", "/v1/orders"
 const post = <T>(path: string, body: unknown = {}) => api<T>("orders", path, { method: "POST", body: JSON.stringify(body) });
 
 // Acciones por caso de uso (API v1.1). Ver orders-service/API.md.
+export const getPackingQueue = (companyId: number | null) => api<{ data: Order[] }>("orders", withCompany("/v1/packing/queue", companyId));
 export const takeForPacking = (id: number) => post<Order>(`/v1/orders/${id}/packing/take`);
 export const setPackages = (id: number, packages: { weightKg?: number }[]) =>
   api<{ data: Package[] }>("orders", `/v1/orders/${id}/packages`, { method: "PUT", body: JSON.stringify({ packages }) });

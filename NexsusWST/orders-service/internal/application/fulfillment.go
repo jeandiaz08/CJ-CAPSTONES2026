@@ -63,7 +63,8 @@ func (s *Service) PackingQueue(ctx context.Context, id tenant.Identity, scope []
 	if !canPack(id) {
 		return nil, domain.ErrForbidden
 	}
-	return s.Fulfillment.PackingQueue(ctx, scope, id.UserID)
+	// Las órdenes de usuarios deshabilitados solo las ven quienes pueden soltarlas.
+	return s.Fulfillment.PackingQueue(ctx, scope, id.UserID, id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps))
 }
 
 // TakeForPacking - Empaque toma la orden (pasa a «En empaque»). Si dos

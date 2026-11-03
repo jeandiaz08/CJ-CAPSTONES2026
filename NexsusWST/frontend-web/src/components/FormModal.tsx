@@ -4,7 +4,7 @@ import type { FormEvent, ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 import { Modal } from "./Modal";
 
-export type SubmitTone = "primary" | "danger" | "success";
+export type SubmitTone = "primary" | "danger" | "success" | "highlight";
 
 // Modal de formulario: encabezado, cuerpo con scroll y pie fijo.
 // Mientras se envía no se puede cerrar ni volver a enviar.

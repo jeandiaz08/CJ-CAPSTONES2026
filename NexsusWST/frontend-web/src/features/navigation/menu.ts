@@ -93,7 +93,7 @@ export const MENU: MenuSection[] = [
         ]
       },
       {
-        href: "/empaque",
+        href: "/ordenes/empaque",
         label: "Empaque",
         icon: PackageCheck,
         roles: [...INTERNOS, "empaque"],

@@ -84,7 +84,7 @@ Contiene estos campos:
 - **Destino:** `recipientName, recipientPhone, recipientEmail, addressLine, commune, regionCode, dispatchType, customerNotes`.
 - **Estado:** `status, statusLabel, prevStatus, incidentKind, incidentLabel, note (motivo vigente)`.
 - **Cola e Invas:** `priority, waveId, wmsRef`.
-- **Empaque y control:** `claimedBy, claimedByName, editable, version, items[{sku, quantity}]`.
+- **Empaque y control:** `claimedBy, claimedByName, claimedAt, editable, version, items[{sku, quantity}]`.
 - **Fechas:** `createdAt, updatedAt, handedOverAt, cancelledAt`.
 
 ### Ingreso y consulta (H-05, H-08, CU-01, CU-08)
@@ -135,7 +135,7 @@ Contiene estos campos:
 
 | Método | Ruta | Detalle |
 | --- | --- | --- |
-| GET | `/v1/packing/queue` | Preparadas + las que tengo En empaque (+ las tomadas por usuarios deshabilitados) |
+| GET | `/v1/packing/queue` | Preparadas + las que tengo En empaque. Jefe/Admin también reciben las tomadas por usuarios deshabilitados. Orden: prioridad y luego `created_at`. |
 | POST | `/v1/orders/{id}/packing/take` | Preparada → En empaque. Si otra persona la tomó: 409 |
 | POST | `/v1/orders/{id}/packing/release` | Devolver a la bandeja |
 | PUT | `/v1/orders/{id}/packages` | `{packages:[{weightKg?, lengthCm?, widthCm?, heightCm?}]}` → códigos `NX-{orden}-{n}` |

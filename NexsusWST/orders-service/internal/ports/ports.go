@@ -247,7 +247,7 @@ type CourierQueue struct {
 type FulfillmentRepository interface {
 	Packages(ctx context.Context, orderID int64) ([]domain.Package, error)
 	ReplacePackages(ctx context.Context, orderID int64, p []domain.Package, actor string, userID int64) ([]domain.Package, error)
-	PackingQueue(ctx context.Context, companyIDs []int64, userID int64) ([]domain.Order, error)
+	PackingQueue(ctx context.Context, companyIDs []int64, userID int64, includeDisabled bool) ([]domain.Order, error)
 
 	AddDocument(ctx context.Context, d Document) (Document, error)
 	Documents(ctx context.Context, orderID int64) ([]Document, error)

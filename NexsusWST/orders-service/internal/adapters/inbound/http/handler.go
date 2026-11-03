@@ -153,6 +153,7 @@ type orderDTO struct {
 	Attempts            int           `json:"validationAttempts"`
 	ClaimedBy           *int64        `json:"claimedBy,omitempty"`
 	ClaimedByName       string        `json:"claimedByName,omitempty"`
+	ClaimedAt           *time.Time    `json:"claimedAt,omitempty"`
 	Editable            bool          `json:"editable"`
 	ItemsEditable       bool          `json:"itemsEditable"`
 	Version             int           `json:"version"`
@@ -175,7 +176,7 @@ func toDTO(o domain.Order) orderDTO {
 		Status: string(o.Status), StatusLabel: domain.Labels[o.Status], PrevStatus: string(o.PrevStatus),
 		IncidentKind: o.IncidentKind, IncidentLabel: domain.IncidentLabels[o.IncidentKind],
 		Priority: o.Priority, WaveID: o.WaveID, WMSRef: o.WMSRef, Note: o.Note, LastError: o.LastError,
-		Attempts: o.ValidationAttempts, ClaimedBy: o.ClaimedBy, ClaimedByName: o.ClaimedByName, Editable: o.Editable(), ItemsEditable: o.ItemsEditable(),
+		Attempts: o.ValidationAttempts, ClaimedBy: o.ClaimedBy, ClaimedByName: o.ClaimedByName, ClaimedAt: o.ClaimedAt, Editable: o.Editable(), ItemsEditable: o.ItemsEditable(),
 		Version: o.Version, Items: items, CreatedAt: o.CreatedAt, UpdatedAt: o.UpdatedAt,
 		HandedOverAt: o.HandedOverAt, CancelledAt: o.CancelledAt}
 }

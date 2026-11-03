@@ -65,13 +65,13 @@ func (r *FulfillmentRepository) ReplacePackages(ctx context.Context, orderID int
 	return r.Packages(ctx, orderID)
 }
 
-// PackingQueue: Preparadas + «En empaque» tomadas por el usuario o por
-// alguien que hoy está deshabilitado (vuelven a la bandeja).
-func (r *FulfillmentRepository) PackingQueue(ctx context.Context, ids []int64, userID int64) ([]domain.Order, error) {
+// PackingQueue: Preparadas + «En empaque» tomadas por el usuario y, con includeDisabled,
+// por alguien que hoy está deshabilitado. Prioridad primero y luego lo más antiguo.
+func (r *FulfillmentRepository) PackingQueue(ctx context.Context, ids []int64, userID int64, includeDisabled bool) ([]domain.Order, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+cols+` FROM `+fromOrders+`
 		WHERE ($1::bigint[] IS NULL OR o.company_id = ANY($1))
-		  AND (o.status='picked' OR (o.status='packing' AND (o.claimed_by=$2 OR cu.id IS NULL)))
-		ORDER BY o.status DESC, o.priority DESC, o.updated_at LIMIT 300`, ids, userID)
+		  AND (o.status='picked' OR (o.status='packing' AND (o.claimed_by=$2 OR ($3 AND cu.id IS NULL))))
+		ORDER BY o.priority DESC, o.created_at, o.id LIMIT 300`, ids, userID, includeDisabled)
 	if err != nil {
 		return nil, err
 	}
