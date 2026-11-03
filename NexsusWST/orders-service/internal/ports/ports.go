@@ -244,10 +244,25 @@ type CourierQueue struct {
 	Packages int    `json:"packages"`
 }
 
+// LabelClaim: etiqueta pendiente que le toca a este proceso pedir.
+type LabelClaim struct {
+	OrderID int64
+	Attempt int
+}
+
 type FulfillmentRepository interface {
 	Packages(ctx context.Context, orderID int64) ([]domain.Package, error)
 	ReplacePackages(ctx context.Context, orderID int64, p []domain.Package, actor string, userID int64) ([]domain.Package, error)
 	PackingQueue(ctx context.Context, companyIDs []int64, userID int64, includeDisabled bool) ([]domain.Order, error)
+
+	// Etiqueta de la orden. Reclamar deja un plazo para que nadie más la pida a la vez.
+	RequestLabel(ctx context.Context, o domain.Order, actor string) error
+	ClaimLabel(ctx context.Context, orderID int64) (attempt int, claimed bool, err error)
+	ClaimDueLabels(ctx context.Context, limit int) ([]LabelClaim, error)
+	RetryLabel(ctx context.Context, orderID int64, attempt int, delay time.Duration, reason string) error
+	FailLabel(ctx context.Context, orderID int64, attempt int, reason, actor string) error
+	ClearLabel(ctx context.Context, orderID int64) error
+	CompleteLabel(ctx context.Context, d Document, trackingCode string, packages int, actor string) (bool, error)
 
 	AddDocument(ctx context.Context, d Document) (Document, error)
 	Documents(ctx context.Context, orderID int64) ([]Document, error)
@@ -328,6 +343,7 @@ type IntegrationRepository interface {
 type Notification struct {
 	ID        int64     `json:"id"`
 	CompanyID int64     `json:"companyId"`
+	Warehouse string    `json:"warehouse,omitempty"`
 	Audience  string    `json:"audience"` // internal | client | all
 	OrderID   *int64    `json:"orderId"`
 	Kind      string    `json:"kind"`
@@ -380,9 +396,10 @@ type WMSGateway interface {
 	PickingDone(ctx context.Context, o domain.Order) (bool, error)
 }
 
-// CourierGateway - etiquetas del courier (PA-01, una estrategia por courier).
+// CourierGateway - etiquetas del courier por API (PA-01). Devuelve domain.ErrLabelNotReady
+// si todavía no está disponible; attempt parte en 1.
 type CourierGateway interface {
-	Label(ctx context.Context, o domain.Order, packages []domain.Package) (pdf []byte, trackingCode string, err error)
+	Label(ctx context.Context, o domain.Order, packages []domain.Package, attempt int) (pdf []byte, trackingCode string, err error)
 }
 
 // ChannelGateway - consulta de detalle de una orden avisada por referencia

@@ -85,6 +85,7 @@ Contiene estos campos:
 - **Estado:** `status, statusLabel, prevStatus, incidentKind, incidentLabel, note (motivo vigente)`.
 - **Cola e Invas:** `priority, waveId, wmsRef`.
 - **Empaque y control:** `claimedBy, claimedByName, claimedAt, editable, version, items[{sku, quantity}]`.
+- **Etiqueta:** `label{strategy (api|office), status (none|pending|ready|failed|office), trackingCode, documentId, downloadPath, nextAttemptAt}`, `courierMaxPackages`. Sigue disponible con la orden Lista para retiro.
 - **Fechas:** `createdAt, updatedAt, handedOverAt, cancelledAt`.
 
 ### Ingreso y consulta (H-05, H-08, CU-01, CU-08)
@@ -140,7 +141,7 @@ Contiene estos campos:
 | POST | `/v1/orders/{id}/packing/release` | Devolver a la bandeja |
 | PUT | `/v1/orders/{id}/packages` | `{packages:[{weightKg?, lengthCm?, widthCm?, heightCm?}]}` → códigos `NX-{orden}-{n}` |
 | POST | `/v1/orders/{id}/packing/confirm` | `{items:[{sku, quantity}] contados, version}` → Lista para retiro, o Incidencia si no coincide (`discrepancies[]`) o si el courier no admite esa cantidad de bultos. Dos confirmaciones a la vez: la segunda recibe 409. |
-| POST | `/v1/orders/{id}/label` | Etiqueta del courier (PDF, hoy **simulada**) guardada como documento; deja el código del courier |
+| POST | `/v1/orders/{id}/label` | Etiqueta del courier (PDF, hoy **simulada**). Lista: 201 `{document, downloadPath, label}`. Pendiente: 202 `{label}`; se reintenta sola y avisa por WebSocket y notificación. Courier «Buscar en oficina»: 409. Si cambia la cantidad de bultos, la etiqueta queda sin efecto. |
 
 ### Documentos (H-05 esc. 3)
 

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -82,7 +83,8 @@ func main() {
 		// Sin clave no se pueden crear ni verificar integraciones; el resto funciona.
 		log.Warn("integraciones deshabilitadas", "err", err)
 	}
-	simCourier := courier.NewSimulated() // [SIMULADO] hasta habilitar cada courier/canal (PV-08)
+	labelPending, _ := strconv.Atoi(envOr("COURIER_SIM_LABEL_PENDING", "1"))
+	simCourier := courier.NewSimulated(labelPending) // [SIMULADO] hasta habilitar cada courier/canal (PV-08)
 	svc := application.NewService(application.Deps{
 		Orders:        postgres.NewRepository(db),
 		Rules:         postgres.NewRuleRepository(db),
@@ -105,12 +107,13 @@ func main() {
 	validator := application.NewValidator(svc)
 	rules := application.NewRulesEngine(svc)
 	picking := application.NewPickingSync(svc)
+	labels := application.NewLabelRetry(svc)
 
 	// ---- Worker (forma parte de Órdenes) --------------------------------------
 	wcfg := config.LoadWorker()
 	bgCtx, stopBg := context.WithCancel(context.Background())
 	var bg sync.WaitGroup
-	bg.Add(5)
+	bg.Add(6)
 	go func() { defer bg.Done(); workers.RunValidationLoop(bgCtx, validator, 2*time.Second) }()
 	go func() {
 		defer bg.Done()
@@ -121,6 +124,7 @@ func main() {
 		})
 	}()
 	go func() { defer bg.Done(); workers.RunEvery(bgCtx, 10*time.Second, picking.RunOnce) }()
+	go func() { defer bg.Done(); workers.RunEvery(bgCtx, 10*time.Second, labels.RunOnce) }()
 	go func() {
 		defer bg.Done()
 		workers.NewOutboxRelay(db, rdb, wcfg.Stream, wcfg.Batch, log).Run(bgCtx)

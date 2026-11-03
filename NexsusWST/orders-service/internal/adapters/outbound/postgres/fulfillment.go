@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,6 +49,10 @@ func (r *FulfillmentRepository) Packages(ctx context.Context, orderID int64) ([]
 // ReplacePackages vuelve a registrar los bultos; el código es NX-<orden>-<n>.
 func (r *FulfillmentRepository) ReplacePackages(ctx context.Context, orderID int64, p []domain.Package, actor string, userID int64) ([]domain.Package, error) {
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		var before int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM order_packages WHERE order_id=$1`, orderID).Scan(&before); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM order_packages WHERE order_id=$1`, orderID); err != nil {
 			return err
 		}
@@ -57,7 +62,17 @@ func (r *FulfillmentRepository) ReplacePackages(ctx context.Context, orderID int
 				return err
 			}
 		}
-		return addEvent(ctx, tx, orderID, "packages", "register", "", "", actor, fmt.Sprintf("%d bulto(s) registrados", len(p)))
+		reason := fmt.Sprintf("%d bulto(s) registrados", len(p))
+		if before != len(p) { // la etiqueta trae una página por bulto
+			tag, err := tx.Exec(ctx, `DELETE FROM order_labels WHERE order_id=$1`, orderID)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() > 0 {
+				reason += ". La etiqueta anterior quedó sin efecto"
+			}
+		}
+		return addEvent(ctx, tx, orderID, "packages", "register", "", "", actor, reason)
 	})
 	if err != nil {
 		return nil, err
@@ -129,6 +144,110 @@ func (r *FulfillmentRepository) Documents(ctx context.Context, orderID int64) ([
 
 func (r *FulfillmentRepository) Document(ctx context.Context, orderID, docID int64) (ports.Document, error) {
 	return scanDoc(r.db.QueryRow(ctx, `SELECT `+docCols+` FROM order_documents WHERE order_id=$1 AND id=$2`, orderID, docID))
+}
+
+// ---------------- Etiquetas ----------------
+
+// labelLease: si el proceso cae a mitad de un intento, la etiqueta se vuelve a pedir pasado este plazo.
+const labelLease = `interval '2 minutes'`
+
+// RequestLabel deja la etiqueta pendiente y lista para pedirla. Una que ya llegó no se toca.
+func (r *FulfillmentRepository) RequestLabel(ctx context.Context, o domain.Order, actor string) error {
+	_, err := r.db.Exec(ctx, `INSERT INTO order_labels (order_id, company_id, warehouse, status, requested_by)
+		VALUES ($1,$2,$3,'pending',$4)
+		ON CONFLICT (order_id) DO UPDATE SET status='pending', attempts=0, next_attempt_at=now(), last_error=NULL, updated_at=now()
+		WHERE order_labels.status<>'ready'`, o.ID, o.CompanyID, o.Warehouse, actor)
+	return err
+}
+
+func (r *FulfillmentRepository) ClaimLabel(ctx context.Context, orderID int64) (int, bool, error) {
+	var attempt int
+	err := r.db.QueryRow(ctx, `UPDATE order_labels SET attempts=attempts+1, next_attempt_at=now()+`+labelLease+`, updated_at=now()
+		WHERE order_id=$1 AND status='pending' AND next_attempt_at<=now() RETURNING attempts`, orderID).Scan(&attempt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	return attempt, err == nil, err
+}
+
+func (r *FulfillmentRepository) ClaimDueLabels(ctx context.Context, limit int) ([]ports.LabelClaim, error) {
+	rows, err := r.db.Query(ctx, `UPDATE order_labels SET attempts=attempts+1, next_attempt_at=now()+`+labelLease+`, updated_at=now()
+		WHERE order_id IN (SELECT order_id FROM order_labels WHERE status='pending' AND next_attempt_at<=now()
+			ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
+		RETURNING order_id, attempts`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ports.LabelClaim
+	for rows.Next() {
+		var c ports.LabelClaim
+		if err := rows.Scan(&c.OrderID, &c.Attempt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (r *FulfillmentRepository) RetryLabel(ctx context.Context, orderID int64, attempt int, delay time.Duration, reason string) error {
+	_, err := r.db.Exec(ctx, `UPDATE order_labels SET next_attempt_at=now()+make_interval(secs => $3), last_error=$4, updated_at=now()
+		WHERE order_id=$1 AND status='pending' AND attempts=$2`, orderID, attempt, delay.Seconds(), reason)
+	return err
+}
+
+func (r *FulfillmentRepository) FailLabel(ctx context.Context, orderID int64, attempt int, reason, actor string) error {
+	return pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE order_labels SET status='failed', last_error=$3, updated_at=now()
+			WHERE order_id=$1 AND status='pending' AND attempts=$2`, orderID, attempt, reason)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		return addEvent(ctx, tx, orderID, "label", "failed", "", "", actor, fmt.Sprintf("El courier no entregó la etiqueta tras %d intentos", attempt))
+	})
+}
+
+func (r *FulfillmentRepository) ClearLabel(ctx context.Context, orderID int64) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM order_labels WHERE order_id=$1 AND status<>'ready'`, orderID)
+	return err
+}
+
+// CompleteLabel guarda la etiqueta recibida. Devuelve false si ya no corresponde: se invalidó
+// o cambió la cantidad de bultos mientras se pedía. No sube la versión de la orden, para que
+// una etiqueta que llega sola no le dé un conflicto a quien está empacando.
+func (r *FulfillmentRepository) CompleteLabel(ctx context.Context, d ports.Document, trackingCode string, packages int, actor string) (bool, error) {
+	done := false
+	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		var status string
+		err := tx.QueryRow(ctx, `SELECT status FROM order_labels WHERE order_id=$1 FOR UPDATE`, d.OrderID).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var current int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM order_packages WHERE order_id=$1`, d.OrderID).Scan(&current); err != nil {
+			return err
+		}
+		if status != "pending" || current != packages {
+			return nil
+		}
+		var docID int64
+		if err := tx.QueryRow(ctx, `INSERT INTO order_documents (order_id, company_id, kind, filename, content_type, size_bytes, sha256, storage_key, uploaded_by)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, d.OrderID, d.CompanyID, d.Kind, d.Filename, d.ContentType, d.SizeBytes, d.SHA256, d.StorageKey, d.UploadedBy).Scan(&docID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE order_labels SET status='ready', document_id=$2, last_error=NULL, updated_at=now() WHERE order_id=$1`, d.OrderID, docID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE orders SET courier_code=COALESCE(NULLIF(courier_code,''),NULLIF($2,'')), updated_at=now() WHERE id=$1`, d.OrderID, trackingCode); err != nil {
+			return err
+		}
+		done = true
+		return addEvent(ctx, tx, d.OrderID, "label", "ready", "", "", actor, fmt.Sprintf("Etiqueta lista (%d bulto/s)", packages))
+	})
+	return done && err == nil, err
 }
 
 // ---------------- Retiro y manifiestos ----------------

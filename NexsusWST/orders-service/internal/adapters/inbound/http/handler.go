@@ -121,8 +121,34 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 // DTO
 // ---------------------------------------------------------------------------
 
+// labelDTO: estado de la etiqueta. status: none, pending, ready, failed u office («Buscar en oficina»).
+type labelDTO struct {
+	Strategy      string     `json:"strategy"`
+	Status        string     `json:"status"`
+	TrackingCode  string     `json:"trackingCode,omitempty"`
+	DocumentID    *int64     `json:"documentId,omitempty"`
+	DownloadPath  string     `json:"downloadPath,omitempty"`
+	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
+}
+
+func toLabelDTO(o domain.Order) labelDTO {
+	l := labelDTO{Strategy: o.LabelStrategy, Status: o.LabelStatus}
+	switch o.LabelStatus {
+	case domain.LabelPending:
+		l.NextAttemptAt = o.LabelNextAttemptAt
+	case domain.LabelReady:
+		l.TrackingCode, l.DocumentID = o.CourierCode, o.LabelDocumentID
+		if o.LabelDocumentID != nil {
+			l.DownloadPath = fmt.Sprintf("/v1/orders/%d/documents/%d/download", o.ID, *o.LabelDocumentID)
+		}
+	}
+	return l
+}
+
 type orderDTO struct {
 	PackagesCount       int           `json:"packagesCount"`
+	Label               labelDTO      `json:"label"`
+	CourierMaxPackages  *int          `json:"courierMaxPackages"`
 	AssignmentSituation *string       `json:"assignmentSituation"`
 	ID                  int64         `json:"id"`
 	CompanyID           int64         `json:"companyId"`
@@ -169,7 +195,7 @@ func toDTO(o domain.Order) orderDTO {
 	if items == nil {
 		items = []domain.Item{}
 	}
-	return orderDTO{PackagesCount: o.PackagesCount, AssignmentSituation: o.AssignmentSituation, ID: o.ID, CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Source: o.Source,
+	return orderDTO{PackagesCount: o.PackagesCount, Label: toLabelDTO(o), CourierMaxPackages: o.CourierMaxPackages, AssignmentSituation: o.AssignmentSituation, ID: o.ID, CompanyID: o.CompanyID, ExternalRef: o.ExternalRef, Channel: o.Channel, Source: o.Source,
 		Courier: o.Courier, CourierCode: o.CourierCode, RecipientName: o.RecipientName, RecipientPh: o.RecipientPhone,
 		RecipientMail: o.RecipientEmail, AddressLine: o.AddressLine, Commune: o.Commune, RegionCode: o.RegionCode,
 		DispatchType: o.DispatchType, Warehouse: o.Warehouse, CustomerNotes: o.CustomerNotes,
@@ -735,13 +761,17 @@ func (h *Handler) label(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	doc, err := h.svc.PrintLabel(r.Context(), id, ids, oid)
+	res, err := h.svc.PrintLabel(r.Context(), id, ids, oid)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, map[string]any{"document": doc,
-		"downloadPath": fmt.Sprintf("/v1/orders/%d/documents/%d/download", oid, doc.ID)})
+	if res.Document == nil { // pendiente: se reintenta sola y avisa cuando llega
+		httpx.JSON(w, http.StatusAccepted, map[string]any{"label": toLabelDTO(res.Order)})
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, map[string]any{"document": res.Document, "label": toLabelDTO(res.Order),
+		"downloadPath": fmt.Sprintf("/v1/orders/%d/documents/%d/download", oid, res.Document.ID)})
 }
 
 // ---------------------------------------------------------------------------

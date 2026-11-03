@@ -33,6 +33,8 @@ const nowLocal = `(CURRENT_TIMESTAMP AT TIME ZONE 'America/Santiago')`
 const nowHour = `to_char(` + nowLocal + `,'HH24:MI')`
 
 const fromOrders = `orders o LEFT JOIN users cu ON cu.id = o.claimed_by AND cu.active
+ LEFT JOIN courier_settings lcs ON lcs.courier=o.courier
+ LEFT JOIN order_labels ol ON ol.order_id=o.id
  LEFT JOIN LATERAL (SELECT max(c.cutoff_time) AS cutoff_time FROM cutoffs c JOIN cutoff_couriers cc ON cc.cutoff_id=c.id WHERE c.active AND cc.courier=o.courier) cs ON true
  LEFT JOIN LATERAL (SELECT min(c.cutoff_time) AS cutoff_time FROM cutoffs c JOIN cutoff_couriers cc ON cc.cutoff_id=c.id WHERE c.active AND cc.courier=o.courier AND to_char(c.cutoff_time,'HH24:MI') >= ` + nowHour + `) nc ON true
  LEFT JOIN ops_settings os ON os.key='assignment_deadline'
@@ -68,7 +70,9 @@ const cols = `o.id, o.company_id, o.external_ref, o.channel, COALESCE(o.courier,
 	o.priority, COALESCE(o.wave_id,''), COALESCE(o.wms_ref,''), o.version, COALESCE(o.note,''),
 	o.validation_attempts, o.next_retry_at, COALESCE(o.last_error,''),
 	o.claimed_by, COALESCE(cu.name,''), o.claimed_at, o.created_by, o.import_id,
-	o.created_at, o.updated_at, o.handed_over_at, o.cancelled_at, (SELECT count(*) FROM order_packages op WHERE op.order_id=o.id), ` + assignmentSituation
+	o.created_at, o.updated_at, o.handed_over_at, o.cancelled_at, (SELECT count(*) FROM order_packages op WHERE op.order_id=o.id), ` + assignmentSituation + `,
+	COALESCE(lcs.label_strategy,'api'), CASE WHEN lcs.label_strategy='office' THEN 'office' ELSE COALESCE(ol.status,'none') END,
+	ol.document_id, ol.next_attempt_at, lcs.max_packages`
 
 func scan(row pgx.Row) (domain.Order, error) {
 	var o domain.Order
@@ -81,7 +85,8 @@ func scan(row pgx.Row) (domain.Order, error) {
 		&o.Priority, &o.WaveID, &o.WMSRef, &o.Version, &o.Note,
 		&o.ValidationAttempts, &o.NextRetryAt, &o.LastError,
 		&o.ClaimedBy, &o.ClaimedByName, &o.ClaimedAt, &o.CreatedBy, &o.ImportID,
-		&o.CreatedAt, &o.UpdatedAt, &o.HandedOverAt, &o.CancelledAt, &o.PackagesCount, &o.AssignmentSituation)
+		&o.CreatedAt, &o.UpdatedAt, &o.HandedOverAt, &o.CancelledAt, &o.PackagesCount, &o.AssignmentSituation,
+		&o.LabelStrategy, &o.LabelStatus, &o.LabelDocumentID, &o.LabelNextAttemptAt, &o.CourierMaxPackages)
 	o.Status, o.PrevStatus = domain.Status(st), domain.Status(prev)
 	return o, err
 }
@@ -166,8 +171,8 @@ func replaceItems(ctx context.Context, q querier, orderID int64, items []domain.
 
 func addEvent(ctx context.Context, q querier, orderID int64, typ, ev, from, to, actor, reason string) error {
 	_, err := q.Exec(ctx, `
-		INSERT INTO order_events (order_id, event_type, event, from_status, to_status, actor, reason)
-		VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''))`, orderID, typ, ev, from, to, actor, reason)
+		INSERT INTO order_events (order_id, company_id, warehouse, event_type, event, from_status, to_status, actor, reason)
+		VALUES ($1,(SELECT company_id FROM orders WHERE id=$1),(SELECT warehouse FROM orders WHERE id=$1),$2,$3,NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''))`, orderID, typ, ev, from, to, actor, reason)
 	return err
 }
 

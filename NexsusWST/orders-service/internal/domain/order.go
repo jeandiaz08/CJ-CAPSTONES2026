@@ -71,6 +71,11 @@ type Order struct {
 	DispatchType        string
 	Warehouse           string
 	PackagesCount       int
+	LabelStrategy       string
+	LabelStatus         string
+	LabelDocumentID     *int64
+	LabelNextAttemptAt  *time.Time
+	CourierMaxPackages  *int
 	AssignmentSituation *string
 	CustomerNotes       string
 	Source              string // manual, bulk, webhook

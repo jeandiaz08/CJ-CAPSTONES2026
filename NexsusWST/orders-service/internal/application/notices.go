@@ -43,9 +43,23 @@ func (n *Notices) OnStatus(ctx context.Context, o domain.Order, reason string) {
 	}
 }
 
+// OnLabel avisa al personal interno el resultado de una etiqueta que se pidió sola.
+func (n *Notices) OnLabel(ctx context.Context, o domain.Order, ready bool) {
+	if n == nil || n.repo == nil {
+		return
+	}
+	ref := fmt.Sprintf("#%d (%s)", o.ID, o.ExternalRef)
+	if ready {
+		n.add(ctx, o, "internal", "label_ready", "Etiqueta lista: orden "+ref, "Ya se puede imprimir.", false)
+		return
+	}
+	n.add(ctx, o, "internal", "label_failed", "Sin etiqueta: orden "+ref,
+		fmt.Sprintf("%s no entregó la etiqueta. Reinténtala desde la orden.", o.Courier), false)
+}
+
 func (n *Notices) add(ctx context.Context, o domain.Order, audience, kind, title, body string, email bool) {
 	oid := o.ID
-	saved, err := n.repo.Add(ctx, ports.Notification{CompanyID: o.CompanyID, Audience: audience, OrderID: &oid, Kind: kind, Title: title, Body: body})
+	saved, err := n.repo.Add(ctx, ports.Notification{CompanyID: o.CompanyID, Warehouse: o.Warehouse, Audience: audience, OrderID: &oid, Kind: kind, Title: title, Body: body})
 	if err != nil {
 		n.log.Warn("no se pudo guardar el aviso", "err", err, "order_id", o.ID)
 		return
