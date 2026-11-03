@@ -166,7 +166,7 @@ Abre http://localhost → **/login** → botón **Ingresar** → pantalla de **K
 | `cliente1@nexus.local` | Cliente (solo Empresa Demo Uno) | Sus órdenes y productos |
 | `cliente2@nexus.local` | Cliente (solo Empresa Demo Dos) | Sus órdenes (sirve para probar el aislamiento) |
 
-El perfil de Nexus (rol, permisos, empresas) se vincula solo la primera vez que cada usuario ingresa.
+El perfil de Nexus (rol, permisos, empresas) se vincula solo la primera vez que cada usuario ingresa. El servicio `seed-dev` crea estos perfiles al levantar; para recargarlos: `make seed-dev` o `docker compose run --rm seed-dev`.
 
 **Recorrido de prueba completo:**
 
@@ -266,7 +266,7 @@ Cada servicio migra solo **sus** tablas (cada tabla tiene un solo dueño, DA-03)
 1. Droplet Ubuntu con Docker y Compose; DNS del dominio apuntando a su IP; puertos 80/443 abiertos.
 2. Clona el repo en el servidor, crea `.env` con valores **reales** (`APP_ENV=production`, `APP_DOMAIN=nexus.tudominio.cl`, `LOG_LEVEL=info`).
 3. Edita el correo en `infrastructure/traefik/traefik.prod.yml` (Let's Encrypt).
-4. Elimina o reemplaza `backend-core/migrations/000002_seed_dev.*` y `000004_seed_dev_v11.*` (datos y perfiles ficticios). Los usuarios de prueba de Keycloak están solo en `docker-compose.override.yml`, que producción no usa.
+4. Las migraciones traen solo catálogos reales. Los datos ficticios (`infrastructure/dev-seed`, usuarios de `infrastructure/keycloak/dev-users`) y las cuentas demo de `/login` (`NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS`) los activa solo `docker-compose.override.yml`, que producción no carga.
 5. Keycloak en producción (PV-18):
    - `APP_PUBLIC_URL=https://<dominio>`, `KEYCLOAK_PUBLIC_URL=https://auth.westorage.cl/auth`, `AUTH_DOMAIN=auth.westorage.cl` (DNS apuntando al servidor).
    - `KC_WEB_DIRECT_GRANTS=false`.
@@ -316,7 +316,7 @@ Rotulado explícitamente para no presentarlo como funcionalidad terminada (DAS �
 | Catálogo de comunas | RM completa + principales comunas (113); falta el listado oficial (346) | Carga CUT/SUBDERE |
 | Login con PKCE sin librería (`src/services/oidc.ts`) | Puente funcional hasta Auth.js | H-01 T05/T06 (Jean) |
 | Alcance por empresa del personal interno (`all_companies`) | Propuesta | PV-02 |
-| `000002_seed_dev`, `000004_seed_dev_v11`, `dev-users` de Keycloak | Datos y usuarios ficticios | Retirar antes de producción |
+| `infrastructure/dev-seed`, `dev-users` de Keycloak | Datos y usuarios ficticios | Solo desarrollo (`docker-compose.override.yml`) |
 
 ## Próximos pasos sugeridos
 

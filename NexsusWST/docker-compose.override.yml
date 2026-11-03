@@ -8,6 +8,7 @@
 #   - Keycloak en modo desarrollo con usuarios de prueba (contraseña Nexus2026!)
 #     Consola: http://localhost/auth/admin  (usuario/contraseña de .env)
 #   - Mailpit: bandeja de correos de prueba en http://127.0.0.1:8025
+#   - seed-dev: empresas, perfiles y productos ficticios
 # =============================================================================
 
 services:
@@ -20,6 +21,7 @@ services:
       target: dev
     environment:
       NODE_ENV: development
+      NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS: "true" # cuentas demo en /login; nunca en producción
       # Necesario en Windows/macOS para detectar cambios en archivos montados
       WATCHPACK_POLLING: "true"
     volumes:
@@ -29,9 +31,28 @@ services:
       - /app/node_modules
       - /app/.next
 
+  # Datos ficticios de desarrollo. Corre antes de core para que un usuario de prueba no
+  # entre sin sus empresas. Producción no carga este archivo.
+  seed-dev:
+    image: postgres:${POSTGRES_VERSION:-17-alpine}
+    command: ["psql", "-q", "-v", "ON_ERROR_STOP=1", "-h", "postgres", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}", "-f", "/seed/seed_dev.sql"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./infrastructure/dev-seed:/seed:ro
+    depends_on:
+      migrate-core:
+        condition: service_completed_successfully
+    networks:
+      - data
+    restart: "no"
+
   core:
     build:
       target: dev
+    depends_on:
+      seed-dev:
+        condition: service_completed_successfully
     environment:
       APP_ENV: development
     volumes:

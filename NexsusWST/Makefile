@@ -4,7 +4,7 @@ DCPROD=docker compose -f docker-compose.yml -f docker-compose.prod.yml
 THEME_DIR=infrastructure/keycloak/theme
 THEME_JAR=$(THEME_DIR)/dist_keycloak/nexuswst-keycloak-theme.jar
 
-.PHONY: theme up down logs ps restart rebuild psql redis-cli test-core test-orders tidy migrate-new prod-up prod-down nuke
+.PHONY: theme up down logs ps restart rebuild psql redis-cli test-core test-orders tidy migrate-new seed-dev prod-up prod-down nuke
 
 theme:         ## Compila el .jar del tema de Keycloak (solo requiere Docker)
 	docker run --rm -v "$(PWD)/$(THEME_DIR):/app" -w /app node:22-bookworm-slim sh docker-build.sh
@@ -33,6 +33,8 @@ test-orders:
 	$(DC) run --rm --no-deps orders go test ./...
 migrate-new:   ## make migrate-new svc=backend-core name=crear_tabla_x
 	docker run --rm -v "$(PWD)/$(svc)/migrations:/migrations" migrate/migrate:v4.18.3 create -ext sql -dir /migrations -seq $(name)
+seed-dev:      ## Vuelve a cargar los datos ficticios de desarrollo (también corre con make up)
+	$(DC) run --rm seed-dev
 prod-up: $(THEME_JAR)
 	$(DCPROD) up -d --build
 prod-down:
