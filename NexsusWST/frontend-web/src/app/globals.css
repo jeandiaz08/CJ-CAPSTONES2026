@@ -471,3 +471,6 @@ body{line-height:1.5}h1,h2,h3{line-height:1.2}h1{font-size:28px}button,input,sel
 
 /* Horario de operación y avisos de la cola. */
 .config-deadline+.config-deadline{margin-top:12px}.config-days{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px}.config-days legend{font-size:13px;font-weight:500;padding:0;margin-bottom:6px}.config-days label{display:grid;justify-items:center;gap:2px;min-width:32px;font-size:13px;font-weight:500;cursor:pointer}.config-days input{width:18px;height:18px;accent-color:var(--accent)}.form-notice-warning{border-left-color:var(--warn)}.form-notice-danger{border-left-color:var(--danger)}
+
+/* Sidebar: ítems sin función en este alcance. Mismo color, sin efecto al pasar el cursor. */
+.sidebar.redesigned .nav-link.is-disabled,.sidebar.redesigned .nav-link.is-disabled:hover{background:none;cursor:default}

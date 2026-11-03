@@ -54,7 +54,7 @@ npm run build
 npm run build-keycloak-theme
 ```
 
-El último comando requiere JDK y Apache Maven. En esta máquina se autorizó Maven 3.9.16 portátil desde Apache, verificando SHA-512, con JDK 11 existente. No se modificó el PATH permanente:
+Para generar solo el `.jar`, sin instalar nada más que Docker, usa `make theme` desde la raíz del repositorio. El último comando requiere JDK y Apache Maven. En esta máquina se autorizó Maven 3.9.16 portátil desde Apache, verificando SHA-512, con JDK 11 existente. No se modificó el PATH permanente:
 
 ```powershell
 $env:JAVA_HOME = 'C:/Program Files/Java/jdk-11'
