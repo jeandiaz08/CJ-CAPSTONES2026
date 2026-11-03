@@ -60,7 +60,7 @@ func TestCutoffHandlers(t *testing.T) {
 					next.ServeHTTP(w, r.WithContext(tenant.With(r.Context(), tenant.Identity{Profile: tenant.Profile{UserID: 1, Role: tc.role}})))
 				})
 			}
-			h.Register(mux, mw, mw)
+			h.Register(mux, mw)
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
 			if w.Code != tc.want {

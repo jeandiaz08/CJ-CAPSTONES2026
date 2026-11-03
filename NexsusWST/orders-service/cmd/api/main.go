@@ -69,8 +69,7 @@ func main() {
 	go jwks.Warmup(ctx)
 	verifier := auth.Verifier{Keys: jwks, Issuer: cfg.KeycloakIssuer, Audience: cfg.KeycloakAudience, Leeway: 30 * time.Second}
 	profiles := tenant.PGProfiles{DB: db}
-	requireAuth := tenant.Middleware(verifier, profiles, nil, false)
-	requireAuthWS := tenant.Middleware(verifier, profiles, nil, true)
+	requireAuth := tenant.Middleware(verifier, profiles, nil)
 
 	// ---- Composición --------------------------------------------------------
 	files, err := storage.NewLocal(envOr("ATTACHMENTS_DIR", "/data/attachments"))
@@ -153,7 +152,7 @@ func main() {
 	})
 
 	origins := strings.Split(envOr("WS_ALLOWED_ORIGINS", envOr("APP_DOMAIN", "localhost")), ",")
-	ordershttp.NewHandler(svc, rdb, profiles, log, origins).Register(mux, requireAuth, requireAuthWS)
+	ordershttp.NewHandler(svc, rdb, profiles, log, origins).Register(mux, requireAuth)
 	webhooks.NewHandler(svc, log).Register(mux)
 
 	handler := httpserver.Chain(mux,

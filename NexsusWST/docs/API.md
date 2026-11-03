@@ -13,7 +13,8 @@ Base desde el navegador (siempre a través de Traefik, mismo origen):
 
 - La interfaz inicia sesión en **Keycloak** con OIDC **código + PKCE** (cliente público `nexus-web`). El token de acceso dura **10 min**; se renueva con `refresh_token` (sesión de 12 h, se cierra tras 2 h sin uso).
 - Cada petición lleva `Authorization: Bearer <access_token>`. Core y Órdenes verifican el token con las claves públicas de Keycloak (RS256) y leen el **perfil de Nexus** en PostgreSQL en cada petición.
-- El WebSocket recibe el token en `?access_token=`.
+- El WebSocket se abre con un ticket: `POST /v1/ws-ticket` (con Bearer) devuelve `{ticket, expiresIn: 30}`. Sirve una sola vez y cada reconexión pide uno nuevo. `?access_token=` ya no se acepta.
+- La interfaz web no maneja tokens: llama a `/bff/{core|orders}/...` de Next, que agrega el Bearer en el servidor. `/api/core` y `/api/orders` siguen disponibles con Bearer para Postman y curl.
 - Solo en desarrollo (`KC_WEB_DIRECT_GRANTS=true`) se puede pedir un token con usuario y contraseña, para Postman o curl:
 
 ```bash
@@ -181,7 +182,7 @@ Contiene estos campos:
 ### Avisos y tiempo real (H-15)
 
 - `GET /v1/notifications?unread=true` → `{data, unread}` · `POST /v1/notifications/read {ids}`
-- `GET /ws?access_token=…` (WebSocket). Mensajes:
+- `POST /v1/ws-ticket` → `{ticket, expiresIn}` · `GET /ws?ticket=…` (WebSocket; ticket inválido, usado o vencido: 401). Mensajes:
   - `{"type":"order.changed", orderId, companyId, status, version, priority}`
   - `{"type":"notification", audience, notification}`
   - Al reconectar, volver a consultar la API.

@@ -35,7 +35,7 @@ func TestListFiltersSummaryAndCourierSettings(t *testing.T) {
 			next.ServeHTTP(w, r.WithContext(tenant.With(r.Context(), tenant.Identity{Profile: tenant.Profile{UserID: 1, Role: tenant.RoleAdmin, AllCompanies: true}})))
 		})
 	}
-	h.Register(mux, mw, mw)
+	h.Register(mux, mw)
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))

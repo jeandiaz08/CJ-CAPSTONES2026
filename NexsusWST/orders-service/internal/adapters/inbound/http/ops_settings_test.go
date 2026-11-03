@@ -110,7 +110,7 @@ func TestSettingsHandlers(t *testing.T) {
 					next.ServeHTTP(w, r.WithContext(tenant.With(r.Context(), tenant.Identity{Profile: tenant.Profile{UserID: 1, Role: tc.role, AllCompanies: true}})))
 				})
 			}
-			h.Register(mux, mw, mw)
+			h.Register(mux, mw)
 			r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, r)

@@ -43,7 +43,7 @@ func NewHandler(svc *application.Service, rdb *redis.Client, profiles tenant.Pro
 	return &Handler{svc: svc, rdb: rdb, profiles: profiles, log: log, wsOrigins: wsOrigins}
 }
 
-func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) http.Handler) {
+func (h *Handler) Register(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	r := func(pattern string, f http.HandlerFunc) { mux.Handle(pattern, auth(f)) }
 
 	r("GET /v1/meta", h.meta)
@@ -114,7 +114,8 @@ func (h *Handler) Register(mux *http.ServeMux, auth, wsAuth func(http.Handler) h
 	r("GET /v1/notifications", h.notifications)
 	r("POST /v1/notifications/read", h.readNotifications)
 
-	mux.Handle("GET /ws", wsAuth(http.HandlerFunc(h.ws)))
+	r("POST /v1/ws-ticket", h.issueWSTicket)
+	mux.Handle("GET /ws", h.requireWSTicket(http.HandlerFunc(h.ws)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1232,7 +1233,7 @@ func (h *Handler) ws(w http.ResponseWriter, r *http.Request) {
 	isClient := id.HasRole(tenant.RoleCliente)
 
 	// La conexión no sobrevive al token (10 min): al vencer se cierra y la
-	// interfaz se reconecta con el token renovado. Además se relee el perfil
+	// interfaz se reconecta con un ticket nuevo. Además se relee el perfil
 	// cada 30 s: un usuario deshabilitado deja de recibir avisos de inmediato.
 	expire := time.NewTimer(time.Until(time.Unix(id.TokenExpiresAt, 0)))
 	defer expire.Stop()
