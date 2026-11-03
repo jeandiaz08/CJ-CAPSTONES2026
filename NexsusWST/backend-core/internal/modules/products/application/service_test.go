@@ -39,6 +39,15 @@ func (f *fakeRepo) Create(_ context.Context, p domain.Product) (domain.Product, 
 	return p, nil
 }
 
+func (f *fakeRepo) SetWave(_ context.Context, id int64, c *string) error {
+	for i := range f.items {
+		if f.items[i].ID == id {
+			f.items[i].WaveCode = c
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
 func (f *fakeRepo) BySKUs(_ context.Context, cid int64, skus []string) ([]domain.Product, error) {
 	var out []domain.Product
 	for _, p := range f.items {

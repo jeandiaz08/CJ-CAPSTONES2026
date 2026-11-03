@@ -11,6 +11,7 @@ import (
 	"github.com/nexuswst/backend-core/internal/modules/products/domain"
 	"github.com/nexuswst/backend-core/internal/shared/httpx"
 	"github.com/nexuswst/backend-core/internal/shared/tenant"
+	"github.com/nexuswst/backend-core/internal/shared/wave"
 )
 
 type Handler struct{ svc *application.Service }
@@ -23,6 +24,7 @@ func (h *Handler) Register(mux *http.ServeMux, auth func(http.Handler) http.Hand
 	mux.Handle("GET /v1/products", auth(http.HandlerFunc(h.list)))
 	mux.Handle("GET /v1/products/{id}", auth(http.HandlerFunc(h.get)))
 	mux.Handle("POST /v1/products", auth(write(http.HandlerFunc(h.create))))
+	mux.Handle("PATCH /v1/products/{id}/wave", auth(tenant.RequireRole(tenant.RoleAdmin, tenant.RoleJefeOps)(http.HandlerFunc(h.setWave))))
 	mux.Handle("GET /v1/products/{id}/components", auth(http.HandlerFunc(h.components)))
 	mux.Handle("PUT /v1/products/{id}/components", auth(write(http.HandlerFunc(h.setComponents))))
 }
@@ -34,11 +36,12 @@ type productDTO struct {
 	Description string    `json:"description"`
 	Type        string    `json:"type"`
 	Active      bool      `json:"active"`
+	WaveCode    *string   `json:"waveCode"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
 func toDTO(p domain.Product) productDTO {
-	return productDTO{ID: p.ID, CompanyID: p.CompanyID, SKU: p.SKU, Description: p.Description, Type: string(p.Type), Active: p.Active, CreatedAt: p.CreatedAt}
+	return productDTO{ID: p.ID, CompanyID: p.CompanyID, SKU: p.SKU, Description: p.Description, Type: string(p.Type), Active: p.Active, WaveCode: p.WaveCode, CreatedAt: p.CreatedAt}
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -89,10 +92,11 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	id, _ := tenant.From(r.Context())
 	var body struct {
-		CompanyID   int64  `json:"companyId"`
-		SKU         string `json:"sku"`
-		Description string `json:"description"`
-		Type        string `json:"type"`
+		CompanyID   int64   `json:"companyId"`
+		SKU         string  `json:"sku"`
+		Description string  `json:"description"`
+		Type        string  `json:"type"`
+		WaveCode    *string `json:"waveCode"`
 	}
 	if err := httpx.Decode(r, &body); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido")
@@ -102,9 +106,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusForbidden, "forbidden", "empresa no autorizada")
 		return
 	}
-	p, err := h.svc.Create(r.Context(), body.CompanyID, application.CreateInput{SKU: body.SKU, Description: body.Description, Type: body.Type})
+	// La ola del producto la definen Administrador o Jefe de Operaciones (PV-19).
+	if body.WaveCode != nil && *body.WaveCode != "" && !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps) {
+		httpx.Error(w, http.StatusForbidden, "forbidden", "solo Administrador o Jefe de Operaciones definen la ola del producto")
+		return
+	}
+	p, err := h.svc.Create(r.Context(), body.CompanyID, application.CreateInput{SKU: body.SKU, Description: body.Description, Type: body.Type, WaveCode: body.WaveCode})
 	switch {
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, domain.ErrInvalid), errors.Is(err, wave.ErrInvalidCode):
 		httpx.Error(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 	case errors.Is(err, domain.ErrDuplicateSKU):
 		httpx.Error(w, http.StatusConflict, "duplicate", err.Error())
@@ -199,4 +208,37 @@ func writeKitErr(w http.ResponseWriter, err error) bool {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "error en la composición del kit")
 	}
 	return true
+}
+
+// setWave: PATCH /v1/products/{id}/wave  {"waveCode": "AM" | null} (PV-19).
+func (h *Handler) setWave(w http.ResponseWriter, r *http.Request) {
+	id, _ := tenant.From(r.Context())
+	scope, _, err := id.Scope(r)
+	if err != nil {
+		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
+		return
+	}
+	pid, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "id inválido")
+		return
+	}
+	var body struct {
+		WaveCode *string `json:"waveCode"`
+	}
+	if err := httpx.Decode(r, &body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido")
+		return
+	}
+	p, err := h.svc.SetWave(r.Context(), scope, pid, body.WaveCode)
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		httpx.Error(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, wave.ErrInvalidCode):
+		httpx.Error(w, http.StatusUnprocessableEntity, "invalid", err.Error())
+	case err != nil:
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "no se pudo guardar la ola")
+	default:
+		httpx.JSON(w, http.StatusOK, toDTO(p))
+	}
 }

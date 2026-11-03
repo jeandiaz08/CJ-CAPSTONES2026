@@ -4,6 +4,8 @@ package application
 import (
 	"context"
 
+	"github.com/nexuswst/backend-core/internal/shared/wave"
+
 	"github.com/nexuswst/backend-core/internal/modules/products/domain"
 	"github.com/nexuswst/backend-core/internal/modules/products/ports"
 )
@@ -18,6 +20,7 @@ type CreateInput struct {
 	SKU         string
 	Description string
 	Type        string
+	WaveCode    *string // opcional (PV-19)
 }
 
 // List filtra SIEMPRE por las empresas autorizadas (RF-03, RNF-SEG-01).
@@ -97,5 +100,26 @@ func (s *Service) Create(ctx context.Context, companyID int64, in CreateInput) (
 	if err != nil {
 		return domain.Product{}, err
 	}
+	if p.WaveCode, err = wave.Normalize(in.WaveCode); err != nil {
+		return domain.Product{}, err
+	}
 	return s.repo.Create(ctx, p)
+}
+
+// SetWave fija o quita la ola propia del producto (PV-19, H-04-T10). Solo
+// Administrador y Jefe de Operaciones (lo controla el handler).
+func (s *Service) SetWave(ctx context.Context, companyIDs []int64, id int64, code *string) (domain.Product, error) {
+	p, err := s.repo.GetByID(ctx, companyIDs, id)
+	if err != nil {
+		return domain.Product{}, err
+	}
+	c, err := wave.Normalize(code)
+	if err != nil {
+		return domain.Product{}, err
+	}
+	if err := s.repo.SetWave(ctx, p.ID, c); err != nil {
+		return domain.Product{}, err
+	}
+	p.WaveCode = c
+	return p, nil
 }

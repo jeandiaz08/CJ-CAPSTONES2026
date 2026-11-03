@@ -64,3 +64,28 @@ func (p *CatalogReader) EmptyKits(ctx context.Context, companyID int64, skus []s
 	}
 	return collect[string](rows)
 }
+
+// WavePreference lee la ola de los productos de la orden y la ola por defecto
+// del cliente desde las vistas del Core (PV-19), en solo lectura (DA-12).
+// Devuelve las olas DISTINTAS de producto, ordenadas.
+func (p *CatalogReader) WavePreference(ctx context.Context, orderID, companyID int64) ([]string, string, error) {
+	var productWaves []string
+	var companyWave *string
+	err := p.db.QueryRow(ctx, wavePreferenceSQL, orderID, companyID).
+		Scan(&productWaves, &companyWave)
+	if err != nil {
+		return nil, "", err
+	}
+	if companyWave == nil {
+		return productWaves, "", nil
+	}
+	return productWaves, *companyWave, nil
+}
+
+const wavePreferenceSQL = `
+	SELECT ARRAY(SELECT DISTINCT pw.wave_code
+	             FROM order_items i
+	             JOIN v_product_waves pw ON pw.company_id = $2 AND pw.sku = i.sku
+	             WHERE i.order_id = $1
+	             ORDER BY 1),
+	       (SELECT wave_code FROM v_company_waves WHERE company_id = $2)`

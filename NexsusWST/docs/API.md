@@ -70,13 +70,25 @@ Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanie
 | --- | --- | --- | --- |
 | GET | `/v1/products` | `?search=&limit=&offset=&company_id=` | Listado `{data}` acotado a las empresas autorizadas |
 | GET | `/v1/products/{id}` | | Detalle |
-| POST | `/v1/products` | `{companyId, sku, description, type: simple\|kit}` | Crea. 409 si el SKU ya existe en la empresa |
+| POST | `/v1/products` | `{companyId, sku, description, type: simple\|kit, waveCode?}` | Crea. 409 si el SKU ya existe en la empresa. `waveCode` solo lo envían Administrador o Jefe (403 para el cliente) |
+| PATCH | `/v1/products/{id}/wave` | `{waveCode: "AM" \| null}` | Ola propia del producto (PV-19). Solo Administrador y Jefe de Operaciones; `null` la quita |
 | GET | `/v1/products/{id}/components` | | Composición del kit: `{kit, components: [{productId, sku, description, quantity}]}` |
 | PUT | `/v1/products/{id}/components` | `{components: [{sku, quantity}]}` | **Reemplaza** la composición completa (transacción). Responde igual que el GET |
 
 Reglas de la composición (SCRUM-100): solo para productos `kit` (409 `not_kit` si es simple); de 1 a 50 componentes; cada componente debe existir en la **misma empresa**, estar activo y ser `simple` (no se permiten kits dentro de kits); cantidad > 0 y sin SKU repetidos. Si algo no se cumple responde 422 `invalid_component` con el SKU y el motivo, y no se guarda nada. Un kit de otra empresa responde 404.
 
 El kit **no tiene stock propio**: al validar una orden, Órdenes expande cada kit en sus componentes (cantidad del kit × cantidad del componente), consulta su stock y registra el comprometido sobre ellos. Una orden con un kit sin composición pasa a Incidencia con el motivo.
+
+### Ola por cliente y por producto (PV-19, H-03-T07, H-04-T10, H-10-T11)
+
+| Método | Ruta | Cuerpo | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/clients` | | Cada empresa trae `waveCode` (ola por defecto o `null`) |
+| PATCH | `/v1/clients/{id}/wave` | `{waveCode: "PM" \| null}` | Ola por defecto del cliente. Solo Administrador y Jefe de Operaciones |
+
+El código es el de la ola en Invas (letras, números, `-` o `_`, máximo 20; se guarda en mayúsculas). Los productos también traen `waveCode`. Órdenes lo lee por las vistas `v_product_waves` y `v_company_waves`, sin llamar al Core.
+
+Cómo decide el motor de asignación, antes de las reglas: **producto → cliente → reglas → sin regla que calce**. Si los productos de la orden que tienen ola coinciden en una sola, va a esa; si tienen olas distintas o ninguno tiene, va a la ola del cliente; si tampoco hay, decide la primera regla que calce; si no, queda Validada sin ola para el Jefe. Si la ola pedida no existe hoy en Invas, la orden no se asigna y queda un evento `no_wave` en su historial. Los cortes y el horario no cambian: deciden cuándo sale la orden.
 
 ### Catálogos (caché Redis + ETag)
 

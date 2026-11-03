@@ -123,6 +123,9 @@ type CatalogReader interface {
 	// componentes, y kits que aún no tienen composición.
 	StockLines(ctx context.Context, companyID int64, items []domain.Item) ([]domain.Item, error)
 	EmptyKits(ctx context.Context, companyID int64, skus []string) ([]string, error)
+	// Ola por producto o cliente (PV-19): olas distintas de los productos de
+	// la orden y ola por defecto del cliente ("" si no tiene).
+	WavePreference(ctx context.Context, orderID, companyID int64) (productWaves []string, companyWave string, err error)
 	CompanyActive(ctx context.Context, companyID int64) (bool, error)
 	CourierActive(ctx context.Context, code string) (bool, error)
 	Communes(ctx context.Context) ([]string, error)
