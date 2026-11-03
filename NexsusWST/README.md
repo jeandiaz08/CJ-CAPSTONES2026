@@ -274,8 +274,8 @@ Cada servicio migra solo **sus** tablas (cada tabla tiene un solo dueño, DA-03)
    - `KC_WEB_DIRECT_GRANTS=false`.
    - `SMTP_*` con el correo de WeStorage (remitente `no-reply@westorage.cl`; SPF/DKIM los configura TI).
    - Secretos nuevos y largos para `KEYCLOAK_*` e `INTEGRATIONS_KEY`.
-   - Unos 1,25 GB de RAM para Keycloak.
-   - Antes de actualizar la versión de Keycloak, respalda la base (incluye el esquema `keycloak`).
+   - Keycloak tiene un límite de memoria de 1,36 GB en `docker-compose.prod.yml` (PV-15); el stack completo usa unos 2,6–2,9 GB del plan de 4 GB.
+   - Antes de actualizar la versión de Keycloak, respalda la base (`make backup`; incluye el esquema `keycloak`).
 6. Compila el tema de Keycloak con `make theme` (paso 3).
 7. Levanta:
 
@@ -284,6 +284,27 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 En producción: imágenes compiladas sin herramientas de desarrollo, usuario sin privilegios, sin dashboard de Traefik, sin puertos de BD expuestos y la red `data` es interna. Si WeStorage entrega un PostgreSQL administrado, quita el servicio `postgres` y apunta `DATABASE_URL` a esa instancia con `sslmode=require`.
+
+### Respaldo y restauración de PostgreSQL (SCRUM-199)
+
+El respaldo incluye **toda la base**: Core, Órdenes y el esquema `keycloak` (usuarios y roles). Redis no se respalda: guarda caché (se reconstruye) y colas con AOF.
+
+```bash
+make backup                                            # ./scripts/backup.sh
+make restore file=backups/nexuswst_20261103-2100.dump  # pide escribir RESTAURAR
+```
+
+- El respaldo queda en `./backups/nexuswst_<fecha>.dump` (formato *custom* de `pg_dump`, comprimido). Se verifica con `pg_restore --list` antes de guardarlo y se conservan los últimos 7 (`BACKUP_KEEP`). La carpeta `backups/` está en `.gitignore`.
+- La restauración detiene Keycloak, Core y Órdenes, restaura **en una sola transacción** (si falla, la base queda como estaba) y los vuelve a levantar.
+- En producción, antes de cada comando: `export COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"`.
+- Respaldo diario en el servidor (cron, 03:00):
+
+```bash
+0 3 * * * cd /opt/nexuswst/NexsusWST && COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml" ./scripts/backup.sh >> backups/backup.log 2>&1
+```
+
+- Copia los respaldos **fuera del servidor** (por ejemplo, a tu PC con `scp`): si se pierde el droplet, se pierden también los respaldos que estén en él.
+- Prueba la restauración al menos una vez en el ambiente de pruebas (PV-15).
 
 ---
 
