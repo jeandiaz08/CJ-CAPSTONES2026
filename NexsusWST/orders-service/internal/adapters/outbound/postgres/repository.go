@@ -170,9 +170,21 @@ func replaceItems(ctx context.Context, q querier, orderID int64, items []domain.
 }
 
 func addEvent(ctx context.Context, q querier, orderID int64, typ, ev, from, to, actor, reason string) error {
+	return addEventDetails(ctx, q, orderID, typ, ev, from, to, actor, reason, nil)
+}
+
+// addEventDetails es addEvent con datos ordenados en order_events.details.
+func addEventDetails(ctx context.Context, q querier, orderID int64, typ, ev, from, to, actor, reason string, details any) error {
+	var raw []byte
+	if details != nil {
+		var err error
+		if raw, err = json.Marshal(details); err != nil {
+			return err
+		}
+	}
 	_, err := q.Exec(ctx, `
-		INSERT INTO order_events (order_id, company_id, warehouse, event_type, event, from_status, to_status, actor, reason)
-		VALUES ($1,(SELECT company_id FROM orders WHERE id=$1),(SELECT warehouse FROM orders WHERE id=$1),$2,$3,NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''))`, orderID, typ, ev, from, to, actor, reason)
+		INSERT INTO order_events (order_id, company_id, warehouse, event_type, event, from_status, to_status, actor, reason, details)
+		VALUES ($1,(SELECT company_id FROM orders WHERE id=$1),(SELECT warehouse FROM orders WHERE id=$1),$2,$3,NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''),$8::jsonb)`, orderID, typ, ev, from, to, actor, reason, raw)
 	return err
 }
 
@@ -362,7 +374,7 @@ func (r *Repository) Summary(ctx context.Context, ids []int64) (map[domain.Statu
 
 func (r *Repository) Events(ctx context.Context, orderID int64) ([]ports.EventRecord, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, event_type, event, COALESCE(from_status,''), COALESCE(to_status,''), actor, COALESCE(reason,''), occurred_at
+		SELECT id, event_type, event, COALESCE(from_status,''), COALESCE(to_status,''), actor, COALESCE(reason,''), occurred_at, details
 		FROM order_events WHERE order_id=$1 ORDER BY id`, orderID)
 	if err != nil {
 		return nil, err
@@ -371,7 +383,7 @@ func (r *Repository) Events(ctx context.Context, orderID int64) ([]ports.EventRe
 	out := make([]ports.EventRecord, 0)
 	for rows.Next() {
 		var e ports.EventRecord
-		if err := rows.Scan(&e.ID, &e.Type, &e.Event, &e.FromStatus, &e.ToStatus, &e.Actor, &e.Reason, &e.OccurredAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Type, &e.Event, &e.FromStatus, &e.ToStatus, &e.Actor, &e.Reason, &e.OccurredAt, &e.Details); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -387,7 +399,7 @@ func (r *Repository) Transition(ctx context.Context, o domain.Order, from domain
 	var out domain.Order
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		var err error
-		if out, err = transitionTx(ctx, tx, o, from, ev, actor, reason, opts.ClearWave); err != nil {
+		if out, err = transitionTx(ctx, tx, o, from, ev, actor, reason, opts.ClearWave, opts.Details); err != nil {
 			return err
 		}
 		if opts.ReleaseCommitted {
@@ -401,7 +413,7 @@ func (r *Repository) Transition(ctx context.Context, o domain.Order, from domain
 }
 
 // transitionTx guarda estado y campos de control con verificación de versión.
-func transitionTx(ctx context.Context, tx pgx.Tx, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, clearWave bool) (domain.Order, error) {
+func transitionTx(ctx context.Context, tx pgx.Tx, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, clearWave bool, details ...any) (domain.Order, error) {
 	nextRetry := "NULL"
 	if o.Status == domain.StatusPending || o.Status == domain.StatusValidating { // vuelve a la cola del validador
 		nextRetry = "now()"
@@ -426,7 +438,11 @@ func transitionTx(ctx context.Context, tx pgx.Tx, o domain.Order, from domain.St
 	if tag.RowsAffected() == 0 {
 		return domain.Order{}, domain.ErrConflict
 	}
-	if err := addEvent(ctx, tx, o.ID, "status_change", string(ev), string(from), string(o.Status), actor, reason); err != nil {
+	var det any
+	if len(details) > 0 {
+		det = details[0]
+	}
+	if err := addEventDetails(ctx, tx, o.ID, "status_change", string(ev), string(from), string(o.Status), actor, reason, det); err != nil {
 		return domain.Order{}, err
 	}
 	return getOne(ctx, tx, o.ID, false)

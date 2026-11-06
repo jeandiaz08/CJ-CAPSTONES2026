@@ -180,9 +180,19 @@ Contiene estos campos:
 | --- | --- | --- |
 | GET | `/v1/dispatch/couriers` | Órdenes y bultos listos por courier |
 | POST | `/v1/dispatch/manifests` | `{courier, orderIds?}` → manifiesto abierto. Las comunas sin cobertura salen y pasan a Incidencia (`excluded[]`). |
-| GET | `/v1/dispatch/manifests[?status=open\|closed]`, `/v1/dispatch/manifests/{id}` | Detalle con líneas y bultos escaneados |
+| GET | `/v1/dispatch/manifests[?status=open\|closed]`, `/v1/dispatch/manifests/{id}` | Detalle con líneas y bultos escaneados. El detalle trae `summary {orders, packages, scanned, companies[{id, name, orders, packages}]}` (H-13-T09); las líneas movidas o canceladas no cuentan |
 | POST | `/v1/dispatch/manifests/{id}/scan` | `{code}` marca un bulto (manual o con lector) |
-| POST | `/v1/dispatch/manifests/{id}/close` | `{pickerName, pickerId?, vehiclePlate?, notes?}` → `{delivered[], pending[]}`. Las órdenes con bultos faltantes no se entregan y quedan para el siguiente retiro. |
+| POST | `/v1/dispatch/manifests/{id}/close` | `{pickerName, pickerId?, vehiclePlate?, notes?, dispatchAnyway?[{orderId, reason}]}` → `{delivered[], pending[], incomplete[]}`. Las órdenes con bultos faltantes no se entregan y quedan para el siguiente retiro, salvo las de `dispatchAnyway` («Despachar igual», H-13-T08). |
+
+**«Despachar igual» (H-13-T08, PV-09).** Solo el Jefe de Operaciones o el Administrador lo autoriza (403 para el resto, aunque tenga el permiso Despacho), y quien cierra igual necesita el permiso Despacho. Cada orden necesita un motivo de al menos 5 caracteres, debe estar incluida en el manifiesto, tener bultos sin escanear y al menos uno escaneado (si no, 422 y el manifiesto no se cierra). La orden pasa a «Entregada al courier» y queda en `incomplete[]`. En su historial (`GET /v1/orders/{id}`) el evento trae `details`:
+
+```json
+{"kind": "despacho_incompleto", "manifestId": 12, "courier": "starken", "waveId": "OLA-AM",
+ "reason": "Bulto 2 dañado, se reenvía mañana", "authorizedBy": "user:2 Jefe",
+ "packagesTotal": 3, "scannedPackages": ["NX-150-1", "NX-150-3"], "missingPackages": ["NX-150-2"]}
+```
+
+Además se crea un aviso interno (`kind: despacho_incompleto`) para el Jefe y el Admin en la campana y en vivo; el cliente no lo ve. Límite: los bultos no registran qué productos lleva cada uno, así que se informa qué bultos faltaron, no qué productos iban en ellos.
 
 ### Seguimiento (H-14)
 
