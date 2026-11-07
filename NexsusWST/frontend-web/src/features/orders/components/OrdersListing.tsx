@@ -1,4 +1,5 @@
 "use client";
+import { NotificationBell } from "@/components/NotificationBell";
 import {CutoffCards} from "./CutoffCards";
 import {AssignmentActions} from "./AssignmentActions";
 import {AssignmentSituation} from "./AssignmentSituation";
@@ -12,7 +13,7 @@ import {originLabel} from "../format";
 import {countFilters, readFilters, toOrderFilters, writeFilters, type FilterValues} from "../filters";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { Package, PackageOpen, Archive, AlertCircle, CirclePlus, Filter, FilterX, Bell } from "lucide-react";
+import { Package, PackageOpen, Archive, AlertCircle, CirclePlus, Filter, FilterX } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Tabs } from "@/components/Tabs";
 import { KpiCard } from "@/components/KpiCard";
@@ -24,7 +25,7 @@ import { useOrders } from "@/hooks/useOrders";
 import { getSummary, getOrderMeta, type Order } from "@/services/orders";
 import { listCompanies, getCatalog } from "@/services/core";
 import { useOrderResource } from "../hooks/useOrderResources";
-import { OrderDetail, dateLabel, todoAction } from "./OrderDetail";
+import { OrderDetail, dateLabel } from "./OrderDetail";
 export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     const { session, companyId } = useAuth();
     const params = useSearchParams(), router = useRouter(), pathname = usePathname();
@@ -91,9 +92,7 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     return <div className={`orders-view ${assignment?"assignment-view":""}`}>
     <PageHeader title="Órdenes" actions={<>
         <LiveBadge live={live}/>
-        <button className="icon-btn" aria-label="Notificaciones" onClick={todoAction}>
-        <Bell size={23}/>
-        </button>
+        <NotificationBell />
         </>}/>
     <Tabs items={[{ href: "/ordenes/todas/listado", label: "Listado", active: !assignment }, ...(canAssign ? [{ href: "/ordenes/todas/asignacion", label: "Asignación de órdenes", active: assignment }] : [])]}/>
     {assignment?<CutoffCards revision={revision}/>:<>     <div className="orders-kpis">{([{ status: "pending", label: "Pendiente", tone: "neutral", icon: PackageOpen }, { status: "picking", label: "En preparación", tone: "processing", icon: Package }, { status: "packing", label: "En empaque", tone: "warn", icon: PackageOpen }, { status: "ready_pickup", label: "Lista para retiro", tone: "ok", icon: Archive }, { status: "incident", label: "Incidencias", tone: "danger", icon: AlertCircle }] as const).map(k => <KpiCard key={k.status} label={k.label} count={summary.loading ? undefined : summary.data?.data[k.status] ?? 0} tone={k.tone} icon={<k.icon size={30}/>} active={kpiActive(k.status)} onClick={() => toggleKpi(k.status)}/>)}</div>{summary.error && <p role="alert">No se pudieron cargar los indicadores.</p>}</>}<div className="orders-toolbar">

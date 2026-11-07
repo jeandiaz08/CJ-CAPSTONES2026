@@ -125,8 +125,11 @@ export type PackageInput = { weightKg?: number; lengthCm?: number; widthCm?: num
 export type Package = PackageInput & { manifestId: number | null; id: number; code: string };
 export type OrderDocument = { id: number; kind: string; filename: string; contentType: string; sizeBytes: number; uploadedAt: string };
 
+export type TrackingEvent = { id: number; provider: string; status: string; description?: string; occurredAt: string };
+export type OrderTracking = { available: boolean; events: TrackingEvent[] };
+
 export const getOrder = (id: number, companyId: number | null) =>
-  api<{ order: Order; events: OrderEvent[]; packages: Package[]; documents: OrderDocument[] }>(
+  api<{ order: Order; events: OrderEvent[]; packages: Package[]; documents: OrderDocument[]; tracking?: OrderTracking }>(
     "orders",
     withCompany(`/v1/orders/${id}`, companyId),
   );

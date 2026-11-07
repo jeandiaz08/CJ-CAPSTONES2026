@@ -1,8 +1,9 @@
 "use client";
 
+import { NotificationBell } from "@/components/NotificationBell";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, Bell, LoaderCircle } from "lucide-react";
+import { Archive, LoaderCircle } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { PageHeader } from "@/components/PageHeader";
 import { LiveBadge } from "@/components/StatusBadge";
@@ -124,7 +125,7 @@ export function DispatchView() {
     <div className="orders-view dispatch-view">
       <PageHeader title="Retiro y entrega" actions={<>
         <LiveBadge live={live} />
-        <button className="icon-btn" aria-label="Notificaciones"><Bell size={23} /></button>
+        <NotificationBell />
       </>} />
       <Tabs items={[{ href: courier ? `${DISPATCH_PATH}?courier=${courier}` : DISPATCH_PATH, label: "Entrega de órdenes", active: true }]} />
       <div className="dispatch-top">
