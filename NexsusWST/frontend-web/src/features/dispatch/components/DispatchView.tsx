@@ -17,6 +17,11 @@ import { usePickupList } from "../hooks/usePickupList";
 import { clearMarks, pruneMarks, readCode, readMarks, saveMarks, scannedCodes, totalPackages, type LocalMarks, type ScanNotice } from "../pickupList";
 import { PickupList } from "./PickupList";
 import { PickupOrderModal } from "./PickupOrderModal";
+import { ClosedManifests } from "./ClosedManifests";
+import { ManifestPanel } from "./ManifestPanel";
+import type { LineInfo } from "./ManifestAccordions";
+import type { ManifestLine } from "@/services/dispatch";
+import { productsForCompany } from "@/services/orderReference";
 
 export const DISPATCH_PATH = "/ordenes/retiro";
 const NO_MARKS: LocalMarks = { marked: [], selected: [] };
@@ -26,10 +31,13 @@ export function DispatchView() {
   const { session, companyId } = useAuth();
   const params = useSearchParams(), router = useRouter(), pathname = usePathname();
   const courier = params.get("courier");
+  const closedView = params.get("view") === "closed";
   // El Administrador consulta (matriz: «Lectura»); operar exige el permiso Despacho.
   const canOperate = !!session?.user.permissions.includes("despacho");
   const { couriers, rows, openManifest, error, reload, live } = usePickupList(courier, companyId);
   const refs = useOrderResource(() => Promise.all([listCompanies(), getCatalog("couriers")]), "dispatch-references");
+  const companyIds = [...new Set((rows ?? []).map((r) => r.order.companyId))].sort((a, b) => a - b);
+  const products = useOrderResource(async () => Object.fromEntries(await Promise.all(companyIds.map(async (id) => [id, await productsForCompany(id)] as const))), `dispatch-products:${companyIds.join(",")}`);
   // Lo marcado es de cada courier: se lee al elegirlo, antes de guardar nada.
   const [state, setState] = useState(() => ({ courier, marks: courier ? readMarks(courier) : NO_MARKS, notice: null as ScanNotice | null }));
   if (state.courier !== courier) setState({ courier, marks: courier ? readMarks(courier) : NO_MARKS, notice: null });
@@ -85,6 +93,7 @@ export function DispatchView() {
       for (const code of codes) await scanPackage(manifest.id, code).catch(() => failed.push(code));
       clearMarks(courier);
       setMarks(() => NO_MARKS);
+      requestAnimationFrame(() => document.getElementById("manifest-title")?.scrollIntoView({ behavior: "smooth", block: "start" }));
       showToast(`Manifiesto #${manifest.id} generado con ${included.size} ${included.size === 1 ? "orden" : "órdenes"}.`, "success");
       if (excluded.length) showToast(`No entraron al manifiesto: ${excluded.join(" · ")}`, "warning");
       if (failed.length) showToast(`No se pudieron marcar: ${failed.join(", ")}. Vuelve a leerlos.`, "warning");
@@ -101,6 +110,12 @@ export function DispatchView() {
   const expected = visibleRows.reduce((total, row) => total + totalPackages(row), 0);
   const markedCount = visibleRows.reduce((total, row) => total + scannedCodes(row, marks).length, 0);
   const selectedCount = visibleRows.filter((row) => marks.selected.includes(row.order.id)).length;
+  // Datos de cada línea del manifiesto: la orden puede ya no estar en la lista (pasó a Incidencia).
+  const lineInfo = (line: ManifestLine): LineInfo => {
+    const order = rows?.find((r) => r.order.id === line.orderId)?.order;
+    return { companyName: companyName(line.companyId), labelCode: order?.label.status === "ready" ? order.label.trackingCode ?? "" : "", items: order?.items ?? [] };
+  };
+  const productName = (companyId: number, sku: string) => products.data?.[companyId]?.find((p) => p.sku === sku)?.description ?? sku;
   // Si la orden sale de la lista mientras se mira (otra persona la movió), el detalle se cierra.
   const viewingRow = visibleRows.find((row) => row.order.id === viewing);
 
@@ -110,7 +125,8 @@ export function DispatchView() {
         <LiveBadge live={live} />
         <button className="icon-btn" aria-label="Notificaciones"><Bell size={23} /></button>
       </>} />
-      <Tabs items={[{ href: DISPATCH_PATH, label: "Entrega de órdenes", active: true }]} />
+      <Tabs items={[{ href: courier ? `${DISPATCH_PATH}?courier=${courier}` : DISPATCH_PATH, label: "Entrega de órdenes", active: !closedView }, { href: `${DISPATCH_PATH}?view=closed`, label: "Manifiestos cerrados", active: closedView }]} />
+      {closedView ? <ClosedManifests courierName={courierName} info={lineInfo} productName={productName} /> : <>
       <div className="dispatch-top">
         <div className="orders-kpis">
           <KpiCard label="Lista para el retiro" count={totalReady} tone="ok" icon={<Archive size={30} />} />
@@ -148,13 +164,19 @@ export function DispatchView() {
           </div>
           <div className="dispatch-count-foot">
             <p>Órdenes seleccionadas {selectedCount} de {visibleRows.length}</p>
-            <button type="button" className="btn form-submit-success dispatch-action" disabled={!canOperate || selectedCount === 0 || generating} aria-busy={generating} onClick={generate}>
+            <button type="button" className="btn form-submit-success dispatch-action" disabled={!canOperate || selectedCount === 0 || generating || !!openManifest} aria-busy={generating} onClick={generate}>
               {generating && <LoaderCircle size={18} className="spin" aria-hidden="true" />}
               Generar manifiesto
             </button>
+            {openManifest && <p className="muted">Confirma o termina el manifiesto #{openManifest.id} antes de generar otro.</p>}
           </div>
         </aside>
       </div>
+      {courier && openManifest && rows && (
+        <ManifestPanel key={openManifest.id} manifest={openManifest} courierName={courierName(courier)} canOperate={canOperate} userName={session?.user.name ?? ""}
+          info={lineInfo} productName={productName} onClosed={reload} />
+      )}
+      </>}
       {viewingRow && (
         <PickupOrderModal row={viewingRow} companyName={companyName(viewingRow.order.companyId)} courierName={courierName(viewingRow.order.courier)} canOperate={canOperate}
           onClose={() => setViewing(null)} onReported={() => { setViewing(null); reload(); }} />
