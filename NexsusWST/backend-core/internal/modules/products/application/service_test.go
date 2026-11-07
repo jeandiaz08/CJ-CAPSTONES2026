@@ -11,7 +11,10 @@ import (
 )
 
 // fakeRepo: adaptador de prueba en memoria (sin PostgreSQL).
-type fakeRepo struct{ items []domain.Product }
+type fakeRepo struct {
+	items []domain.Product
+	comps map[int64][]domain.KitComponent
+}
 
 func (f *fakeRepo) List(_ context.Context, fl ports.ListFilter) ([]domain.Product, error) {
 	var out []domain.Product
@@ -34,6 +37,37 @@ func (f *fakeRepo) Create(_ context.Context, p domain.Product) (domain.Product, 
 	p.ID = int64(len(f.items) + 1)
 	f.items = append(f.items, p)
 	return p, nil
+}
+
+func (f *fakeRepo) SetWave(_ context.Context, id int64, c *string) error {
+	for i := range f.items {
+		if f.items[i].ID == id {
+			f.items[i].WaveCode = c
+			return nil
+		}
+	}
+	return domain.ErrNotFound
+}
+func (f *fakeRepo) BySKUs(_ context.Context, cid int64, skus []string) ([]domain.Product, error) {
+	var out []domain.Product
+	for _, p := range f.items {
+		for _, s := range skus {
+			if p.CompanyID == cid && p.SKU == s {
+				out = append(out, p)
+			}
+		}
+	}
+	return out, nil
+}
+func (f *fakeRepo) Components(_ context.Context, kitID int64) ([]domain.KitComponent, error) {
+	return f.comps[kitID], nil
+}
+func (f *fakeRepo) ReplaceComponents(_ context.Context, kitID int64, c []domain.KitComponent) error {
+	if f.comps == nil {
+		f.comps = map[int64][]domain.KitComponent{}
+	}
+	f.comps[kitID] = c
+	return nil
 }
 
 // in: nil = todas las empresas

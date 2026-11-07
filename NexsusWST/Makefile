@@ -1,10 +1,11 @@
 # Atajos (opcionales). En Windows sin make, copia el comando de la derecha.
 DC=docker compose
 DCPROD=docker compose -f docker-compose.yml -f docker-compose.prod.yml
+DCCF=$(DCPROD) -f docker-compose.cloudflare.yml
 THEME_DIR=infrastructure/keycloak/theme
 THEME_JAR=$(THEME_DIR)/dist_keycloak/nexuswst-keycloak-theme.jar
 
-.PHONY: theme up down logs ps restart rebuild psql redis-cli test-core test-orders tidy migrate-new seed-dev prod-up prod-down nuke
+.PHONY: theme up down logs ps restart rebuild psql redis-cli test-core test-orders tidy migrate-new seed-dev backup restore keycloak-update ci prod-up prod-down prod-cf-up prod-cf-down cloudflare-ips nuke
 
 theme:         ## Compila el .jar del tema de Keycloak (solo requiere Docker)
 	docker run --rm -v "$(PWD)/$(THEME_DIR):/app" -w /app node:22-bookworm-slim sh docker-build.sh
@@ -35,9 +36,23 @@ migrate-new:   ## make migrate-new svc=backend-core name=crear_tabla_x
 	docker run --rm -v "$(PWD)/$(svc)/migrations:/migrations" migrate/migrate:v4.18.3 create -ext sql -dir /migrations -seq $(name)
 seed-dev:      ## Vuelve a cargar los datos ficticios de desarrollo (también corre con make up)
 	$(DC) run --rm seed-dev
+backup:        ## Respaldo de PostgreSQL en ./backups (conserva los últimos 7)
+	./scripts/backup.sh
+restore:       ## make restore file=backups/nexuswst_AAAAMMDD-HHMMSS.dump (pide confirmación)
+	./scripts/restore.sh $(file)
+keycloak-update: ## Aplica al realm ya creado: usuarios sin correo, correos en español y Microsoft 365 (.env)
+	./scripts/keycloak-update.sh
 prod-up: $(THEME_JAR)
 	$(DCPROD) up -d --build
 prod-down:
 	$(DCPROD) down
+prod-cf-up: $(THEME_JAR) ## Producción detrás de Cloudflare (solo tráfico de Cloudflare, TLS por DNS)
+	$(DCCF) up -d --build
+prod-cf-down:
+	$(DCCF) down
+cloudflare-ips: ## Revisa que los rangos de Cloudflare en Traefik sigan al día
+	./scripts/cloudflare-ips.sh
+ci:            ## Mismos pasos del pipeline (Go y frontend); requiere Go 1.26 y Node 22
+	./scripts/ci.sh all
 nuke:          ## ¡BORRA volúmenes (BD y Redis)! Solo desarrollo
 	$(DC) down -v

@@ -35,7 +35,9 @@ func NewService(users ports.UserRepository, idp ports.IdentityProvider, profiles
 
 type UserView struct {
 	ID           int64    `json:"id"`
-	Email        string   `json:"email"`
+	Email        string   `json:"email"`              // vacío si no tiene correo
+	Username     string   `json:"username,omitempty"` // usuario sin correo (H-02-T09)
+	HasEmail     bool     `json:"hasEmail"`           // false: la contraseña la restablece el administrador
 	Name         string   `json:"name"`
 	Role         string   `json:"role"`
 	Permissions  []string `json:"permissions"`
@@ -44,10 +46,13 @@ type UserView struct {
 	Active       bool     `json:"active"`
 	Linked       bool     `json:"linked"` // ya ingresó o fue creado por Nexus en Keycloak
 	LastLoginAt  any      `json:"lastLoginAt"`
+	// TemporaryPassword solo viene al crear un usuario sin correo o al
+	// restablecerle la contraseña; no se guarda en Nexus ni se vuelve a mostrar.
+	TemporaryPassword string `json:"temporaryPassword,omitempty"`
 }
 
 func View(u domain.User) UserView {
-	v := UserView{ID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role, Permissions: u.Permissions,
+	v := UserView{ID: u.ID, Email: u.Email, Username: u.Username, HasEmail: u.HasEmail(), Name: u.Name, Role: u.Role, Permissions: u.Permissions,
 		Companies: u.Companies, AllCompanies: u.AllCompanies, Active: u.Active, Linked: u.KeycloakID != ""}
 	if v.Permissions == nil {
 		v.Permissions = []string{}
@@ -201,6 +206,9 @@ func (s *Service) Create(ctx context.Context, actor tenant.Identity, d domain.Dr
 	if err := s.validate(ctx, &d); err != nil {
 		return UserView{}, err
 	}
+	if d.Email == "" {
+		return s.createWithoutEmail(ctx, actor, d)
+	}
 	if existing, err := s.users.GetByEmail(ctx, d.Email); err == nil {
 		return UserView{}, fmt.Errorf("%w (usuario #%d)", domain.ErrEmailTaken, existing.ID)
 	} else if !errors.Is(err, domain.ErrNotFound) {
@@ -320,11 +328,88 @@ func (s *Service) setActive(ctx context.Context, actor tenant.Identity, id int64
 	return View(u), nil
 }
 
+// createWithoutEmail da de alta personal de bodega sin correo (H-02-T09):
+// usuario y contraseña temporal en Keycloak, perfil en Nexus. La contraseña
+// temporal se devuelve una sola vez para que el administrador se la entregue.
+func (s *Service) createWithoutEmail(ctx context.Context, actor tenant.Identity, d domain.Draft) (UserView, error) {
+	if existing, err := s.users.GetByUsername(ctx, d.Username); err == nil {
+		return UserView{}, fmt.Errorf("%w (usuario #%d)", domain.ErrUsernameTaken, existing.ID)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return UserView{}, err
+	}
+	kcID, err := s.idp.CreateLocalUser(ctx, d.Username, d.Name)
+	if err != nil {
+		return UserView{}, err
+	}
+	undo := func() {
+		if e := s.idp.DeleteUser(context.WithoutCancel(ctx), kcID); e != nil {
+			s.log.Error("no se pudo deshacer el alta en Keycloak", "keycloakId", kcID, "err", e)
+		}
+	}
+	temp, err := TemporaryPassword()
+	if err == nil {
+		err = s.idp.SetTemporaryPassword(ctx, kcID, temp)
+	}
+	if err == nil {
+		err = s.idp.SetRole(ctx, kcID, d.Role)
+	}
+	if err != nil {
+		undo()
+		return UserView{}, err
+	}
+	u, err := s.users.Insert(ctx, kcID, d, &actor.UserID)
+	if err != nil {
+		undo()
+		return UserView{}, err
+	}
+	_ = s.users.Audit(ctx, &actor.UserID, u.ID, "created", map[string]any{
+		"role": d.Role, "permissions": d.Permissions, "companies": d.Companies, "allCompanies": d.AllCompanies,
+		"username": d.Username, "withoutEmail": true})
+	v := View(u)
+	v.TemporaryPassword = temp
+	return v, nil
+}
+
+// ResetPassword (H-02-T09): el administrador le pone una contraseña temporal
+// nueva a un usuario, que deberá cambiarla al ingresar. Es la vía para quien no
+// tiene correo; también sirve si alguien perdió acceso a su correo. Cierra sus
+// sesiones abiertas. La contraseña no queda en la auditoría.
+func (s *Service) ResetPassword(ctx context.Context, actor tenant.Identity, id int64) (string, error) {
+	if id == actor.UserID {
+		return "", ValidationError{"no puedes restablecer tu propia contraseña aquí; usa «¿Olvidaste tu contraseña?» al iniciar sesión"}
+	}
+	u, err := s.users.GetByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if u.KeycloakID == "" {
+		return "", ValidationError{"el usuario aún no está vinculado a Keycloak"}
+	}
+	if !u.Active {
+		return "", ValidationError{"el usuario está deshabilitado; habilítalo antes de restablecer su contraseña"}
+	}
+	temp, err := TemporaryPassword()
+	if err != nil {
+		return "", err
+	}
+	if err := s.idp.SetTemporaryPassword(ctx, u.KeycloakID, temp); err != nil {
+		return "", err
+	}
+	if err := s.idp.Logout(ctx, u.KeycloakID); err != nil {
+		s.log.Warn("no se pudieron cerrar las sesiones tras restablecer la contraseña", "user", id, "err", err)
+	}
+	_ = s.users.Audit(ctx, &actor.UserID, id, "password_reset", map[string]any{"temporary": true})
+	return temp, nil
+}
+
 // ResendSetPassword vuelve a enviar el correo para definir la contraseña.
 func (s *Service) ResendSetPassword(ctx context.Context, actor tenant.Identity, id int64) error {
 	u, err := s.users.GetByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	if !u.HasEmail() {
+		return ValidationError{"el usuario no tiene correo; usa «Restablecer contraseña»"}
 	}
 	if u.KeycloakID == "" {
 		return ValidationError{"el usuario aún no está vinculado a Keycloak"}

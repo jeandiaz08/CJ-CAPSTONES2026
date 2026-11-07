@@ -1,0 +1,3 @@
+BEGIN;
+ALTER TABLE order_events DROP COLUMN IF EXISTS details;
+COMMIT;

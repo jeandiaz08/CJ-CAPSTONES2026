@@ -38,3 +38,18 @@ func LabelRetryDelay(attempt int) time.Duration {
 	}
 	return 5 * time.Minute
 }
+
+// LabelRetryDelayEvery (H-16-T06, SCRUM-245): la misma espera creciente, pero
+// la espera estable («cada N minutos») es configurable. Con every <= 0 se usa
+// LabelRetryDelay tal cual; si no, ningún intento espera más que every y,
+// desde el cuarto, se reintenta cada every.
+func LabelRetryDelayEvery(attempt int, every time.Duration) time.Duration {
+	d := LabelRetryDelay(attempt)
+	if every <= 0 {
+		return d
+	}
+	if d > every || attempt >= 4 {
+		return every
+	}
+	return d
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/nexuswst/orders-service/internal/domain"
 	"github.com/nexuswst/orders-service/internal/ports"
@@ -55,6 +56,18 @@ func (n *Notices) OnLabel(ctx context.Context, o domain.Order, ready bool) {
 	}
 	n.add(ctx, o, "internal", "label_failed", "Sin etiqueta: orden "+ref,
 		fmt.Sprintf("%s no entregó la etiqueta. Reinténtala desde la orden.", o.Courier), false)
+}
+
+// OnIncompleteDispatch avisa al Jefe y al Admin (audiencia interna) que una
+// orden salió con bultos faltantes (H-13-T08).
+func (n *Notices) OnIncompleteDispatch(ctx context.Context, o domain.Order, d IncompleteDispatch, who string) {
+	if n == nil || n.repo == nil {
+		return
+	}
+	ref := fmt.Sprintf("#%d (%s)", o.ID, o.ExternalRef)
+	n.add(ctx, o, "internal", "despacho_incompleto", "Despacho incompleto: orden "+ref,
+		fmt.Sprintf("Salió en el manifiesto #%d con %d de %d bulto(s). Faltan: %s. Autorizó %s. Motivo: %s",
+			d.ManifestID, len(d.ScannedPackages), d.PackagesTotal, strings.Join(d.MissingPackages, ", "), who, d.Reason), false)
 }
 
 func (n *Notices) add(ctx context.Context, o domain.Order, audience, kind, title, body string, email bool) {

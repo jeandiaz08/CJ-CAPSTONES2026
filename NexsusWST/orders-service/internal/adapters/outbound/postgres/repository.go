@@ -170,9 +170,21 @@ func replaceItems(ctx context.Context, q querier, orderID int64, items []domain.
 }
 
 func addEvent(ctx context.Context, q querier, orderID int64, typ, ev, from, to, actor, reason string) error {
+	return addEventDetails(ctx, q, orderID, typ, ev, from, to, actor, reason, nil)
+}
+
+// addEventDetails es addEvent con datos ordenados en order_events.details.
+func addEventDetails(ctx context.Context, q querier, orderID int64, typ, ev, from, to, actor, reason string, details any) error {
+	var raw []byte
+	if details != nil {
+		var err error
+		if raw, err = json.Marshal(details); err != nil {
+			return err
+		}
+	}
 	_, err := q.Exec(ctx, `
-		INSERT INTO order_events (order_id, company_id, warehouse, event_type, event, from_status, to_status, actor, reason)
-		VALUES ($1,(SELECT company_id FROM orders WHERE id=$1),(SELECT warehouse FROM orders WHERE id=$1),$2,$3,NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''))`, orderID, typ, ev, from, to, actor, reason)
+		INSERT INTO order_events (order_id, company_id, warehouse, event_type, event, from_status, to_status, actor, reason, details)
+		VALUES ($1,(SELECT company_id FROM orders WHERE id=$1),(SELECT warehouse FROM orders WHERE id=$1),$2,$3,NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''),$8::jsonb)`, orderID, typ, ev, from, to, actor, reason, raw)
 	return err
 }
 
@@ -362,7 +374,7 @@ func (r *Repository) Summary(ctx context.Context, ids []int64) (map[domain.Statu
 
 func (r *Repository) Events(ctx context.Context, orderID int64) ([]ports.EventRecord, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, event_type, event, COALESCE(from_status,''), COALESCE(to_status,''), actor, COALESCE(reason,''), occurred_at
+		SELECT id, event_type, event, COALESCE(from_status,''), COALESCE(to_status,''), actor, COALESCE(reason,''), occurred_at, details
 		FROM order_events WHERE order_id=$1 ORDER BY id`, orderID)
 	if err != nil {
 		return nil, err
@@ -371,7 +383,7 @@ func (r *Repository) Events(ctx context.Context, orderID int64) ([]ports.EventRe
 	out := make([]ports.EventRecord, 0)
 	for rows.Next() {
 		var e ports.EventRecord
-		if err := rows.Scan(&e.ID, &e.Type, &e.Event, &e.FromStatus, &e.ToStatus, &e.Actor, &e.Reason, &e.OccurredAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Type, &e.Event, &e.FromStatus, &e.ToStatus, &e.Actor, &e.Reason, &e.OccurredAt, &e.Details); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -387,7 +399,7 @@ func (r *Repository) Transition(ctx context.Context, o domain.Order, from domain
 	var out domain.Order
 	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		var err error
-		if out, err = transitionTx(ctx, tx, o, from, ev, actor, reason, opts.ClearWave); err != nil {
+		if out, err = transitionTx(ctx, tx, o, from, ev, actor, reason, opts.ClearWave, opts.Details); err != nil {
 			return err
 		}
 		if opts.ReleaseCommitted {
@@ -401,7 +413,7 @@ func (r *Repository) Transition(ctx context.Context, o domain.Order, from domain
 }
 
 // transitionTx guarda estado y campos de control con verificación de versión.
-func transitionTx(ctx context.Context, tx pgx.Tx, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, clearWave bool) (domain.Order, error) {
+func transitionTx(ctx context.Context, tx pgx.Tx, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, clearWave bool, details ...any) (domain.Order, error) {
 	nextRetry := "NULL"
 	if o.Status == domain.StatusPending || o.Status == domain.StatusValidating { // vuelve a la cola del validador
 		nextRetry = "now()"
@@ -426,7 +438,11 @@ func transitionTx(ctx context.Context, tx pgx.Tx, o domain.Order, from domain.St
 	if tag.RowsAffected() == 0 {
 		return domain.Order{}, domain.ErrConflict
 	}
-	if err := addEvent(ctx, tx, o.ID, "status_change", string(ev), string(from), string(o.Status), actor, reason); err != nil {
+	var det any
+	if len(details) > 0 {
+		det = details[0]
+	}
+	if err := addEventDetails(ctx, tx, o.ID, "status_change", string(ev), string(from), string(o.Status), actor, reason, det); err != nil {
 		return domain.Order{}, err
 	}
 	return getOne(ctx, tx, o.ID, false)
@@ -670,8 +686,12 @@ func (r *Repository) FinishValidation(ctx context.Context, orderID int64, invasS
 			out = o
 			return nil // otra operación ya la movió
 		}
-		// Bloquea las filas de comprometido de estos SKU (orden fijo -> sin deadlocks)
-		items := sortedItems(o.Items)
+		// Un kit compromete el stock de sus componentes (SCRUM-100). Las líneas
+		// vienen ordenadas por SKU: bloqueos en orden fijo -> sin deadlocks.
+		items, err := stockLines(ctx, tx, o.CompanyID, o.Items)
+		if err != nil {
+			return err
+		}
 		for _, it := range items {
 			if _, err := tx.Exec(ctx, `INSERT INTO stock_committed (company_id, sku, quantity) VALUES ($1,$2,0)
 				ON CONFLICT DO NOTHING`, o.CompanyID, it.SKU); err != nil {
@@ -696,9 +716,18 @@ func (r *Repository) FinishValidation(ctx context.Context, orderID int64, invasS
 		ev, reason := domain.EvVoid, shortage
 		if ok {
 			ev, reason = domain.EvValidate, ""
-			for _, it := range o.Items {
+			// Se guarda lo comprometido para liberar exactamente lo mismo,
+			// aunque después cambie la composición del kit.
+			if _, err := tx.Exec(ctx, `DELETE FROM order_stock_lines WHERE order_id=$1`, o.ID); err != nil {
+				return err
+			}
+			for _, it := range items {
 				if _, err := tx.Exec(ctx, `UPDATE stock_committed SET quantity=quantity+$3, updated_at=now()
 					WHERE company_id=$1 AND sku=$2`, o.CompanyID, it.SKU, it.Quantity); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO order_stock_lines (order_id, sku, quantity) VALUES ($1,$2,$3)`,
+					o.ID, it.SKU, it.Quantity); err != nil {
 					return err
 				}
 			}
@@ -790,26 +819,38 @@ func (r *Repository) MarkRulesChecked(ctx context.Context, ids []int64) error {
 }
 
 func releaseCommitted(ctx context.Context, q querier, o domain.Order) error {
-	if len(o.Items) == 0 {
-		if err := loadItems(ctx, q, &o); err != nil {
+	// Se libera lo que quedó registrado al validar (con los kits expandidos).
+	// Órdenes validadas antes de SCRUM-100 no tienen registro: se usan sus líneas.
+	rows, err := q.Query(ctx, `DELETE FROM order_stock_lines WHERE order_id=$1 RETURNING sku, quantity`, o.ID)
+	if err != nil {
+		return err
+	}
+	var lines []domain.Item
+	for rows.Next() {
+		var it domain.Item
+		if err := rows.Scan(&it.SKU, &it.Quantity); err != nil {
+			rows.Close()
 			return err
 		}
+		lines = append(lines, it)
 	}
-	for _, it := range o.Items {
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(lines) == 0 {
+		if len(o.Items) == 0 {
+			if err := loadItems(ctx, q, &o); err != nil {
+				return err
+			}
+		}
+		lines = o.Items
+	}
+	for _, it := range lines {
 		if _, err := q.Exec(ctx, `UPDATE stock_committed SET quantity=GREATEST(quantity-$3,0), updated_at=now()
 			WHERE company_id=$1 AND sku=$2`, o.CompanyID, it.SKU, it.Quantity); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func sortedItems(items []domain.Item) []domain.Item {
-	out := append([]domain.Item(nil), items...)
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].SKU < out[j-1].SKU; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
-	return out
 }

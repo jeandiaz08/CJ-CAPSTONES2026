@@ -28,6 +28,7 @@ type Product struct {
 	Description string
 	Type        ProductType
 	Active      bool
+	WaveCode    *string // ola de Invas propia del producto (PV-19); nil = sin preferencia
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

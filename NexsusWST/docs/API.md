@@ -36,6 +36,8 @@ curl -s -X POST http://localhost/auth/realms/nexuswst/protocol/openid-connect/to
 | 422 | `validation_error` | Datos inválidos; viene `fields: [{field, message}]` |
 | 500 | `internal_error` | Viene `ref`: referencia de diagnóstico para buscar en los logs |
 
+Las respuestas de error del Core traen `ref` (igual a la cabecera `X-Request-Id`). En un 500, el mensaje pide informar esa referencia y la causa técnica queda en el registro del servidor con el mismo `request_id`, nunca en la respuesta (H-15-T04). Si Traefik ya envía `X-Request-Id`, se conserva; una referencia con caracteres raros o de más de 64 se reemplaza.
+
 Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se contrasta con el perfil).
 
 ---
@@ -54,15 +56,44 @@ Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se co
 | Método | Ruta | Cuerpo / filtros | Descripción |
 | --- | --- | --- | --- |
 | GET | `/v1/users` | `?q=&role=&active=true\|false&limit=&offset=` | Listado `{items, total}` |
-| POST | `/v1/users` | `{email, name, role, permissions[], companies[], allCompanies}` | Crea en Keycloak con su rol y le envía el **correo para definir la contraseña**. 409 si el correo existe. |
+| POST | `/v1/users` | `{email, name, role, permissions[], companies[], allCompanies}` o, sin correo, `{username, name, role, …}` | Con correo: crea en Keycloak con su rol y le envía el **correo para definir la contraseña** (409 `email_taken`). Sin correo (H-02-T09, solo personal interno): crea el usuario con una **contraseña temporal** que viene una sola vez en `temporaryPassword` (409 `username_taken`). |
 | GET | `/v1/users/{id}` | | Detalle |
 | PATCH | `/v1/users/{id}` | cualquiera de `{name, role, permissions, companies, allCompanies}` | Edita. Nadie cambia **su propio** rol, permisos ni empresas (403). |
 | POST | `/v1/users/{id}/disable` | `{reason}` | Deshabilita en Keycloak, cierra sus sesiones y bloquea su siguiente petición. Lo que tenía tomado en empaque vuelve a la bandeja. |
 | POST | `/v1/users/{id}/enable` | `{reason}` | Rehabilita |
-| POST | `/v1/users/{id}/password-email` | | Reenvía el correo para definir la contraseña |
+| POST | `/v1/users/{id}/password-email` | | Reenvía el correo para definir la contraseña (422 si el usuario no tiene correo) |
+| POST | `/v1/users/{id}/password-reset` | | `{temporaryPassword}`: contraseña temporal nueva que el usuario cambia al entrar; cierra sus sesiones. Para quien no tiene correo (también sirve si perdió su correo). No aplica a uno mismo (422). |
 | GET | `/v1/users/{id}/history` | | Auditoría: quién cambió qué y cuándo |
 
+**Usuarios sin correo (H-02-T09).** Personal de bodega que no tiene correo: el usuario es de 3 a 40 caracteres `[a-z0-9._-]`, empieza con letra o número y no lleva `@`. El rol y las empresas los asigna el administrador como a cualquiera. El usuario (vista) trae `username`, `email` (vacío) y `hasEmail: false`; la interfaz muestra «Restablecer contraseña» en vez de «Reenviar correo». `temporaryPassword` solo viene en la respuesta de alta o de restablecimiento (con `Cache-Control: no-store`), no se guarda en Nexus ni en la auditoría. En el login, el campo «Correo o usuario» acepta ambos.
+
 Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni el permiso `despacho`.
+
+### Productos y kits (H-04, RF-06) — Administrador, Jefe de Operaciones y Cliente (su empresa)
+
+| Método | Ruta | Cuerpo / filtros | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/products` | `?search=&limit=&offset=&company_id=` | Listado `{data}` acotado a las empresas autorizadas |
+| GET | `/v1/products/{id}` | | Detalle |
+| POST | `/v1/products` | `{companyId, sku, description, type: simple\|kit, waveCode?}` | Crea. 409 si el SKU ya existe en la empresa. `waveCode` solo lo envían Administrador o Jefe (403 para el cliente) |
+| PATCH | `/v1/products/{id}/wave` | `{waveCode: "AM" \| null}` | Ola propia del producto (PV-19). Solo Administrador y Jefe de Operaciones; `null` la quita |
+| GET | `/v1/products/{id}/components` | | Composición del kit: `{kit, components: [{productId, sku, description, quantity}]}` |
+| PUT | `/v1/products/{id}/components` | `{components: [{sku, quantity}]}` | **Reemplaza** la composición completa (transacción). Responde igual que el GET |
+
+Reglas de la composición (SCRUM-100): solo para productos `kit` (409 `not_kit` si es simple); de 1 a 50 componentes; cada componente debe existir en la **misma empresa**, estar activo y ser `simple` (no se permiten kits dentro de kits); cantidad > 0 y sin SKU repetidos. Si algo no se cumple responde 422 `invalid_component` con el SKU y el motivo, y no se guarda nada. Un kit de otra empresa responde 404.
+
+El kit **no tiene stock propio**: al validar una orden, Órdenes expande cada kit en sus componentes (cantidad del kit × cantidad del componente), consulta su stock y registra el comprometido sobre ellos. Una orden con un kit sin composición pasa a Incidencia con el motivo.
+
+### Ola por cliente y por producto (PV-19, H-03-T07, H-04-T10, H-10-T11)
+
+| Método | Ruta | Cuerpo | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/clients` | | Cada empresa trae `waveCode` (ola por defecto o `null`) |
+| PATCH | `/v1/clients/{id}/wave` | `{waveCode: "PM" \| null}` | Ola por defecto del cliente. Solo Administrador y Jefe de Operaciones |
+
+El código es el de la ola en Invas (letras, números, `-` o `_`, máximo 20; se guarda en mayúsculas). Los productos también traen `waveCode`. Órdenes lo lee por las vistas `v_product_waves` y `v_company_waves`, sin llamar al Core.
+
+Cómo decide el motor de asignación, antes de las reglas: **producto → cliente → reglas → sin regla que calce**. Si los productos de la orden que tienen ola coinciden en una sola, va a esa; si tienen olas distintas o ninguno tiene, va a la ola del cliente; si tampoco hay, decide la primera regla que calce; si no, queda Validada sin ola para el Jefe. Si la ola pedida no existe hoy en Invas, la orden no se asigna y queda un evento `no_wave` en su historial. Los cortes y el horario no cambian: deciden cuándo sale la orden.
 
 ### Catálogos (caché Redis + ETag)
 
@@ -107,7 +138,7 @@ Contiene estos campos:
 | Método | Ruta | Cuerpo | Notas |
 | --- | --- | --- | --- |
 | PATCH | `/v1/orders/{id}` | `{courier?, courierCode?, destination?{…}, dispatchType?, customerNotes?, items?, reason?}` | Solo antes de llegar a Invas (`editable`). Si cambian productos, destino o courier, se **valida de nuevo** (libera el comprometido). 409 `not_editable` en preparación. |
-| POST | `/v1/orders/{id}/cancel` | `{reason}` (obligatorio) | Cancelada (terminal, oculta, no se borra). Si ya está en una ola de Invas pasa a **Incidencia «Cancelación por confirmar»** y el Jefe la confirma con `resolve` + `cancel`. |
+| POST | `/v1/orders/{id}/cancel` | `{reason}` (obligatorio) | Cancelada (terminal, oculta, no se borra). Si ya está en una ola de Invas pasa a **Incidencia «Cancelación por confirmar»** y el Jefe la confirma con `resolve` + `cancel`. El **cliente** solo cancela antes de la preparación (H-09-T07): con la orden ya en una ola de Invas recibe 409 `invalid_transition` y debe pedirlo a WeStorage; Jefe y Admin sí pueden. |
 | POST | `/v1/orders/{id}/recover` | `{note}` | «Resolver anulación»: Anulada → Pendiente (Jefe/Admin) |
 
 ### Incidencias (H-11, CU-03)
@@ -154,9 +185,19 @@ Contiene estos campos:
 | --- | --- | --- |
 | GET | `/v1/dispatch/couriers` | Órdenes y bultos listos por courier |
 | POST | `/v1/dispatch/manifests` | `{courier, orderIds?}` → manifiesto abierto. Las comunas sin cobertura salen y pasan a Incidencia (`excluded[]`). |
-| GET | `/v1/dispatch/manifests[?status=open\|closed]`, `/v1/dispatch/manifests/{id}` | Detalle con líneas y bultos escaneados |
+| GET | `/v1/dispatch/manifests[?status=open\|closed]`, `/v1/dispatch/manifests/{id}` | Detalle con líneas y bultos escaneados. El detalle trae `summary {orders, packages, scanned, companies[{id, name, orders, packages}]}` (H-13-T09); las líneas movidas o canceladas no cuentan |
 | POST | `/v1/dispatch/manifests/{id}/scan` | `{code}` marca un bulto (manual o con lector) |
-| POST | `/v1/dispatch/manifests/{id}/close` | `{pickerName, pickerId?, vehiclePlate?, notes?}` → `{delivered[], pending[]}`. Las órdenes con bultos faltantes no se entregan y quedan para el siguiente retiro. |
+| POST | `/v1/dispatch/manifests/{id}/close` | `{pickerName, pickerId?, vehiclePlate?, notes?, dispatchAnyway?[{orderId, reason}]}` → `{delivered[], pending[], incomplete[]}`. Las órdenes con bultos faltantes no se entregan y quedan para el siguiente retiro, salvo las de `dispatchAnyway` («Despachar igual», H-13-T08). |
+
+**«Despachar igual» (H-13-T08, PV-09).** Solo el Jefe de Operaciones o el Administrador lo autoriza (403 para el resto, aunque tenga el permiso Despacho), y quien cierra igual necesita el permiso Despacho. Cada orden necesita un motivo de al menos 5 caracteres, debe estar incluida en el manifiesto, tener bultos sin escanear y al menos uno escaneado (si no, 422 y el manifiesto no se cierra). La orden pasa a «Entregada al courier» y queda en `incomplete[]`. En su historial (`GET /v1/orders/{id}`) el evento trae `details`:
+
+```json
+{"kind": "despacho_incompleto", "manifestId": 12, "courier": "starken", "waveId": "OLA-AM",
+ "reason": "Bulto 2 dañado, se reenvía mañana", "authorizedBy": "user:2 Jefe",
+ "packagesTotal": 3, "scannedPackages": ["NX-150-1", "NX-150-3"], "missingPackages": ["NX-150-2"]}
+```
+
+Además se crea un aviso interno (`kind: despacho_incompleto`) para el Jefe y el Admin en la campana y en vivo; el cliente no lo ve. Límite: los bultos no registran qué productos lleva cada uno, así que se informa qué bultos faltaron, no qué productos iban en ellos.
 
 ### Seguimiento (H-14)
 

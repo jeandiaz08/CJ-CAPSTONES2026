@@ -281,8 +281,8 @@ Cada servicio migra solo **sus** tablas (cada tabla tiene un solo dueño, DA-03)
    - `KC_WEB_DIRECT_GRANTS=false`.
    - `SMTP_*` con el correo de WeStorage (remitente `no-reply@westorage.cl`; SPF/DKIM los configura TI).
    - Secretos nuevos y largos para `KEYCLOAK_*` e `INTEGRATIONS_KEY`.
-   - Unos 1,25 GB de RAM para Keycloak.
-   - Antes de actualizar la versión de Keycloak, respalda la base (incluye el esquema `keycloak`).
+   - Keycloak tiene un límite de memoria de 1,36 GB en `docker-compose.prod.yml` (PV-15); el stack completo usa unos 2,6–2,9 GB del plan de 4 GB.
+   - Antes de actualizar la versión de Keycloak, respalda la base (`make backup`; incluye el esquema `keycloak`).
 6. Compila el tema de Keycloak con `make theme` (paso 3).
 7. Levanta:
 
@@ -291,6 +291,68 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 En producción: imágenes compiladas sin herramientas de desarrollo, usuario sin privilegios, sin dashboard de Traefik, sin puertos de BD expuestos y la red `data` es interna. Si WeStorage entrega un PostgreSQL administrado, quita el servicio `postgres` y apunta `DATABASE_URL` a esa instancia con `sslmode=require`.
+
+### Producción detrás de Cloudflare (SCRUM-247, PV-20)
+
+Capa opcional sobre la de producción (`docker-compose.cloudflare.yml` + `infrastructure/traefik/traefik.cloudflare.yml`). Sin ella, producción sigue igual (Let's Encrypt por HTTP).
+
+1. En Cloudflare: registro `A` del dominio de Nexus apuntando al droplet, con el proxy activo (nube naranja), y en SSL/TLS el modo **Full (strict)**.
+2. Crea un token de API con permiso **Zone → DNS → Edit** sobre la zona y ponlo en `CLOUDFLARE_DNS_API_TOKEN` del `.env`. Traefik lo usa para pedir el certificado de Let's Encrypt por DNS (funciona con el proxy activo). Cambia el correo de `certificatesResolvers` en `traefik.cloudflare.yml`, igual que en `traefik.prod.yml`.
+3. `make prod-cf-up` (para bajar: `make prod-cf-down`).
+
+Qué cambia:
+
+- **Solo entra tráfico de Cloudflare**: quien vaya directo a la IP del servidor recibe 403, aunque falsee las cabeceras de Cloudflare.
+- **IP real del visitante**: Traefik solo acepta `X-Forwarded-For` de las IP de Cloudflare, así Keycloak (bloqueo por fuerza bruta) y los registros ven la IP real y nadie la puede falsear.
+- Los rangos de Cloudflare están en los dos archivos de Traefik; `make cloudflare-ips` los compara con los publicados (conviene antes de cada despliegue).
+- Recomendado además en el droplet: firewall que solo abra 80/443 a esos rangos (y 22 a quien administra).
+
+### Integración continua (SCRUM-197)
+
+El pipeline corre los mismos pasos en **GitHub Actions** (`.github/workflows/ci.yml`, en cada push a `main`, `test`, `jean_dev` o `cristopher_dev` y en cada PR) y en **GitLab CI** (`.gitlab-ci.yml`, si el proyecto se sube a GitLab). Los dos llaman a `scripts/ci.sh`:
+
+| Paso | Qué revisa |
+| --- | --- |
+| Go · core / orders | `gofmt`, `go vet` y pruebas con detector de carreras y cobertura (`coverage.out`). Las pruebas que necesitan PostgreSQL se saltan. |
+| Frontend | `npm ci`, lint, tipos (`tsc`) y build de producción |
+| Imágenes | Construye las imágenes de producción (sin publicarlas) |
+| SonarQube | Análisis con la cobertura de Go (`sonar-project.properties`). Se salta solo si no está configurado. |
+
+Para activar SonarQube: en GitHub, el secreto `SONAR_TOKEN` y las variables `SONAR_HOST_URL` (y `SONAR_ORGANIZATION` si es SonarCloud); en GitLab, las mismas como variables de CI/CD. Antes de subir puedes correr lo mismo con `make ci` (necesita Go 1.26 y Node 22).
+
+### Cambios de configuración de Keycloak en un realm ya creado
+
+Keycloak importa `infrastructure/keycloak/import/nexuswst-realm.json` **solo la primera vez**. Si el realm ya existe (tu entorno o el servidor), aplica los cambios con:
+
+```bash
+make keycloak-update        # ./scripts/keycloak-update.sh (se puede repetir sin problema)
+```
+
+- **Usuarios sin correo** (SCRUM-231): el usuario deja de ser el correo y el correo pasa a ser opcional.
+- **Correos en español** (SCRUM-80): tema `nexuswst-email` (`infrastructure/keycloak/email-theme`), con remitente `SMTP_FROM`.
+- **Microsoft 365 / Entra ID** (SCRUM-230, opcional): con `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` y `ENTRA_CLIENT_SECRET` en el `.env` se habilita «Continuar con Microsoft»; sin ellos queda deshabilitado. El administrador de Microsoft de WeStorage registra la aplicación con la URI de redirección `<KEYCLOAK_PUBLIC_URL>/realms/nexuswst/broker/microsoft/endpoint`.
+- En producción: `export COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"` antes del comando. Necesita `python3` en el servidor.
+
+### Respaldo y restauración de PostgreSQL (SCRUM-199)
+
+El respaldo incluye **toda la base**: Core, Órdenes y el esquema `keycloak` (usuarios y roles). Redis no se respalda: guarda caché (se reconstruye) y colas con AOF.
+
+```bash
+make backup                                            # ./scripts/backup.sh
+make restore file=backups/nexuswst_20261103-2100.dump  # pide escribir RESTAURAR
+```
+
+- El respaldo queda en `./backups/nexuswst_<fecha>.dump` (formato *custom* de `pg_dump`, comprimido). Se verifica con `pg_restore --list` antes de guardarlo y se conservan los últimos 7 (`BACKUP_KEEP`). La carpeta `backups/` está en `.gitignore`.
+- La restauración detiene Keycloak, Core y Órdenes, restaura **en una sola transacción** (si falla, la base queda como estaba) y los vuelve a levantar.
+- En producción, antes de cada comando: `export COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"`.
+- Respaldo diario en el servidor (cron, 03:00):
+
+```bash
+0 3 * * * cd /opt/nexuswst/NexsusWST && COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml" ./scripts/backup.sh >> backups/backup.log 2>&1
+```
+
+- Copia los respaldos **fuera del servidor** (por ejemplo, a tu PC con `scp`): si se pierde el droplet, se pierden también los respaldos que estén en él.
+- Prueba la restauración al menos una vez en el ambiente de pruebas (PV-15).
 
 ---
 

@@ -227,9 +227,15 @@ services:
       KC_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       KC_SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
       KC_SMTP_SSL: ${SMTP_SSL:-false}
+      # Ingreso opcional con Microsoft 365 (Entra ID, H-01-T09). Vacío = botón deshabilitado.
+      KC_MS_ENABLED: ${ENTRA_ENABLED:-false}
+      KC_MS_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      KC_MS_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      KC_MS_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
     volumes:
       - ./infrastructure/keycloak/import/nexuswst-realm.json:/opt/keycloak/data/import/nexuswst-realm.json:ro
       - ./infrastructure/keycloak/theme/dist_keycloak/nexuswst-keycloak-theme.jar:/opt/keycloak/providers/nexuswst-keycloak-theme.jar:ro
+      - ./infrastructure/keycloak/email-theme/nexuswst-email:/opt/keycloak/themes/nexuswst-email:ro   # textos de los correos (SCRUM-80)
     depends_on:
       postgres:
         condition: service_healthy

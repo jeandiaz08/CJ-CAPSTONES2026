@@ -426,6 +426,11 @@ func (o *Order) Incident(kind string) (Status, error) {
 }
 
 // InInvas indica que la orden ya está (o puede estar) en una ola de Invas.
+// ClientCanCancel (H-09-T07, SCRUM-237): el cliente solo cancela antes de la
+// preparación, es decir, mientras la orden no está en una ola de Invas. Desde
+// ahí, la cancelación la gestiona WeStorage (Jefe de Operaciones o Administrador).
+func (o Order) ClientCanCancel() bool { return !o.InInvas() }
+
 func (o Order) InInvas() bool {
 	switch o.Status {
 	case StatusPicking, StatusPicked, StatusPacking, StatusReadyPickup:

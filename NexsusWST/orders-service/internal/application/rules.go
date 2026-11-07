@@ -108,44 +108,60 @@ func (e *RulesEngine) RunOnce(ctx context.Context) (assigned int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	var checked []int64
-	if len(rules) > 0 {
-		waves, err := s.WMS.ListWaves(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("olas de Invas: %w", err) // se reintenta después
-		}
-		byCode := map[string]ports.Wave{}
-		for _, w := range waves {
-			byCode[strings.ToUpper(w.Code)] = w
-		}
-		for _, item := range ready {
-			o := item.order
-			r, ok := FirstMatch(rules, o)
-			if !ok {
-				checked = append(checked, o.ID)
-				continue
-			}
-			w, ok := byCode[strings.ToUpper(r.WaveCode)]
-			if !ok {
-				checked = append(checked, o.ID)
-				_ = s.Orders.AddEvent(ctx, o.ID, "rule", "no_wave", ActorRules,
-					fmt.Sprintf("La regla «%s» pide la ola %s, que hoy no existe en Invas", r.Name, r.WaveCode))
-				continue
-			}
-			ids, err := s.Orders.AssignWave(ctx, nil, []int64{o.ID}, w.ID, ActorRules, fmt.Sprintf("Regla «%s» → %s", r.Name, w.Name), map[int64]string{o.ID: item.rank})
+	// Las olas de Invas se piden una sola vez por pasada y solo si hacen falta.
+	var byCode map[string]ports.Wave
+	waveByCode := func(code string) (ports.Wave, bool, error) {
+		if byCode == nil {
+			waves, err := s.WMS.ListWaves(ctx)
 			if err != nil {
-				return assigned, err
+				return ports.Wave{}, false, fmt.Errorf("olas de Invas: %w", err) // se reintenta después
 			}
-			if len(ids) == 1 {
-				assigned++
-				if o2, e := s.Orders.Get(ctx, nil, o.ID); e == nil {
-					s.Notifier.OrderChanged(ctx, o2)
-				}
+			byCode = map[string]ports.Wave{}
+			for _, w := range waves {
+				byCode[strings.ToUpper(w.Code)] = w
 			}
 		}
-	} else {
-		for _, item := range ready {
-			checked = append(checked, item.order.ID)
+		w, ok := byCode[strings.ToUpper(code)]
+		return w, ok, nil
+	}
+	var checked []int64
+	for _, item := range ready {
+		o := item.order
+		// PV-19: producto → cliente → reglas.
+		var code, reason, missing string
+		productWaves, companyWave, err := s.Catalog.WavePreference(ctx, o.ID, o.CompanyID)
+		if err != nil {
+			return assigned, err
+		}
+		if pref, ok := domain.ResolveWavePreference(productWaves, companyWave); ok {
+			code, reason = pref.Code, pref.Reason
+			missing = fmt.Sprintf("La %s pide la ola %s, que hoy no existe en Invas", map[domain.WaveSource]string{
+				domain.WaveFromProduct: "ficha del producto", domain.WaveFromCompany: "ficha del cliente"}[pref.Source], pref.Code)
+		} else if r, ok := FirstMatch(rules, o); ok {
+			code, reason = r.WaveCode, fmt.Sprintf("Regla «%s»", r.Name)
+			missing = fmt.Sprintf("La regla «%s» pide la ola %s, que hoy no existe en Invas", r.Name, r.WaveCode)
+		} else {
+			checked = append(checked, o.ID) // sin regla que calce: decide el Jefe
+			continue
+		}
+		w, ok, err := waveByCode(code)
+		if err != nil {
+			return assigned, err
+		}
+		if !ok {
+			checked = append(checked, o.ID)
+			_ = s.Orders.AddEvent(ctx, o.ID, "rule", "no_wave", ActorRules, missing)
+			continue
+		}
+		ids, err := s.Orders.AssignWave(ctx, nil, []int64{o.ID}, w.ID, ActorRules, reason+" → "+w.Name, map[int64]string{o.ID: item.rank})
+		if err != nil {
+			return assigned, err
+		}
+		if len(ids) == 1 {
+			assigned++
+			if o2, e := s.Orders.Get(ctx, nil, o.ID); e == nil {
+				s.Notifier.OrderChanged(ctx, o2)
+			}
 		}
 	}
 	return assigned, s.Orders.MarkRulesChecked(ctx, checked)
