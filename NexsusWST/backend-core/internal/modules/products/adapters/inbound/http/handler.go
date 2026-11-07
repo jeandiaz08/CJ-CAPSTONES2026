@@ -56,7 +56,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	items, err := h.svc.List(r.Context(), scope, q.Get("search"), limit, offset)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "no se pudo listar")
+		httpx.Internal(w, err, "No se pudo listar")
 		return
 	}
 	out := make([]productDTO, 0, len(items))
@@ -83,7 +83,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, domain.ErrNotFound):
 		httpx.Error(w, http.StatusNotFound, "not_found", err.Error())
 	case err != nil:
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "error al obtener")
+		httpx.Internal(w, err, "Error al obtener el producto")
 	default:
 		httpx.JSON(w, http.StatusOK, toDTO(p))
 	}
@@ -118,7 +118,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, domain.ErrDuplicateSKU):
 		httpx.Error(w, http.StatusConflict, "duplicate", err.Error())
 	case err != nil:
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "error al crear")
+		httpx.Internal(w, err, "Error al crear el producto")
 	default:
 		httpx.JSON(w, http.StatusCreated, toDTO(p))
 	}
@@ -205,7 +205,7 @@ func writeKitErr(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, domain.ErrInvalidComponent):
 		httpx.Error(w, http.StatusUnprocessableEntity, "invalid_component", err.Error())
 	default:
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "error en la composición del kit")
+		httpx.Internal(w, err, "Error en la composición del kit")
 	}
 	return true
 }
@@ -237,7 +237,7 @@ func (h *Handler) setWave(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, wave.ErrInvalidCode):
 		httpx.Error(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 	case err != nil:
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "no se pudo guardar la ola")
+		httpx.Internal(w, err, "No se pudo guardar la ola")
 	default:
 		httpx.JSON(w, http.StatusOK, toDTO(p))
 	}

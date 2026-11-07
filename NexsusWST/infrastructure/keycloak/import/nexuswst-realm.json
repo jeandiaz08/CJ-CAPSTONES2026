@@ -4,9 +4,10 @@
   "displayNameHtml": "<b>NexusWST</b> · WeStorage",
   "enabled": true,
   "loginTheme": "nexuswst",
+  "emailTheme": "nexuswst-email",
 
   "registrationAllowed": false,
-  "registrationEmailAsUsername": true,
+  "registrationEmailAsUsername": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,
@@ -110,5 +111,35 @@
         "realm-management": ["manage-users", "view-users", "query-users", "view-realm"]
       }
     }
-  ]
+  ],
+
+  "identityProviders": [
+    {
+      "alias": "microsoft",
+      "providerId": "microsoft",
+      "displayName": "Microsoft",
+      "enabled": "${KC_MS_ENABLED:false}",
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "linkOnly": false,
+      "hideOnLogin": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "tenantId": "${KC_MS_TENANT_ID:}",
+        "clientId": "${KC_MS_CLIENT_ID:}",
+        "clientSecret": "${KC_MS_CLIENT_SECRET:}",
+        "defaultScope": "openid profile email",
+        "prompt": "select_account",
+        "syncMode": "IMPORT"
+      }
+    }
+  ],
+
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      { "providerId": "declarative-user-profile", "subComponents": {},
+        "config": { "kc.user.profile.config": ["{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"displayName\":\"${email}\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false}],\"groups\":[{\"name\":\"user-metadata\",\"displayHeader\":\"User metadata\",\"displayDescription\":\"Attributes, which refer to user metadata\"}]}"] } }
+    ]
+  }
 }

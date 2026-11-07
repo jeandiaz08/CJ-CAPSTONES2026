@@ -13,7 +13,7 @@ import (
 type PGProfiles struct{ DB *pgxpool.Pool }
 
 const profileSQL = `
-SELECT u.id, COALESCE(u.keycloak_id::text, ''), u.email, u.name, u.role, u.permissions,
+SELECT u.id, COALESCE(u.keycloak_id::text, ''), COALESCE(u.email::text, ''), u.name, u.role, u.permissions,
        u.all_companies, u.active,
        COALESCE(array_agg(c.id ORDER BY c.id) FILTER (WHERE c.active), '{}'),
        COUNT(c.id) FILTER (WHERE NOT c.active)

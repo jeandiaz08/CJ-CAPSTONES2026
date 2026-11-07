@@ -142,7 +142,7 @@ func (s *Service) labelNotReady(ctx context.Context, o domain.Order, attempt int
 		s.notices.OnLabel(ctx, o, false)
 		return nil
 	}
-	if err := s.Fulfillment.RetryLabel(ctx, o.ID, attempt, domain.LabelRetryDelay(attempt), cause.Error()); err != nil {
+	if err := s.Fulfillment.RetryLabel(ctx, o.ID, attempt, domain.LabelRetryDelayEvery(attempt, s.LabelRetryEvery), cause.Error()); err != nil {
 		return err
 	}
 	if attempt == 1 {

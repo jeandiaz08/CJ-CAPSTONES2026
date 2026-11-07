@@ -4,7 +4,7 @@ DCPROD=docker compose -f docker-compose.yml -f docker-compose.prod.yml
 THEME_DIR=infrastructure/keycloak/theme
 THEME_JAR=$(THEME_DIR)/dist_keycloak/nexuswst-keycloak-theme.jar
 
-.PHONY: theme up down logs ps restart rebuild psql redis-cli test-core test-orders tidy migrate-new seed-dev backup restore prod-up prod-down nuke
+.PHONY: theme up down logs ps restart rebuild psql redis-cli test-core test-orders tidy migrate-new seed-dev backup restore keycloak-update prod-up prod-down nuke
 
 theme:         ## Compila el .jar del tema de Keycloak (solo requiere Docker)
 	docker run --rm -v "$(PWD)/$(THEME_DIR):/app" -w /app node:22-bookworm-slim sh docker-build.sh
@@ -39,6 +39,8 @@ backup:        ## Respaldo de PostgreSQL en ./backups (conserva los últimos 7)
 	./scripts/backup.sh
 restore:       ## make restore file=backups/nexuswst_AAAAMMDD-HHMMSS.dump (pide confirmación)
 	./scripts/restore.sh $(file)
+keycloak-update: ## Aplica al realm ya creado: usuarios sin correo, correos en español y Microsoft 365 (.env)
+	./scripts/keycloak-update.sh
 prod-up: $(THEME_JAR)
 	$(DCPROD) up -d --build
 prod-down:

@@ -115,7 +115,7 @@ func (p *CatalogReader) Communes(ctx context.Context) ([]string, error) {
 func (p *CatalogReader) ClientEmails(ctx context.Context, companyID int64) ([]string, error) {
 	rows, err := p.db.Query(ctx, `
 		SELECT u.email::text FROM users u JOIN user_companies uc ON uc.user_id=u.id
-		WHERE uc.company_id=$1 AND u.role='cliente' AND u.active`, companyID)
+		WHERE uc.company_id=$1 AND u.role='cliente' AND u.active AND u.email IS NOT NULL`, companyID)
 	if err != nil {
 		return nil, err
 	}

@@ -285,6 +285,19 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 En producción: imágenes compiladas sin herramientas de desarrollo, usuario sin privilegios, sin dashboard de Traefik, sin puertos de BD expuestos y la red `data` es interna. Si WeStorage entrega un PostgreSQL administrado, quita el servicio `postgres` y apunta `DATABASE_URL` a esa instancia con `sslmode=require`.
 
+### Cambios de configuración de Keycloak en un realm ya creado
+
+Keycloak importa `infrastructure/keycloak/import/nexuswst-realm.json` **solo la primera vez**. Si el realm ya existe (tu entorno o el servidor), aplica los cambios con:
+
+```bash
+make keycloak-update        # ./scripts/keycloak-update.sh (se puede repetir sin problema)
+```
+
+- **Usuarios sin correo** (SCRUM-231): el usuario deja de ser el correo y el correo pasa a ser opcional.
+- **Correos en español** (SCRUM-80): tema `nexuswst-email` (`infrastructure/keycloak/email-theme`), con remitente `SMTP_FROM`.
+- **Microsoft 365 / Entra ID** (SCRUM-230, opcional): con `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` y `ENTRA_CLIENT_SECRET` en el `.env` se habilita «Continuar con Microsoft»; sin ellos queda deshabilitado. El administrador de Microsoft de WeStorage registra la aplicación con la URI de redirección `<KEYCLOAK_PUBLIC_URL>/realms/nexuswst/broker/microsoft/endpoint`.
+- En producción: `export COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"` antes del comando. Necesita `python3` en el servidor.
+
 ### Respaldo y restauración de PostgreSQL (SCRUM-199)
 
 El respaldo incluye **toda la base**: Core, Órdenes y el esquema `keycloak` (usuarios y roles). Redis no se respalda: guarda caché (se reconstruye) y colas con AOF.

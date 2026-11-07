@@ -30,7 +30,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.svc.List(r.Context(), scope, r.URL.Query().Get("search"))
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "no se pudo listar")
+		httpx.Internal(w, err, "No se pudo listar")
 		return
 	}
 	out := make([]map[string]any, 0, len(items))
@@ -66,7 +66,7 @@ func (h *Handler) setWave(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, wave.ErrInvalidCode):
 		httpx.Error(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 	case err != nil:
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "no se pudo guardar la ola")
+		httpx.Internal(w, err, "No se pudo guardar la ola")
 	default:
 		httpx.JSON(w, http.StatusOK, map[string]any{"id": cid, "waveCode": code})
 	}

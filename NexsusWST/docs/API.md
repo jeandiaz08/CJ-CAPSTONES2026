@@ -36,6 +36,8 @@ curl -s -X POST http://localhost/auth/realms/nexuswst/protocol/openid-connect/to
 | 422 | `validation_error` | Datos inválidos; viene `fields: [{field, message}]` |
 | 500 | `internal_error` | Viene `ref`: referencia de diagnóstico para buscar en los logs |
 
+Las respuestas de error del Core traen `ref` (igual a la cabecera `X-Request-Id`). En un 500, el mensaje pide informar esa referencia y la causa técnica queda en el registro del servidor con el mismo `request_id`, nunca en la respuesta (H-15-T04). Si Traefik ya envía `X-Request-Id`, se conserva; una referencia con caracteres raros o de más de 64 se reemplaza.
+
 Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se contrasta con el perfil).
 
 ---
@@ -54,13 +56,16 @@ Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se co
 | Método | Ruta | Cuerpo / filtros | Descripción |
 | --- | --- | --- | --- |
 | GET | `/v1/users` | `?q=&role=&active=true\|false&limit=&offset=` | Listado `{items, total}` |
-| POST | `/v1/users` | `{email, name, role, permissions[], companies[], allCompanies}` | Crea en Keycloak con su rol y le envía el **correo para definir la contraseña**. 409 si el correo existe. |
+| POST | `/v1/users` | `{email, name, role, permissions[], companies[], allCompanies}` o, sin correo, `{username, name, role, …}` | Con correo: crea en Keycloak con su rol y le envía el **correo para definir la contraseña** (409 `email_taken`). Sin correo (H-02-T09, solo personal interno): crea el usuario con una **contraseña temporal** que viene una sola vez en `temporaryPassword` (409 `username_taken`). |
 | GET | `/v1/users/{id}` | | Detalle |
 | PATCH | `/v1/users/{id}` | cualquiera de `{name, role, permissions, companies, allCompanies}` | Edita. Nadie cambia **su propio** rol, permisos ni empresas (403). |
 | POST | `/v1/users/{id}/disable` | `{reason}` | Deshabilita en Keycloak, cierra sus sesiones y bloquea su siguiente petición. Lo que tenía tomado en empaque vuelve a la bandeja. |
 | POST | `/v1/users/{id}/enable` | `{reason}` | Rehabilita |
-| POST | `/v1/users/{id}/password-email` | | Reenvía el correo para definir la contraseña |
+| POST | `/v1/users/{id}/password-email` | | Reenvía el correo para definir la contraseña (422 si el usuario no tiene correo) |
+| POST | `/v1/users/{id}/password-reset` | | `{temporaryPassword}`: contraseña temporal nueva que el usuario cambia al entrar; cierra sus sesiones. Para quien no tiene correo (también sirve si perdió su correo). No aplica a uno mismo (422). |
 | GET | `/v1/users/{id}/history` | | Auditoría: quién cambió qué y cuándo |
+
+**Usuarios sin correo (H-02-T09).** Personal de bodega que no tiene correo: el usuario es de 3 a 40 caracteres `[a-z0-9._-]`, empieza con letra o número y no lleva `@`. El rol y las empresas los asigna el administrador como a cualquiera. El usuario (vista) trae `username`, `email` (vacío) y `hasEmail: false`; la interfaz muestra «Restablecer contraseña» en vez de «Reenviar correo». `temporaryPassword` solo viene en la respuesta de alta o de restablecimiento (con `Cache-Control: no-store`), no se guarda en Nexus ni en la auditoría. En el login, el campo «Correo o usuario» acepta ambos.
 
 Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni el permiso `despacho`.
 
@@ -133,7 +138,7 @@ Contiene estos campos:
 | Método | Ruta | Cuerpo | Notas |
 | --- | --- | --- | --- |
 | PATCH | `/v1/orders/{id}` | `{courier?, courierCode?, destination?{…}, dispatchType?, customerNotes?, items?, reason?}` | Solo antes de llegar a Invas (`editable`). Si cambian productos, destino o courier, se **valida de nuevo** (libera el comprometido). 409 `not_editable` en preparación. |
-| POST | `/v1/orders/{id}/cancel` | `{reason}` (obligatorio) | Cancelada (terminal, oculta, no se borra). Si ya está en una ola de Invas pasa a **Incidencia «Cancelación por confirmar»** y el Jefe la confirma con `resolve` + `cancel`. |
+| POST | `/v1/orders/{id}/cancel` | `{reason}` (obligatorio) | Cancelada (terminal, oculta, no se borra). Si ya está en una ola de Invas pasa a **Incidencia «Cancelación por confirmar»** y el Jefe la confirma con `resolve` + `cancel`. El **cliente** solo cancela antes de la preparación (H-09-T07): con la orden ya en una ola de Invas recibe 409 `invalid_transition` y debe pedirlo a WeStorage; Jefe y Admin sí pueden. |
 | POST | `/v1/orders/{id}/recover` | `{note}` | «Resolver anulación»: Anulada → Pendiente (Jefe/Admin) |
 
 ### Incidencias (H-11, CU-03)
