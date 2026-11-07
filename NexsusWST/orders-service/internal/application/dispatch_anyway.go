@@ -12,8 +12,8 @@ import (
 )
 
 // «Despachar igual» (H-13-T08, SCRUM-243, PV-09): al cerrar el manifiesto, una
-// orden con bultos sin escanear queda para el siguiente retiro, salvo que el
-// Jefe de Operaciones o el Administrador autorice despacharla igual con un
+// orden con bultos sin escanear queda para el siguiente retiro, salvo que quien
+// tenga el permiso Despacho (no el perfil) autorice despacharla igual con un
 // motivo. La autorización queda en el historial de la orden (quién, cuándo,
 // qué bultos faltaron, manifiesto y ola) y avisa al personal interno.
 //
@@ -41,8 +41,10 @@ type IncompleteDispatch struct {
 	MissingPackages []string `json:"missingPackages"`
 }
 
+// canAuthorizeIncomplete: el permiso Despacho, igual que para cerrar el manifiesto
+// (cambio de Jean, ver backend_pendientes «Cambios de backend hechos por Jean»).
 func canAuthorizeIncomplete(id tenant.Identity) bool {
-	return id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps)
+	return canDispatch(id)
 }
 
 // splitPackages separa los códigos escaneados de los faltantes (orden estable).
@@ -59,15 +61,16 @@ func splitPackages(pkgs []ports.ManifestBundle) (scanned, missing []string) {
 }
 
 // checkDispatchAnyway valida las autorizaciones antes de tocar nada: deben
-// venir de Jefe o Admin, con motivo, sin repetir órdenes y solo para órdenes
-// del manifiesto que de verdad tienen bultos faltantes (y al menos uno escaneado).
+// venir de quien tenga el permiso Despacho, con motivo, sin repetir órdenes y
+// solo para órdenes del manifiesto que de verdad tienen bultos faltantes (y al
+// menos uno escaneado).
 func checkDispatchAnyway(id tenant.Identity, m ports.Manifest, in []DispatchAnyway) (map[int64]string, error) {
 	out := make(map[int64]string, len(in))
 	if len(in) == 0 {
 		return out, nil
 	}
 	if !canAuthorizeIncomplete(id) {
-		return nil, fail(domain.ErrForbidden, "Solo el Jefe de Operaciones o el Administrador puede autorizar un despacho con bultos faltantes.")
+		return nil, fail(domain.ErrForbidden, "Necesitas el permiso Despacho para autorizar un despacho con bultos faltantes.")
 	}
 	lines := make(map[int64]ports.ManifestLine, len(m.Lines))
 	for _, l := range m.Lines {

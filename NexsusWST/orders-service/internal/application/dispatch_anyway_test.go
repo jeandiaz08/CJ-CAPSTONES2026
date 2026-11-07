@@ -36,7 +36,7 @@ func TestSplitPackages(t *testing.T) {
 
 func TestCheckDispatchAnyway(t *testing.T) {
 	m := testManifest()
-	jefe := who(tenant.RoleJefeOps)
+	jefe := who(tenant.RoleJefeOps, tenant.PermDespacho)
 	cases := []struct {
 		name string
 		id   tenant.Identity
@@ -45,8 +45,11 @@ func TestCheckDispatchAnyway(t *testing.T) {
 	}{
 		{"sin autorizaciones no exige rol", who(tenant.RoleEmpaque, tenant.PermDespacho), nil, nil},
 		{"jefe con motivo", jefe, []DispatchAnyway{{OrderID: 1, Reason: "bulto 2 dañado, sale mañana"}}, nil},
-		{"admin con motivo", who(tenant.RoleAdmin), []DispatchAnyway{{OrderID: 1, Reason: "se reenvía"}}, nil},
-		{"operario con permiso Despacho no puede", who(tenant.RoleEmpaque, tenant.PermDespacho), []DispatchAnyway{{OrderID: 1, Reason: "se reenvía"}}, domain.ErrForbidden},
+		// Lo decide el permiso Despacho, no el perfil.
+		{"empaque con permiso Despacho", who(tenant.RoleEmpaque, tenant.PermDespacho), []DispatchAnyway{{OrderID: 1, Reason: "se reenvía"}}, nil},
+		{"empaque sin permiso Despacho", who(tenant.RoleEmpaque), []DispatchAnyway{{OrderID: 1, Reason: "se reenvía"}}, domain.ErrForbidden},
+		{"jefe sin permiso Despacho", who(tenant.RoleJefeOps), []DispatchAnyway{{OrderID: 1, Reason: "se reenvía"}}, domain.ErrForbidden},
+		{"admin sin permiso Despacho", who(tenant.RoleAdmin), []DispatchAnyway{{OrderID: 1, Reason: "se reenvía"}}, domain.ErrForbidden},
 		{"motivo vacío", jefe, []DispatchAnyway{{OrderID: 1, Reason: "   "}}, domain.ErrInvalid},
 		{"motivo muy corto", jefe, []DispatchAnyway{{OrderID: 1, Reason: "ok"}}, domain.ErrInvalid},
 		{"orden fuera del manifiesto", jefe, []DispatchAnyway{{OrderID: 99, Reason: "se reenvía"}}, domain.ErrInvalid},

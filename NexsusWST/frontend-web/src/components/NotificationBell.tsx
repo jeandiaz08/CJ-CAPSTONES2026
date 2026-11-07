@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bell, CircleAlert, PackageCheck, Truck } from "lucide-react";
+import { Bell, CircleAlert, PackageCheck, PackageX, Truck } from "lucide-react";
 import { markAllRead, useNotices, type NoticeKind } from "@/hooks/useNotificationFeed";
 
-const ICONS: Record<NoticeKind, typeof Bell> = { incident: CircleAlert, label_ready: PackageCheck, delivered: Truck };
+const ICONS: Record<NoticeKind, typeof Bell> = { incident: CircleAlert, label_ready: PackageCheck, delivered: Truck, despacho_incompleto: PackageX };
 const time = (iso: string) => new Date(iso).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
 
 // Campana: contador de avisos sin leer y lista de los últimos 20. Al abrirla se marcan leídos.

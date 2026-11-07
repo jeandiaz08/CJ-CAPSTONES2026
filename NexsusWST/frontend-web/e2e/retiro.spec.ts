@@ -108,7 +108,7 @@ test.describe.serial("Retiro y entrega", () => {
     await expect(page.getByRole("button", { name: "Generar manifiesto" })).toBeDisabled();
   });
 
-  test("Fase 3: «Despachar igual» y observación quedan en las notas; la orden sigue para el siguiente retiro", async () => {
+  test("Fase 3: «Despachar igual» entrega con bultos faltantes; la observación queda en las notas", async () => {
     await page.getByRole("button", { name: /^Ver manifiesto abierto #/ }).click();
     const modal = page.locator(".manifest-modal");
     await expect(modal.locator(".manifest-accordion summary")).toHaveText(["Órdenes (1)", "Bultos (2)"]);
@@ -139,19 +139,24 @@ test.describe.serial("Retiro y entrega", () => {
       confirm.getByRole("button", { name: "Confirmar entrega" }).click(),
     ]);
     expect(res.status()).toBe(200);
+    expect((await res.json()).incomplete).toEqual([ready.id]);
     const summary = page.getByRole("dialog").last();
-    await expect(summary).toContainText("Para el siguiente retiro (1)");
-    await expect(summary).toContainText(`#${READY} · Despacho autorizado`);
+    await expect(summary).toContainText("Entregadas al courier (1)");
+    await expect(summary).toContainText(`#${READY} · Con bultos faltantes (${codes[1]})`);
+    await expect(summary).toContainText("Para el siguiente retiro (0)");
     const manifestId = Number(res.url().match(/manifests\/(\d+)\/close/)![1]);
     const closed = (await api<Manifest & { notes: string; status: string; vehiclePlate: string }>("GET", `/v1/dispatch/manifests/${manifestId}`)).body;
     expect([closed.status, closed.vehiclePlate]).toEqual(["closed", "AB12CD"]);
     expect(closed.notes).toContain("Empresa del transporte: Transportes Sur");
-    expect(closed.notes).toContain(`Autorizado sin bulto · #${READY} · ${codes[1]} · Retira: Juan Pérez`);
+    expect(closed.notes).not.toContain("Autorizado sin bulto");
     expect(closed.notes).toContain(`Observación · #${READY} · Faltó un producto dentro del bulto 1 (prueba)`);
-    // TODO(api): con dispatchAnyway saldría entregada; hoy el servidor la deja para el siguiente retiro.
-    expect((await api<{ order: Order }>("GET", `/v1/orders/${ready.id}`)).body.order.status).toBe("ready_pickup");
+    // La orden sale «Entregada al courier» y el historial guarda qué bultos faltaron.
+    const detail = (await api<{ order: Order; events: { details?: { kind?: string; missingPackages?: string[] } }[] }>("GET", `/v1/orders/${ready.id}`)).body;
+    expect(detail.order.status).toBe("handed_over");
+    expect(detail.events.find((e) => e.details?.kind === "despacho_incompleto")?.details?.missingPackages).toEqual([codes[1]]);
     await summary.locator(".form-modal-foot").getByRole("button", { name: "Cerrar" }).click();
     await expect(page.locator(".manifest-modal")).toHaveCount(0);
+    await expect(row(READY)).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Manifiestos cerrados" })).toHaveCount(0);
   });
 

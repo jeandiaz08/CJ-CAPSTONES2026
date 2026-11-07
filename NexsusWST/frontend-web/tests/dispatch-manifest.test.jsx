@@ -11,7 +11,7 @@ vi.mock('@/services/orderReference',()=>({productsForCompany:async()=>[{sku:'AO-
 vi.mock('@/services/api',()=>({ApiError,apiErrorMessage:e=>e.message,downloadFile:async()=>{},printPdf:async()=>{},saveBlob:()=>{},wsUrl:p=>'ws://x'+p,withCompany:p=>p,api:async(_s,path,init)=>{
   if(path==='/v1/ws-ticket')return {ticket:'t'};
   const method=init?.method??'GET';const body=init?.body?JSON.parse(init.body):undefined;s.calls.push({path,method,body});await new Promise(r=>setTimeout(r,2));
-  if(method==='POST'&&/\/close$/.test(path)){if(s.fail){const f=s.fail;s.fail=null;throw f}s.open=null;return s.closeResult}
+  if(method==='POST'&&/\/close$/.test(path)){if(s.fail){const f=s.fail;s.fail=null;throw f}s.open=null;s.orders=s.orders.filter(o=>!s.closeResult.delivered.includes(o.id));return s.closeResult}
   if(path==='/v1/dispatch/couriers')return {data:[{courier:'blueexpress',orders:3,packages:5}]};
   if(path==='/v1/dispatch/manifests?status=open')return {data:s.open?[s.open]:[]};
   if(path.startsWith('/v1/orders?'))return {data:s.orders,total:s.orders.length};
@@ -39,7 +39,7 @@ describe('Retiro: manifiesto en un modal y entrega',()=>{
   beforeEach(()=>{globalThis.IS_REACT_ACT_ENVIRONMENT=true;globalThis.WebSocket=FakeWS;sockets.length=0;sessionStorage.clear();h.session.user.permissions=['despacho'];
     Object.assign(s,{calls:[],fail:null,orders:[order(1),order(2),order(3,{packagesCount:1})],
       open:{id:40,courier:'blueexpress',status:'open',lines:[line(1,[true,true]),line(2,[true,false]),line(3,[false]),line(4,[false],'removed')]},
-      closeResult:{delivered:[1],pending:[2,3]}});
+      closeResult:{delivered:[1,2],pending:[3],incomplete:[2]}});
     globalThis.__nav={params:new URLSearchParams('courier=blueexpress'),calls:[]};host=document.createElement('div');document.body.append(host);root=createRoot(host)});
   afterEach(async()=>{await act(async()=>root.unmount());host.remove();document.body.innerHTML=''});
 
@@ -74,7 +74,9 @@ describe('Retiro: manifiesto en un modal y entrega',()=>{
     await click(btn('Despachar igual',orderRow('R2')));
     const d=dialogs().at(-1);for(const x of ['#R2','NX-2-2','Jefe Demo'])expect(d.textContent).toContain(x);
     await submit(d.querySelector('form'));expect(d.textContent).toContain('Indica quién retira.');
-    await setValue(d.querySelector('input'),'Juan Pérez');await setValue(d.querySelector('textarea'),'Bulto 2 dañado');await submit(d.querySelector('form'));
+    await setValue(d.querySelector('input'),'Juan Pérez');await setValue(d.querySelector('textarea'),'roto');await submit(d.querySelector('form'));
+    expect(d.textContent).toContain('Escribe al menos 5 caracteres.');
+    await setValue(d.querySelector('textarea'),'Bulto 2 dañado');await submit(d.querySelector('form'));
     const remove=btn('Quitar autorización',orderRow('R2'));expect(remove.title).toBe('Autorizada sin NX-2-2 · retira Juan Pérez');
     await click(remove);expect(btn('Despachar igual',orderRow('R2'))).toBeTruthy();
   });
@@ -84,25 +86,38 @@ describe('Retiro: manifiesto en un modal y entrega',()=>{
     await setValue(d.querySelector('textarea'),'Faltó el cable del mouse');await submit(d.querySelector('form'));
     expect(btn('Editar observación',orderRow('R1')).title).toBe('Faltó el cable del mouse');
     await click(btn('Confirmar entrega',manifest()));d=dialogs().at(-1);await setValue(d.querySelector('input'),'Ana');await submit(d.querySelector('form'));
-    expect(s.calls.find(c=>/close$/.test(c.path)).body.notes).toBe('Observación · #R1 · Faltó el cable del mouse');
+    const body=s.calls.find(c=>/close$/.test(c.path)).body;
+    expect(body.notes).toBe('Observación · #R1 · Faltó el cable del mouse');expect(body.dispatchAnyway).toEqual([]);
   });
-  it('Confirmar entrega: notas con empresa y autorizaciones, y resumen con motivos',async()=>{
+  it('Confirmar entrega: «Despachar igual» va en dispatchAnyway, sale entregada y el resumen muestra lo incompleto',async()=>{
     await mount();await openModal();
     await click(btn('Despachar igual',orderRow('R2')));let d=dialogs().at(-1);await setValue(d.querySelector('input'),'Juan Pérez');await setValue(d.querySelector('textarea'),'Bulto dañado');await submit(d.querySelector('form'));
     await click(btn('Confirmar entrega',manifest()));d=dialogs().at(-1);
     expect(d.querySelector('input').value).toBe('Juan Pérez');
     const inputs=[...d.querySelectorAll('input')];await setValue(inputs[3],'Transportes Sur');await setValue(d.querySelector('textarea'),'Retiro de la tarde');
     await submit(d.querySelector('form'));
-    const notes=s.calls.find(c=>/close$/.test(c.path)).body.notes.split('\n');
-    expect(notes[0]).toBe('Empresa del transporte: Transportes Sur');expect(notes[1]).toBe('Retiro de la tarde');
-    expect(notes[2]).toMatch(/^Autorizado sin bulto · #R2 · NX-2-2 · Retira: Juan Pérez · Autoriza: Jefe Demo · .+ · Motivo: Bulto dañado$/);
+    const body=s.calls.find(c=>/close$/.test(c.path)).body;
+    expect(body.notes.split('\n')).toEqual(['Empresa del transporte: Transportes Sur','Retiro de la tarde']);
+    expect(body.dispatchAnyway).toEqual([{orderId:2,reason:'Bulto dañado'}]);
     const summary=dialogs().at(-1);
     const blocks=Object.fromEntries([...summary.querySelectorAll('.delivery-block')].map(b=>[b.querySelector('h3').textContent,b.querySelector('ul')?.textContent??'']));
-    expect(blocks['Entregadas al courier (1)']).toContain('#R1');
-    expect(blocks['Para el siguiente retiro (2)']).toContain('#R2 · Despacho autorizado y registrado');expect(blocks['Para el siguiente retiro (2)']).toContain('#R3 · Faltan bultos por escanear');
+    expect(blocks['Entregadas al courier (2)']).toContain('#R1');
+    expect(blocks['Entregadas al courier (2)']).toContain('#R2 · Con bultos faltantes (NX-2-2) · autorizó Jefe Demo · motivo: Bulto dañado');
+    expect(blocks['Para el siguiente retiro (1)']).toContain('#R3 · Faltan bultos por escanear');
     expect(blocks['Incidencias (1)']).toContain('#R4 · Problema en el retiro: Caja rota');
+    expect(document.querySelector('.toast-warning').textContent).toContain('2 órdenes entregadas (1 con bultos faltantes), 1 para el siguiente retiro');
     await click(btn('Cerrar',summary.querySelector('.form-modal-foot')));
     expect(document.querySelector('.manifest-modal')).toBeNull();expect(sessionStorage.getItem('nexus:dispatch:manifest:40')).toBeNull();
+    const refs=[...host.querySelectorAll('.dispatch-table tbody tr')].map(r=>r.textContent);
+    expect(refs.some(t=>t.includes('#R2'))).toBe(false);expect(refs.some(t=>t.includes('#R3'))).toBe(true);
+  });
+  it('Autorizada pero el servidor no la entrega: queda para el siguiente retiro con el motivo',async()=>{
+    s.closeResult={delivered:[1],pending:[2,3],incomplete:[]};
+    await mount();await openModal();
+    await click(btn('Despachar igual',orderRow('R2')));let d=dialogs().at(-1);await setValue(d.querySelector('input'),'Juan Pérez');await setValue(d.querySelector('textarea'),'Bulto dañado');await submit(d.querySelector('form'));
+    await click(btn('Confirmar entrega',manifest()));d=dialogs().at(-1);await submit(d.querySelector('form'));
+    const pending=[...dialogs().at(-1).querySelectorAll('.delivery-block')].find(b=>b.querySelector('h3').textContent==='Para el siguiente retiro (2)');
+    expect(pending.textContent).toContain('#R2 · Despacho autorizado, pero el servidor no pudo entregarla');
   });
   it('Error al cerrar: se muestra en el formulario y el modal sigue abierto',async()=>{
     s.fail=new ApiError('El manifiesto ya está cerrado.',409,'conflict');

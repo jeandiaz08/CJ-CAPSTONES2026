@@ -1,4 +1,4 @@
-import type { ManifestLine } from "@/services/dispatch";
+import type { DispatchAnyway, ManifestLine } from "@/services/dispatch";
 
 // Una orden sale en el manifiesto mientras su línea esté «included».
 export const activeLines = (lines: ManifestLine[]) => lines.filter((l) => l.status === "included");
@@ -8,7 +8,9 @@ export function lineProgress(line: ManifestLine) {
   return { scanned, total: line.packages.length, missing: line.packages.filter((p) => !p.scanned).map((p) => p.code) };
 }
 
-// «Despachar igual»: autorización de una orden con bultos faltantes.
+// «Despachar igual»: autorización de una orden con bultos faltantes. Viaja en `dispatchAnyway`
+// de /close y el servidor la entrega al courier (lo valida el permiso Despacho).
+export const MIN_DISPATCH_REASON = 5;
 export type DispatchAuthorization = {
   orderId: number;
   externalRef: string;
@@ -19,12 +21,7 @@ export type DispatchAuthorization = {
   reason: string;
 };
 
-const dateTime = (iso: string) => new Date(iso).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" });
-
-// TODO(api): pasar a `dispatchAnyway[{orderId, reason}]` de /close cuando llegue la rama de Cristopher.
-// Mientras tanto la autorización viaja en `notes`, una línea por orden.
-export const authorizationNote = (a: DispatchAuthorization) =>
-  `Autorizado sin bulto · #${a.externalRef} · ${a.missing.join(", ")} · Retira: ${a.pickerName} · Autoriza: ${a.authorizedBy} · ${dateTime(a.at)} · Motivo: ${a.reason}`;
+export const dispatchAnyway = (list: DispatchAuthorization[]): DispatchAnyway[] => list.map((a) => ({ orderId: a.orderId, reason: a.reason }));
 
 // Observación opcional de una orden del manifiesto (por ejemplo, un producto que faltó dentro de un bulto).
 export type OrderObservation = { orderId: number; externalRef: string; text: string };
@@ -33,8 +30,8 @@ export type OrderObservation = { orderId: number; externalRef: string; text: str
 export const observationNote = (o: OrderObservation) => `Observación · #${o.externalRef} · ${o.text}`;
 
 // TODO(api): la empresa del transporte no tiene campo propio en /close; va como primera línea de `notes`.
-export function closeNotes(company: string, notes: string, authorizations: DispatchAuthorization[], observations: OrderObservation[] = []) {
-  return [company.trim() && `Empresa del transporte: ${company.trim()}`, notes.trim(), ...authorizations.map(authorizationNote), ...observations.map(observationNote)].filter(Boolean).join("\n");
+export function closeNotes(company: string, notes: string, observations: OrderObservation[] = []) {
+  return [company.trim() && `Empresa del transporte: ${company.trim()}`, notes.trim(), ...observations.map(observationNote)].filter(Boolean).join("\n");
 }
 
 // Autorizaciones y observaciones sobreviven a una recarga hasta confirmar la entrega.

@@ -7,7 +7,7 @@ import { showToast } from "@/components/Toast";
 import { closeManifest, type Manifest, type ManifestLine } from "@/services/dispatch";
 import { getOrder } from "@/services/orders";
 import {
-  activeLines, closeNotes, lineProgress, readAuthorizations, readObservations, saveAuthorizations, saveObservations,
+  activeLines, closeNotes, dispatchAnyway, lineProgress, readAuthorizations, readObservations, saveAuthorizations, saveObservations,
   type DispatchAuthorization, type OrderObservation,
 } from "../manifest";
 import { ConfirmDeliveryModal, DeliverySummaryModal, DispatchAnywayModal, ObservationModal, type DeliveryForm, type DeliverySummary } from "./DeliveryModals";
@@ -46,12 +46,17 @@ export function ManifestModal({ manifest, courierName, canOperate, userName, inf
   const confirm = async (form: DeliveryForm) => {
     const res = await closeManifest(manifest.id, {
       pickerName: form.pickerName.trim(), pickerId: form.pickerId.trim(), vehiclePlate: form.vehiclePlate.trim(),
-      notes: closeNotes(form.company, form.notes, valid, notes),
+      notes: closeNotes(form.company, form.notes, notes), dispatchAnyway: dispatchAnyway(valid),
     });
     const ref = (id: number) => manifest.lines.find((l) => l.orderId === id)?.externalRef ?? String(id);
-    const pendingReason = (id: number) => valid.some((a) => a.orderId === id)
-      // TODO(api): con `dispatchAnyway` el servidor la entregaría; hoy solo queda registrada.
-      ? "Despacho autorizado y registrado en el manifiesto; el servidor aún no entrega con bultos faltantes"
+    const incomplete = res.incomplete ?? [];
+    const authorization = (id: number) => valid.find((a) => a.orderId === id);
+    const deliveredReason = (id: number) => {
+      const a = incomplete.includes(id) ? authorization(id) : undefined;
+      return a ? `Con bultos faltantes (${a.missing.join(", ")}) · autorizó ${a.authorizedBy} · motivo: ${a.reason}` : undefined;
+    };
+    const pendingReason = (id: number) => authorization(id)
+      ? "Despacho autorizado, pero el servidor no pudo entregarla"
       : "Faltan bultos por escanear";
     const incidents = await Promise.all(manifest.lines.filter((l) => l.status === "removed").map(async (l) => {
       const detail = await getOrder(l.orderId, null).catch(() => null);
@@ -60,8 +65,14 @@ export function ManifestModal({ manifest, courierName, canOperate, userName, inf
     setConfirming(false);
     saveAuthorizations(manifest.id, []);
     saveObservations(manifest.id, []);
-    setSummary({ manifestId: manifest.id, delivered: res.delivered.map((id) => ({ ref: ref(id) })), pending: res.pending.map((id) => ({ ref: ref(id), reason: pendingReason(id) })), incidents });
-    showToast(`Manifiesto #${manifest.id}: ${res.delivered.length} ${res.delivered.length === 1 ? "orden entregada" : "órdenes entregadas"}${res.pending.length ? `, ${res.pending.length} para el siguiente retiro` : ""}.`, res.pending.length ? "warning" : "success");
+    setSummary({
+      manifestId: manifest.id,
+      delivered: res.delivered.map((id) => ({ ref: ref(id), reason: deliveredReason(id) })),
+      pending: res.pending.map((id) => ({ ref: ref(id), reason: pendingReason(id) })),
+      incidents,
+    });
+    const withMissing = incomplete.length ? ` (${incomplete.length} con bultos faltantes)` : "";
+    showToast(`Manifiesto #${manifest.id}: ${res.delivered.length} ${res.delivered.length === 1 ? "orden entregada" : "órdenes entregadas"}${withMissing}${res.pending.length ? `, ${res.pending.length} para el siguiente retiro` : ""}.`, res.pending.length || incomplete.length ? "warning" : "success");
   };
 
   const orderAction = (line: ManifestLine) => {
