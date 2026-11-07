@@ -5,7 +5,7 @@ import { ScanLine } from "lucide-react";
 import { scannedCodes, totalPackages, labelBlock, type PickupRow, type ScanNotice } from "../pickupList";
 
 // «Lista de retiro · {Courier}»: lector siempre visible y tabla de órdenes del courier.
-export function PickupList({ courierName, rows, marked, selected, notice, canOperate, companyName, onScan, onToggle }: {
+export function PickupList({ courierName, rows, marked, selected, notice, canOperate, companyName, onScan, onToggle, onView }: {
   courierName: string;
   rows: PickupRow[];
   marked: string[];
@@ -15,6 +15,7 @@ export function PickupList({ courierName, rows, marked, selected, notice, canOpe
   companyName: (id: number) => string;
   onScan: (code: string) => void;
   onToggle: (orderId: number) => void;
+  onView: (row: PickupRow) => void;
 }) {
   const [code, setCode] = useState("");
   const reader = useRef<HTMLInputElement>(null);
@@ -33,7 +34,7 @@ export function PickupList({ courierName, rows, marked, selected, notice, canOpe
   const marks = { marked, selected };
 
   return (
-    <section className="dispatch-panel dispatch-list" aria-labelledby="dispatch-list-title">
+    <section className="dispatch-panel dispatch-list" aria-labelledby="dispatch-list-title" aria-busy={rows.some((r) => !r.packages)}>
       <div className="dispatch-panel-head">
         <h2 id="dispatch-list-title">Lista de retiro <span aria-hidden="true">•</span> {courierName}</h2>
         <span>{rows.length} {rows.length === 1 ? "orden" : "órdenes"} – {expected} {expected === 1 ? "bulto esperado" : "bultos esperados"}</span>
@@ -42,7 +43,7 @@ export function PickupList({ courierName, rows, marked, selected, notice, canOpe
         <ScanLine size={22} aria-hidden="true" />
         <label htmlFor="dispatch-reader-input" className="sr-only">Código de la etiqueta</label>
         <input id="dispatch-reader-input" ref={reader} value={code} disabled={!canOperate} autoComplete="off" placeholder="Escanear código de la etiqueta…" onChange={(e) => setCode(e.target.value)} />
-        <span className="dispatch-reader-hint">Cada lectura marca el bulto</span>
+        <span className="dispatch-reader-hint">{rows.some((r) => !r.packages) ? "Cargando bultos…" : "Cada lectura marca el bulto"}</span>
       </form>
       <p className={`dispatch-reader-notice ${notice ? `is-${notice.tone}` : ""}`} role="status">{notice?.text}</p>
       {rows.length === 0 ? (
@@ -86,8 +87,7 @@ export function PickupList({ courierName, rows, marked, selected, notice, canOpe
                     <td>{order.recipientName || "—"}</td>
                     <td>{order.commune || "—"}</td>
                     <td><span className={`dispatch-count ${tone}`} aria-label={`${done} de ${total} bultos marcados`}>{done}/{total}</span></td>
-                    {/* TODO(fase 2): «VER» abre el detalle de la orden. */}
-                    <td><button type="button" className="btn dispatch-view" disabled title="Disponible en la siguiente fase">VER</button></td>
+                    <td><button type="button" className="btn dispatch-view" aria-label={`Ver orden ${order.externalRef}`} onClick={() => onView(row)}>VER</button></td>
                   </tr>
                 );
               })}

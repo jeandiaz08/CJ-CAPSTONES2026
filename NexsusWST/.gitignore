@@ -24,6 +24,8 @@ Thumbs.db
 
 # Generados por herramientas
 frontend-web/tsconfig.tsbuildinfo
+frontend-web/test-results/
+frontend-web/playwright-report/
 frontend-web/AGENTS.md
 frontend-web/CLAUDE.md
 

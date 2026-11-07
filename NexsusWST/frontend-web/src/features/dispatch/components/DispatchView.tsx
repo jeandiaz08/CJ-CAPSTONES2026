@@ -16,6 +16,7 @@ import { useAuth } from "@/state/auth";
 import { usePickupList } from "../hooks/usePickupList";
 import { clearMarks, pruneMarks, readCode, readMarks, saveMarks, scannedCodes, totalPackages, type LocalMarks, type ScanNotice } from "../pickupList";
 import { PickupList } from "./PickupList";
+import { PickupOrderModal } from "./PickupOrderModal";
 
 export const DISPATCH_PATH = "/ordenes/retiro";
 const NO_MARKS: LocalMarks = { marked: [], selected: [] };
@@ -36,6 +37,7 @@ export function DispatchView() {
   const setMarks = (update: (m: LocalMarks) => LocalMarks) => setState((s) => ({ ...s, marks: update(s.marks) }));
   const setNotice = (n: ScanNotice | null) => setState((s) => ({ ...s, notice: n }));
   const [generating, setGenerating] = useState(false);
+  const [viewing, setViewing] = useState<number | null>(null);
   // Lo que salió de la lista (cambió de courier, pasó a Incidencia) deja de contar.
   useEffect(() => {
     if (rows) setMarks((m) => pruneMarks(m, rows));
@@ -99,6 +101,8 @@ export function DispatchView() {
   const expected = visibleRows.reduce((total, row) => total + totalPackages(row), 0);
   const markedCount = visibleRows.reduce((total, row) => total + scannedCodes(row, marks).length, 0);
   const selectedCount = visibleRows.filter((row) => marks.selected.includes(row.order.id)).length;
+  // Si la orden sale de la lista mientras se mira (otra persona la movió), el detalle se cierra.
+  const viewingRow = visibleRows.find((row) => row.order.id === viewing);
 
   return (
     <div className="orders-view dispatch-view">
@@ -132,7 +136,7 @@ export function DispatchView() {
         {!courier ? (
           <section className="dispatch-panel"><h2>Lista de retiro</h2><p className="muted">Elige un courier para ver sus órdenes.</p></section>
         ) : rows ? (
-          <PickupList courierName={courierName(courier)} rows={visibleRows} marked={marks.marked} selected={marks.selected} notice={notice} canOperate={canOperate} companyName={companyName} onScan={scan} onToggle={toggle} />
+          <PickupList courierName={courierName(courier)} rows={visibleRows} marked={marks.marked} selected={marks.selected} notice={notice} canOperate={canOperate} companyName={companyName} onScan={scan} onToggle={toggle} onView={(row) => setViewing(row.order.id)} />
         ) : (
           <section className="dispatch-panel"><div className="detail-skeleton dispatch-skeleton" aria-label="Cargando órdenes" /></section>
         )}
@@ -151,6 +155,10 @@ export function DispatchView() {
           </div>
         </aside>
       </div>
+      {viewingRow && (
+        <PickupOrderModal row={viewingRow} companyName={companyName(viewingRow.order.companyId)} courierName={courierName(viewingRow.order.courier)} canOperate={canOperate}
+          onClose={() => setViewing(null)} onReported={() => { setViewing(null); reload(); }} />
+      )}
     </div>
   );
 }

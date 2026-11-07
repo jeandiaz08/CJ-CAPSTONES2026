@@ -251,6 +251,13 @@ Las páginas sin implementar muestran **qué requisito cubren y en qué archivos
 | Detener todo | `docker compose down` (los datos se conservan) |
 | Borrar la BD y empezar de cero | `docker compose down -v` ⚠️ |
 
+### Pruebas del frontend
+
+Desde `frontend-web/`:
+
+- `npm test`: pruebas de comportamiento (`tests/`, vitest + happy-dom, con los servicios simulados).
+- `npm run test:e2e`: pruebas de punta a punta (`e2e/`, Playwright con el Chrome instalado). Requieren el stack de desarrollo levantado y el seed de demostración recargado, porque modifican datos. Otro navegador: `E2E_CHANNEL=msedge`.
+
 ### Crear una migración nueva
 
 ```bash
