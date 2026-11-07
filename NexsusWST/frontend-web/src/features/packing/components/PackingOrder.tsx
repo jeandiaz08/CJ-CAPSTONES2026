@@ -1,8 +1,9 @@
 "use client";
 
+import { NotificationBell } from "@/components/NotificationBell";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Timer } from "lucide-react";
+import { Timer } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { LiveBadge } from "@/components/StatusBadge";
 import { Tabs } from "@/components/Tabs";
@@ -48,7 +49,7 @@ export function PackingOrder({ id }: { id: number }) {
     <div className="orders-view packing-view">
       <PageHeader title={order ? `Orden #${order.externalRef} · ${order.statusLabel}` : "Empaque"} actions={<>
         <LiveBadge live={live} />
-        <button className="icon-btn" aria-label="Notificaciones"><Bell size={23} /></button>
+        <NotificationBell />
       </>} />
       <Tabs items={[{ href: PACKING_PATH, label: "Por empacar", active: false }, { href: `${PACKING_PATH}?tab=mine`, label: "Mi empaque", active: true }]} />
       {error && !order && <div role="alert" className="pad">No se pudo cargar la orden: {error} <button className="btn ghost" onClick={reload}>Reintentar</button></div>}

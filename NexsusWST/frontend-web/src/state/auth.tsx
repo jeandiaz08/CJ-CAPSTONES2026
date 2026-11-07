@@ -116,6 +116,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     clearProductCache();
+    try {
+      Object.keys(sessionStorage).filter((k) => k.startsWith("nexus:")).forEach((k) => sessionStorage.removeItem(k));
+    } catch {
+      // Sin almacenamiento no hay nada que limpiar.
+    }
     fetch("/bff/logout", { method: "POST", cache: "no-store" })
       .then((res) => res.json())
       .then((body: { url?: string }) => window.location.replace(body.url ?? "/login")) // cierra también en Keycloak

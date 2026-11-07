@@ -9,11 +9,13 @@ import { Toaster } from "@/components/Toast";
 import { ChevronRight } from "lucide-react";
 import { useAuth } from "@/state/auth";
 import { canAccessPath } from "@/state/menuAccess";
+import { useNotificationFeed } from "@/hooks/useNotificationFeed";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { session, ready, profileError, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  useNotificationFeed();
   const permitted = !!session && canAccessPath(session.user, pathname);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed,setCollapsed]=useState(false);

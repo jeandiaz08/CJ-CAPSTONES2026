@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoaderCircle } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ReportProblemDialog } from "@/components/ReportProblemDialog";
 import { showToast, type ToastTone } from "@/components/Toast";
 import { dispatchLabel, useOrderResource } from "@/features/orders";
 import { ApiError, apiErrorMessage } from "@/services/api";
@@ -38,7 +39,6 @@ export function PackingWork({ order, packages, courierName, onChanged }: {
   const items = order.items ?? [];
   const [counts, setCounts] = useState<Counts>(() => readCounts(order.id, items));
   const [dialog, setDialog] = useState<"courier" | "problem" | "release" | null>(null);
-  const [problemKind, setProblemKind] = useState(PROBLEM_KINDS[0].value);
   const [savingPackages, setSavingPackages] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,14 +154,7 @@ export function PackingWork({ order, packages, courierName, onChanged }: {
         </ConfirmDialog>
       )}
       {dialog === "problem" && (
-        <ConfirmDialog title="Informar otro problema" reason="required" reasonLabel="Motivo" confirmLabel="Informar" onClose={() => setDialog(null)} onConfirm={(reason) => report(problemKind, reason)}>
-          <div className="modal-field">
-            <label htmlFor="packing-problem-kind">Tipo de problema</label>
-            <select id="packing-problem-kind" value={problemKind} onChange={(e) => setProblemKind(e.target.value)}>
-              {PROBLEM_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-            </select>
-          </div>
-        </ConfirmDialog>
+        <ReportProblemDialog title="Informar otro problema" kinds={PROBLEM_KINDS} onClose={() => setDialog(null)} onConfirm={(kind, reason) => report(kind, reason)} />
       )}
       {dialog === "release" && (
         <ConfirmDialog title="Soltar orden" confirmLabel="Soltar orden" onClose={() => setDialog(null)} onConfirm={async () => {

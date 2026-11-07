@@ -1,8 +1,9 @@
 "use client";
 
+import { NotificationBell } from "@/components/NotificationBell";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Archive, Bell, Check, Package, PackageOpen } from "lucide-react";
+import { Archive, Check, Package, PackageOpen } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { PageHeader } from "@/components/PageHeader";
 import { LiveBadge } from "@/components/StatusBadge";
@@ -92,7 +93,7 @@ export function PackingQueue() {
     <div className="orders-view packing-view">
       <PageHeader title="Empaque" actions={<>
         <LiveBadge live={live} />
-        <button className="icon-btn" aria-label="Notificaciones"><Bell size={23} /></button>
+        <NotificationBell />
       </>} />
       <Tabs items={[{ href: PACKING_PATH, label: "Por empacar", active: !mine }, { href: `${PACKING_PATH}?tab=mine`, label: "Mi empaque", active: mine }]} />
       <div className="orders-kpis">

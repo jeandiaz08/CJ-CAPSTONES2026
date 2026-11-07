@@ -1,5 +1,7 @@
 "use client";
 import { ArrowBigRight, Star, StarOff } from "lucide-react";
+import { CompactTable } from "@/components/CompactTable";
+import { TrackingSection } from "./TrackingSection";
 import {originLabel,channelLabel,dispatchLabel,warehouseLabel} from "../format";
 import {useState} from "react";
 import { getOrder,downloadOrderDocument,type Order } from "@/services/orders";
@@ -38,7 +40,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
         return <p role="alert">No se pudo cargar el detalle: {resource.error}</p>;
     if (!order || !resource.data)
         return null;
-    const { events, packages, documents } = resource.data;
+    const { events, packages, documents, tracking } = resource.data;
     const last = events.filter(e => e.type === "status_change" || e.type === "created").at(-1);
     const cancelReason = cancelBlockReason(order, role);
     const canEdit = !!order.editable && canManageOrders(role);
@@ -54,11 +56,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
     <div className="order-detail-content"><div className="detail-status-row"><StatusBadge status={order.status} label={order.statusLabel}/>{order.priority&&<PriorityBadge/>}</div>
     <section>
     <h3>Información adicional</h3>
-    <div className="detail-scroll">
-    <table>
-    <thead><tr>{fields.map(([label])=><th key={label}>{label}</th>)}</tr></thead><tbody><tr>{fields.map(([label,value])=><td key={label}>{value===undefined||value===null||value===""?"—":String(value)}</td>)}</tr></tbody>
-    </table>
-    </div>
+    <CompactTable label="Información adicional" columns={fields.map(([label])=>({label}))} rows={[{key:"order",cells:fields.map(([,value])=>value===undefined||value===null||value===""?"—":String(value))}]}/>
     </section>
     <section>
     <header>
@@ -102,6 +100,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
             </tr>)}</tbody>
         </table>
         </div> : <><p>Sin bultos registrados</p>{documentLinks}</>}{downloadError&&<p role="alert">{downloadError}</p>}</section>
+    <TrackingSection tracking={tracking}/>
     </div><div className="detail-actions">
     {assignment?<button className={order.priority?"btn priority-remove":"btn order-primary"} onClick={()=>setDialog("priority")}>{order.priority?<><StarOff size={18}/>Quitar prioridad</>:<><Star size={18}/>Enviar primero a la cola</>}</button>:resolveButton}
     {assignment&&order.status==="incident"&&resolveButton}
