@@ -535,3 +535,8 @@ body{line-height:1.5}h1,h2,h3{line-height:1.2}h1{font-size:28px}button,input,sel
 .orders-list th:nth-child(1),.orders-list td:nth-child(1){width:44px;padding:0;text-align:center}.orders-list th:nth-child(2),.orders-list td:nth-child(2){width:150px;min-width:0}.orders-list th:nth-child(3),.orders-list td:nth-child(3){width:210px}.orders-list th:nth-child(4),.orders-list td:nth-child(4){width:200px}.orders-list th:nth-child(5),.orders-list td:nth-child(5){width:140px}.orders-list th:nth-child(6),.orders-list td:nth-child(6){width:80px}.orders-list th:nth-child(7),.orders-list td:nth-child(7){width:180px}.orders-list th:nth-child(8),.orders-list td:nth-child(8){width:120px}
 .orders-list .client-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.orders-list .badge{white-space:nowrap}.orders-list .order-number-cell{display:inline-flex;align-items:center;gap:4px;max-width:100%}
 }
+
+/* Retiro en teléfono: «Couriers:» pegado a sus tarjetas, tarjetas a la medida y número grande a la derecha. */
+@media(max-width:767px){.dispatch-couriers{flex:0 0 auto;align-content:start;gap:8px}.dispatch-courier-strip{align-items:flex-start;padding-top:0}.dispatch-courier{grid-template-columns:minmax(0,1fr) auto;align-items:center;min-width:210px;min-height:0;padding:12px 16px;gap:4px 20px}.dispatch-courier .courier-logo,.dispatch-courier .courier-chip{justify-self:start}.dispatch-courier strong{align-self:center;justify-self:end;font-size:36px;line-height:1}}
+/* Tablas de Retiro: contenido centrado en cada columna. */
+.dispatch-table th,.dispatch-table td,.manifest-accordion .compact-table th,.manifest-accordion .compact-table td{text-align:center}.dispatch-table .dispatch-flag{text-align:center}
