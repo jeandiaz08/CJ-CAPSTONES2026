@@ -14,7 +14,9 @@ func who(role string, perms ...string) tenant.Identity {
 	return tenant.Identity{Profile: tenant.Profile{UserID: 7, Name: "Ana", Role: role, AllCompanies: true, Permissions: perms}}
 }
 
-func pk(code string, scanned bool) ports.ManifestBundle { return ports.ManifestBundle{Code: code, Scanned: scanned} }
+func pk(code string, scanned bool) ports.ManifestBundle {
+	return ports.ManifestBundle{Code: code, Scanned: scanned}
+}
 
 func testManifest() ports.Manifest {
 	return ports.Manifest{ID: 9, Courier: "starken", Status: "open", Lines: []ports.ManifestLine{
