@@ -26,20 +26,38 @@ const dateTime = (iso: string) => new Date(iso).toLocaleString("es-CL", { dateSt
 export const authorizationNote = (a: DispatchAuthorization) =>
   `Autorizado sin bulto · #${a.externalRef} · ${a.missing.join(", ")} · Retira: ${a.pickerName} · Autoriza: ${a.authorizedBy} · ${dateTime(a.at)} · Motivo: ${a.reason}`;
 
-const COMPANY_PREFIX = "Empresa del transporte: ";
+// Observación opcional de una orden del manifiesto (por ejemplo, un producto que faltó dentro de un bulto).
+export type OrderObservation = { orderId: number; externalRef: string; text: string };
+
+// TODO(api): campo propio por orden en /close; hoy va en `notes`, una línea por orden.
+export const observationNote = (o: OrderObservation) => `Observación · #${o.externalRef} · ${o.text}`;
 
 // TODO(api): la empresa del transporte no tiene campo propio en /close; va como primera línea de `notes`.
-export function closeNotes(company: string, notes: string, authorizations: DispatchAuthorization[]) {
-  return [company.trim() && COMPANY_PREFIX + company.trim(), notes.trim(), ...authorizations.map(authorizationNote)].filter(Boolean).join("\n");
+export function closeNotes(company: string, notes: string, authorizations: DispatchAuthorization[], observations: OrderObservation[] = []) {
+  return [company.trim() && `Empresa del transporte: ${company.trim()}`, notes.trim(), ...authorizations.map(authorizationNote), ...observations.map(observationNote)].filter(Boolean).join("\n");
 }
 
-export function transportCompany(notes?: string) {
-  const line = notes?.split("\n").find((l) => l.startsWith(COMPANY_PREFIX));
-  return line ? line.slice(COMPANY_PREFIX.length) : "";
-}
-
-// Las autorizaciones sobreviven a una recarga hasta confirmar la entrega.
+// Autorizaciones y observaciones sobreviven a una recarga hasta confirmar la entrega.
 const storageKey = (manifestId: number) => `nexus:dispatch:manifest:${manifestId}`;
+const observationsKey = (manifestId: number) => `nexus:dispatch:observations:${manifestId}`;
+
+export function readObservations(manifestId: number): OrderObservation[] {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(observationsKey(manifestId)) ?? "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveObservations(manifestId: number, list: OrderObservation[]) {
+  try {
+    if (list.length) sessionStorage.setItem(observationsKey(manifestId), JSON.stringify(list));
+    else sessionStorage.removeItem(observationsKey(manifestId));
+  } catch {
+    // Sin almacenamiento solo se pierden al recargar.
+  }
+}
 
 export function readAuthorizations(manifestId: number): DispatchAuthorization[] {
   try {

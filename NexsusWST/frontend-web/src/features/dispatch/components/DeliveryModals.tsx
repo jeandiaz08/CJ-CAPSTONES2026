@@ -55,6 +55,23 @@ export function DispatchAnywayModal({ line, authorizedBy, defaultPicker, onClose
   );
 }
 
+// Observación opcional de una orden; vacía, se quita.
+export function ObservationModal({ line, initial, onClose, onSave }: {
+  line: ManifestLine;
+  initial: string;
+  onClose: () => void;
+  onSave: (text: string) => void;
+}) {
+  const id = useId();
+  const [text, setText] = useState(initial);
+  return (
+    <FormModal title={`Observación · #${line.externalRef}`} onClose={onClose} onSubmit={() => onSave(text.trim())} submitLabel="Guardar observación">
+      <p className="muted">Por ejemplo, un producto que faltó dentro de un bulto. Queda en el manifiesto al confirmar la entrega.</p>
+      <Field id={`${id}-text`} label="Observación" value={text} onChange={setText} multiline />
+    </FormModal>
+  );
+}
+
 export type DeliveryForm = { pickerName: string; pickerId: string; vehiclePlate: string; company: string; notes: string };
 
 // «Confirmar entrega»: datos de quien retira. La entrega la decide el servidor.

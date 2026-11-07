@@ -1,5 +1,6 @@
 "use client";
 import { ArrowBigRight, Star, StarOff } from "lucide-react";
+import { CompactTable } from "@/components/CompactTable";
 import {originLabel,channelLabel,dispatchLabel,warehouseLabel} from "../format";
 import {useState} from "react";
 import { getOrder,downloadOrderDocument,type Order } from "@/services/orders";
@@ -54,11 +55,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
     <div className="order-detail-content"><div className="detail-status-row"><StatusBadge status={order.status} label={order.statusLabel}/>{order.priority&&<PriorityBadge/>}</div>
     <section>
     <h3>Información adicional</h3>
-    <div className="detail-scroll">
-    <table>
-    <thead><tr>{fields.map(([label])=><th key={label}>{label}</th>)}</tr></thead><tbody><tr>{fields.map(([label,value])=><td key={label}>{value===undefined||value===null||value===""?"—":String(value)}</td>)}</tr></tbody>
-    </table>
-    </div>
+    <CompactTable label="Información adicional" columns={fields.map(([label])=>({label}))} rows={[{key:"order",cells:fields.map(([,value])=>value===undefined||value===null||value===""?"—":String(value))}]}/>
     </section>
     <section>
     <header>

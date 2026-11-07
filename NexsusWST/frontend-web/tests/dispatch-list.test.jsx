@@ -74,20 +74,28 @@ describe('Retiro Fase 1',()=>{
     await act(async()=>root.unmount());root=createRoot(host);await mount();
     expect(tally()).toEqual(['4','1']);expect(rows()[0].querySelector('input').checked).toBe(true);
   });
-  it('Generar manifiesto: crea con las seleccionadas, reenvía lo leído y limpia',async()=>{
-    await mount();await scan('NX-2-1');await click(rows()[0].querySelector('input'));
+  it('Solo se selecciona con al menos un bulto escaneado',async()=>{
+    await mount();
+    expect(rows()[0].querySelector('input').disabled).toBe(true);expect(rows()[0].querySelector('td').title).toBe('Escanea al menos un bulto');
+    await scan('NX-1-1');expect(rows()[0].querySelector('input').disabled).toBe(false);expect(rows()[0].querySelector('input').checked).toBe(true);expect(gen().disabled).toBe(false);
+    await click(rows()[0].querySelector('input'));expect(rows()[0].querySelector('input').checked).toBe(false);expect(gen().disabled).toBe(true);
+    expect(host.textContent).toContain('Órdenes seleccionadas 0 de 3');
+  });
+  it('Generar manifiesto: solo las seleccionadas con bultos, reenvía lo leído, limpia y abre el modal',async()=>{
+    await mount();await scan('NX-2-1');await scan('NX-1-1');
     await click(gen());
-    expect(s.calls.find(c=>c.method==='POST'&&c.path==='/v1/dispatch/manifests').body).toEqual({courier:'blueexpress',orderIds:[2,1]});
-    expect(s.calls.filter(c=>/\/scan$/.test(c.path)).map(c=>c.body.code)).toEqual(['NX-2-1']);
+    expect(s.calls.find(c=>c.method==='POST'&&c.path==='/v1/dispatch/manifests').body).toEqual({courier:'blueexpress',orderIds:[1,2]});
+    expect(s.calls.filter(c=>/\/scan$/.test(c.path)).map(c=>c.body.code)).toEqual(['NX-1-1','NX-2-1']);
+    expect(document.querySelector('[role="dialog"]').textContent).toContain('Manifiesto #77');
     expect(sessionStorage.getItem('nexus:dispatch:blueexpress')).toBeNull();
     expect([...document.querySelectorAll('.toast-success')].map(t=>t.textContent)).toContain('Manifiesto #77 generado con 2 órdenes.');
     expect(rows()[1].textContent).toContain('En manifiesto #77');expect(rows()[1].querySelector('.dispatch-count').textContent).toBe('1/2');
     // Ya en el manifiesto, la lectura va directo al servidor.
-    await scan('NX-2-2');expect(s.calls.filter(c=>/\/scan$/.test(c.path)).map(c=>c.body.code)).toEqual(['NX-2-1','NX-2-2']);expect(rows()[1].querySelector('.dispatch-count').textContent).toBe('2/2');
+    await scan('NX-2-2');expect(s.calls.filter(c=>/\/scan$/.test(c.path)).map(c=>c.body.code)).toEqual(['NX-1-1','NX-2-1','NX-2-2']);expect(rows()[1].querySelector('.dispatch-count').textContent).toBe('2/2');
   });
   it('Excluidas por cobertura: aviso',async()=>{
     s.excluded=['#1: El courier blueexpress no tiene cobertura en Ñuñoa (pasó a Incidencia)'];
-    await mount();await click(rows()[0].querySelector('input'));await click(gen());
+    await mount();await scan('NX-1-1');await click(gen());
     expect([...document.querySelectorAll('.toast-warning')].map(t=>t.textContent).join()).toContain('no tiene cobertura');
   });
   it('En vivo: una orden que sale de la lista se va y deja de contar',async()=>{

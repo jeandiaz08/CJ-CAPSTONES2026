@@ -17,10 +17,9 @@ import { usePickupList } from "../hooks/usePickupList";
 import { clearMarks, pruneMarks, readCode, readMarks, saveMarks, scannedCodes, totalPackages, type LocalMarks, type ScanNotice } from "../pickupList";
 import { PickupList } from "./PickupList";
 import { PickupOrderModal } from "./PickupOrderModal";
-import { ClosedManifests } from "./ClosedManifests";
-import { ManifestPanel } from "./ManifestPanel";
+import { ManifestModal } from "./ManifestModal";
 import type { LineInfo } from "./ManifestAccordions";
-import type { ManifestLine } from "@/services/dispatch";
+import type { Manifest, ManifestLine } from "@/services/dispatch";
 import { productsForCompany } from "@/services/orderReference";
 
 export const DISPATCH_PATH = "/ordenes/retiro";
@@ -31,7 +30,6 @@ export function DispatchView() {
   const { session, companyId } = useAuth();
   const params = useSearchParams(), router = useRouter(), pathname = usePathname();
   const courier = params.get("courier");
-  const closedView = params.get("view") === "closed";
   // El Administrador consulta (matriz: «Lectura»); operar exige el permiso Despacho.
   const canOperate = !!session?.user.permissions.includes("despacho");
   const { couriers, rows, openManifest, error, reload, live } = usePickupList(courier, companyId);
@@ -46,6 +44,8 @@ export function DispatchView() {
   const setNotice = (n: ScanNotice | null) => setState((s) => ({ ...s, notice: n }));
   const [generating, setGenerating] = useState(false);
   const [viewing, setViewing] = useState<number | null>(null);
+  // Manifiesto en el modal. Se conserva mientras se muestra el resumen, aunque ya esté cerrado.
+  const [shownManifest, setShownManifest] = useState<Manifest | null>(null);
   // Lo que salió de la lista (cambió de courier, pasó a Incidencia) deja de contar.
   useEffect(() => {
     if (rows) setMarks((m) => pruneMarks(m, rows));
@@ -86,14 +86,15 @@ export function DispatchView() {
     if (!courier || !rows || marks.selected.length === 0) return;
     setGenerating(true);
     try {
-      const { manifest, excluded } = await createManifest(courier, marks.selected);
+      const ids = rows.filter((r) => marks.selected.includes(r.order.id) && scannedCodes(r, marks).length > 0).map((r) => r.order.id);
+      const { manifest, excluded } = await createManifest(courier, ids);
       const included = new Set(manifest.lines.filter((l) => l.status === "included").map((l) => l.orderId));
       const codes = rows.filter((r) => included.has(r.order.id)).flatMap((r) => scannedCodes(r, marks));
       const failed: string[] = [];
       for (const code of codes) await scanPackage(manifest.id, code).catch(() => failed.push(code));
       clearMarks(courier);
       setMarks(() => NO_MARKS);
-      requestAnimationFrame(() => document.getElementById("manifest-title")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      setShownManifest(manifest);
       showToast(`Manifiesto #${manifest.id} generado con ${included.size} ${included.size === 1 ? "orden" : "órdenes"}.`, "success");
       if (excluded.length) showToast(`No entraron al manifiesto: ${excluded.join(" · ")}`, "warning");
       if (failed.length) showToast(`No se pudieron marcar: ${failed.join(", ")}. Vuelve a leerlos.`, "warning");
@@ -109,7 +110,7 @@ export function DispatchView() {
   const visibleRows = rows ?? [];
   const expected = visibleRows.reduce((total, row) => total + totalPackages(row), 0);
   const markedCount = visibleRows.reduce((total, row) => total + scannedCodes(row, marks).length, 0);
-  const selectedCount = visibleRows.filter((row) => marks.selected.includes(row.order.id)).length;
+  const selectedCount = visibleRows.filter((row) => marks.selected.includes(row.order.id) && scannedCodes(row, marks).length > 0).length;
   // Datos de cada línea del manifiesto: la orden puede ya no estar en la lista (pasó a Incidencia).
   const lineInfo = (line: ManifestLine): LineInfo => {
     const order = rows?.find((r) => r.order.id === line.orderId)?.order;
@@ -125,8 +126,7 @@ export function DispatchView() {
         <LiveBadge live={live} />
         <button className="icon-btn" aria-label="Notificaciones"><Bell size={23} /></button>
       </>} />
-      <Tabs items={[{ href: courier ? `${DISPATCH_PATH}?courier=${courier}` : DISPATCH_PATH, label: "Entrega de órdenes", active: !closedView }, { href: `${DISPATCH_PATH}?view=closed`, label: "Manifiestos cerrados", active: closedView }]} />
-      {closedView ? <ClosedManifests courierName={courierName} info={lineInfo} productName={productName} /> : <>
+      <Tabs items={[{ href: courier ? `${DISPATCH_PATH}?courier=${courier}` : DISPATCH_PATH, label: "Entrega de órdenes", active: true }]} />
       <div className="dispatch-top">
         <div className="orders-kpis">
           <KpiCard label="Lista para el retiro" count={totalReady} tone="ok" icon={<Archive size={30} />} />
@@ -168,15 +168,20 @@ export function DispatchView() {
               {generating && <LoaderCircle size={18} className="spin" aria-hidden="true" />}
               Generar manifiesto
             </button>
-            {openManifest && <p className="muted">Confirma o termina el manifiesto #{openManifest.id} antes de generar otro.</p>}
+            {openManifest && (
+              <>
+                <button type="button" className="btn dispatch-action dispatch-open-manifest" onClick={() => setShownManifest(openManifest)}>Ver manifiesto abierto #{openManifest.id}</button>
+                <p className="muted">Confirma la entrega de ese manifiesto antes de generar otro.</p>
+              </>
+            )}
           </div>
         </aside>
       </div>
-      {courier && openManifest && rows && (
-        <ManifestPanel key={openManifest.id} manifest={openManifest} courierName={courierName(courier)} canOperate={canOperate} userName={session?.user.name ?? ""}
-          info={lineInfo} productName={productName} onClosed={reload} />
+      {shownManifest && (
+        <ManifestModal key={shownManifest.id} manifest={openManifest?.id === shownManifest.id ? openManifest : shownManifest} courierName={courierName(shownManifest.courier)}
+          canOperate={canOperate} userName={session?.user.name ?? ""} info={lineInfo} productName={productName}
+          onClose={() => setShownManifest(null)} onClosed={() => { setShownManifest(null); reload(); }} />
       )}
-      </>}
       {viewingRow && (
         <PickupOrderModal row={viewingRow} companyName={companyName(viewingRow.order.companyId)} courierName={courierName(viewingRow.order.courier)} canOperate={canOperate}
           onClose={() => setViewing(null)} onReported={() => { setViewing(null); reload(); }} />

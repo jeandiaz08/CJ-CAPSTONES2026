@@ -88,39 +88,49 @@ test.describe.serial("Retiro y entrega", () => {
     expect([after.status, after.incidentKind]).toEqual(["incident", "courier_cobertura"]);
   });
 
-  test("Fase 1: generar manifiesto reenvía lo leído y limpia lo guardado", async () => {
+  test("Fase 1: generar manifiesto reenvía lo leído, limpia lo guardado y abre el modal", async () => {
     const [res] = await Promise.all([
       page.waitForResponse((r) => r.url().endsWith("/bff/orders/v1/dispatch/manifests") && r.request().method() === "POST"),
       page.getByRole("button", { name: "Generar manifiesto" }).click(),
     ]);
     expect(res.status()).toBe(201);
     const { manifest } = (await res.json()) as { manifest: Manifest };
-    await expect(row(READY)).toContainText(`En manifiesto #${manifest.id}`);
+    await expect(page.locator(".manifest-modal")).toContainText(`Manifiesto #${manifest.id}`);
     expect(await page.evaluate(() => Object.keys(sessionStorage).some((k) => k.startsWith("nexus:dispatch:")))).toBe(false);
     const saved = (await api<Manifest>("GET", `/v1/dispatch/manifests/${manifest.id}`)).body;
-    expect(saved.lines.find((l) => l.orderId === ready.id)!.packages.find((p) => p.code === codes[0])!.scanned).toBe(true);
+    expect(saved.lines.map((l) => l.orderId)).toEqual([ready.id]);
+    expect(saved.lines[0].packages.find((p) => p.code === codes[0])!.scanned).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".manifest-modal")).toHaveCount(0);
+    await expect(row(READY)).toContainText(`En manifiesto #${manifest.id}`);
     await expect(row(READY).locator(".dispatch-count")).toHaveText("1/2");
-    expect(codes).toHaveLength(2);
+    await expect(page.getByRole("button", { name: `Ver manifiesto abierto #${manifest.id}` })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Generar manifiesto" })).toBeDisabled();
   });
 
-  test("Fase 3: «Despachar igual» queda en las notas y la orden sigue para el siguiente retiro", async () => {
-    const panel = page.locator(".manifest-panel");
-    await expect(panel).toBeVisible();
-    await expect(page.getByRole("button", { name: "Generar manifiesto" })).toBeDisabled();
-    await expect(panel.locator("summary")).toHaveText(["Órdenes (1)", "Bultos (2)"]);
-    const card = panel.getByRole("article", { name: `Orden ${READY}` });
-    await expect(card.locator(".manifest-warning")).toContainText(`Faltan 1 bulto: ${codes[1]}`);
+  test("Fase 3: «Despachar igual» y observación quedan en las notas; la orden sigue para el siguiente retiro", async () => {
+    await page.getByRole("button", { name: /^Ver manifiesto abierto #/ }).click();
+    const modal = page.locator(".manifest-modal");
+    await expect(modal.locator(".manifest-accordion summary")).toHaveText(["Órdenes (1)", "Bultos (2)"]);
+    await expect(modal.locator(".manifest-accordion").nth(1)).not.toHaveAttribute("open", "");
+    const orderRow = modal.getByRole("region", { name: "Órdenes del manifiesto" }).locator("tbody tr");
+    await expect(orderRow.locator(".manifest-count")).toHaveClass(/is-partial/);
 
-    await card.getByRole("button", { name: "Despachar igual" }).click();
-    const anyway = page.getByRole("dialog");
+    await orderRow.getByRole("button", { name: "Despachar igual" }).click();
+    const anyway = page.getByRole("dialog").last();
     await expect(anyway).toContainText(codes[1]);
     await anyway.getByLabel("Nombre de quien retira").fill("Juan Pérez");
     await anyway.getByLabel(/Observación/).fill("Bulto 2 dañado (prueba)");
     await anyway.getByRole("button", { name: "Autorizar despacho" }).click();
-    await expect(card.locator(".manifest-authorized")).toContainText("retira Juan Pérez");
+    await expect(orderRow.getByRole("button", { name: "Quitar autorización" })).toBeVisible();
 
-    await panel.getByRole("button", { name: "Confirmar entrega" }).click();
-    const confirm = page.getByRole("dialog");
+    await orderRow.getByRole("button", { name: "Agregar observación" }).click();
+    await page.getByRole("dialog").last().getByLabel(/Observación/).fill("Faltó un producto dentro del bulto 1 (prueba)");
+    await page.getByRole("dialog").last().getByRole("button", { name: "Guardar observación" }).click();
+    await expect(orderRow.getByRole("button", { name: "Editar observación" })).toBeVisible();
+
+    await modal.getByRole("button", { name: "Confirmar entrega" }).click();
+    const confirm = page.getByRole("dialog").last();
     await expect(confirm.getByLabel("Nombre de quien retira *")).toHaveValue("Juan Pérez");
     await confirm.getByLabel(/Empresa del transporte/).fill("Transportes Sur");
     await confirm.getByLabel(/Patente/).fill("AB12CD");
@@ -129,53 +139,38 @@ test.describe.serial("Retiro y entrega", () => {
       confirm.getByRole("button", { name: "Confirmar entrega" }).click(),
     ]);
     expect(res.status()).toBe(200);
-    const summary = page.getByRole("dialog");
+    const summary = page.getByRole("dialog").last();
     await expect(summary).toContainText("Para el siguiente retiro (1)");
     await expect(summary).toContainText(`#${READY} · Despacho autorizado`);
     const manifestId = Number(res.url().match(/manifests\/(\d+)\/close/)![1]);
     const closed = (await api<Manifest & { notes: string; status: string; vehiclePlate: string }>("GET", `/v1/dispatch/manifests/${manifestId}`)).body;
-    expect(closed.status).toBe("closed");
-    expect(closed.vehiclePlate).toBe("AB12CD");
+    expect([closed.status, closed.vehiclePlate]).toEqual(["closed", "AB12CD"]);
     expect(closed.notes).toContain("Empresa del transporte: Transportes Sur");
     expect(closed.notes).toContain(`Autorizado sin bulto · #${READY} · ${codes[1]} · Retira: Juan Pérez`);
+    expect(closed.notes).toContain(`Observación · #${READY} · Faltó un producto dentro del bulto 1 (prueba)`);
     // TODO(api): con dispatchAnyway saldría entregada; hoy el servidor la deja para el siguiente retiro.
     expect((await api<{ order: Order }>("GET", `/v1/orders/${ready.id}`)).body.order.status).toBe("ready_pickup");
     await summary.locator(".form-modal-foot").getByRole("button", { name: "Cerrar" }).click();
-    await expect(page.locator(".manifest-panel")).toHaveCount(0);
-
-    await page.getByRole("link", { name: "Manifiestos cerrados" }).click();
-    const item = page.locator(".closed-manifest", { hasText: `Manifiesto #${manifestId}` });
-    await expect(item).toBeVisible();
-    await item.locator("summary").first().click();
-    await expect(item).toContainText("Transportes Sur");
-    await expect(item).toContainText("Juan Pérez");
+    await expect(page.locator(".manifest-modal")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Manifiestos cerrados" })).toHaveCount(0);
   });
 
-  // El seed deja abierto un manifiesto de Mercado Envíos con 48257769225 y 48257769226, sin escanear.
-  test("Fase 3: manifiesto abierto del courier; sin escanear no se despacha igual; completa, se entrega", async () => {
+  // El seed deja abierto un manifiesto de Mercado Envíos solo con 48257769225, ya escaneada.
+  test("Fase 3: manifiesto abierto del seed; la orden sin etiqueta queda fuera; se entrega", async () => {
     const open = (await api<{ data: (Manifest & { courier: string })[] }>("GET", "/v1/dispatch/manifests?status=open")).body.data.find((m) => m.courier === "mercadoenvios")!;
     expect(open, "el seed deja un manifiesto abierto de Mercado Envíos").toBeTruthy();
-    const delivered = (await api<{ data: Order[] }>("GET", "/v1/orders?status=ready_pickup&courier=mercadoenvios&limit=50")).body.data.find((o) => o.externalRef === "48257769225")!;
-    const code = open.lines.find((l) => l.orderId === delivered.id)!.packages[0].code;
-
+    expect(open.lines.every((l) => l.packages.some((p) => p.scanned))).toBe(true);
     await page.goto("/ordenes/retiro?courier=mercadoenvios");
-    const panel = page.locator(".manifest-panel");
-    await expect(panel.locator("h2")).toHaveText(`Manifiesto #${open.id} · Mercado Envíos`);
-    await expect(page.getByRole("button", { name: "Generar manifiesto" })).toBeDisabled();
-    const card = panel.getByRole("article", { name: `Orden ${delivered.externalRef}` });
-    await expect(card.getByRole("button", { name: "Despachar igual" })).toBeDisabled();
-    await expect(card.locator("span[title]")).toHaveAttribute("title", /Escanea al menos un bulto/);
-
-    await expect(page.locator(".dispatch-list")).toHaveAttribute("aria-busy", "false");
-    await scan(code); // la orden ya está en el manifiesto: va directo al servidor
-    await expect(card.locator(".manifest-count")).toHaveText("1/1");
-    await panel.getByRole("button", { name: "Confirmar entrega" }).click();
-    await page.getByRole("dialog").getByLabel("Nombre de quien retira *").fill("Ana Retira");
-    await page.getByRole("dialog").getByRole("button", { name: "Confirmar entrega" }).click();
-    const summary = page.getByRole("dialog");
-    await expect(summary).toContainText("Entregadas al courier (1)");
-    await expect(summary).toContainText("#48257769226 · Faltan bultos por escanear");
-    expect((await api<{ order: Order }>("GET", `/v1/orders/${delivered.id}`)).body.order.status).toBe("handed_over");
+    await expect(row("48257769226")).toHaveClass(/is-blocked/);
+    await page.getByRole("button", { name: `Ver manifiesto abierto #${open.id}` }).click();
+    const modal = page.locator(".manifest-modal");
+    await expect(modal.getByRole("region", { name: "Órdenes del manifiesto" }).locator("tbody tr")).toHaveCount(1);
+    await modal.getByRole("button", { name: "Confirmar entrega" }).click();
+    await page.getByRole("dialog").last().getByLabel("Nombre de quien retira *").fill("Ana Retira");
+    await page.getByRole("dialog").last().getByRole("button", { name: "Confirmar entrega" }).click();
+    await expect(page.getByRole("dialog").last()).toContainText("Entregadas al courier (1)");
+    const delivered = open.lines[0].orderId;
+    expect((await api<{ order: Order }>("GET", `/v1/orders/${delivered}`)).body.order.status).toBe("handed_over");
   });
 
   test("Administrador: solo lectura", async ({ browser }) => {

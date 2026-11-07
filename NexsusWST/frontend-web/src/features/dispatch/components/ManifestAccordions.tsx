@@ -1,71 +1,72 @@
 "use client";
 
-import { CircleAlert } from "lucide-react";
+import type { ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
+import { CompactTable } from "@/components/CompactTable";
 import type { ManifestLine } from "@/services/dispatch";
 import type { OrderItem } from "@/services/orders";
-import { lineProgress, type DispatchAuthorization } from "../manifest";
+import { lineProgress } from "../manifest";
 
 export type LineInfo = { companyName: string; labelCode: string; items: OrderItem[] };
 
-// «Órdenes (N)» y «Bultos (N)»: tarjetas en una fila que se desplaza a la derecha.
-export function ManifestAccordions({ lines, info, productName, authorizations = [], open = true, renderOrderActions }: {
+function Accordion({ title, open, children }: { title: string; open: boolean; children: ReactNode }) {
+  return (
+    <details className="manifest-accordion" open={open}>
+      <summary><span>{title}</span><ChevronDown size={20} aria-hidden="true" className="manifest-chevron" /></summary>
+      {children}
+    </details>
+  );
+}
+
+// «Órdenes (N)» abierto y «Bultos (N)» cerrado, cada uno con una tabla compacta.
+export function ManifestAccordions({ lines, info, productName, orderAction }: {
   lines: ManifestLine[];
   info: (line: ManifestLine) => LineInfo;
   productName: (companyId: number, sku: string) => string;
-  authorizations?: DispatchAuthorization[];
-  open?: boolean;
-  renderOrderActions?: (line: ManifestLine) => React.ReactNode;
+  orderAction?: (line: ManifestLine) => ReactNode;
 }) {
-  const bundles = lines.flatMap((line) => line.packages.map((p) => ({ line, bundle: p })));
+  const bundles = lines.flatMap((line) => line.packages.map((bundle) => ({ line, bundle })));
   return (
     <div className="manifest-accordions">
-      <details open={open}>
-        <summary>Órdenes ({lines.length})</summary>
-        <div className="manifest-strip">
-          {lines.map((line) => {
+      <Accordion title={`Órdenes (${lines.length})`} open>
+        <CompactTable label="Órdenes del manifiesto"
+          columns={[{ label: "N° orden" }, { label: "Cliente", className: "is-text" }, { label: "Comuna" }, { label: "Bultos" }, { label: "Código de etiqueta" }, { label: "Acción", className: "is-action" }]}
+          rows={lines.map((line) => {
             const { scanned, total, missing } = lineProgress(line);
             const data = info(line);
-            const authorized = authorizations.find((a) => a.orderId === line.orderId);
-            return (
-              <article key={line.orderId} className={`manifest-card ${missing.length ? "is-incomplete" : "is-complete"}`} aria-label={`Orden ${line.externalRef}`}>
-                <dl>
-                  <div><dt>N° orden</dt><dd>#{line.externalRef}</dd></div>
-                  <div><dt>Cliente</dt><dd>{data.companyName}</dd></div>
-                  <div><dt>Comuna</dt><dd>{line.commune || "—"}</dd></div>
-                  <div><dt>Bultos</dt><dd className="manifest-count">{scanned}/{total}</dd></div>
-                  <div><dt>Código de etiqueta</dt><dd>{data.labelCode || "—"}</dd></div>
-                </dl>
-                {missing.length > 0 && (
-                  <p className="manifest-warning"><CircleAlert size={16} aria-hidden="true" />Faltan {missing.length} {missing.length === 1 ? "bulto" : "bultos"}: {missing.join(", ")}</p>
-                )}
-                {authorized && <p className="manifest-authorized">Autorizada sin {authorized.missing.join(", ")} · retira {authorized.pickerName}</p>}
-                {renderOrderActions?.(line)}
-              </article>
-            );
-          })}
-        </div>
-      </details>
-      <details open={open}>
-        <summary>Bultos ({bundles.length})</summary>
-        <div className="manifest-strip">
-          {bundles.map(({ line, bundle }) => {
+            return {
+              key: line.orderId,
+              className: missing.length ? "is-incomplete" : "",
+              cells: [
+                `#${line.externalRef}`,
+                <span key="c" className="cell-truncate" title={data.companyName}>{data.companyName}</span>,
+                line.commune || "—",
+                <span key="b" className={`manifest-count ${missing.length ? "is-partial" : "is-complete"}`} title={missing.length ? `Faltan: ${missing.join(", ")}` : undefined}>{scanned}/{total}</span>,
+                data.labelCode || "—",
+                orderAction?.(line) ?? "—",
+              ],
+            };
+          })} />
+      </Accordion>
+      <Accordion title={`Bultos (${bundles.length})`} open={false}>
+        <CompactTable label="Bultos del manifiesto"
+          columns={[{ label: "Bulto" }, { label: "Estado" }, { label: "Código de etiqueta" }, { label: "Orden" }, { label: "Productos", className: "is-text" }]}
+          rows={bundles.map(({ line, bundle }) => {
             const data = info(line);
-            return (
-              <article key={bundle.code} className={`manifest-card ${bundle.scanned ? "is-complete" : "is-incomplete"}`} aria-label={`Bulto ${bundle.code}`}>
-                <dl>
-                  <div><dt>Bulto</dt><dd>{bundle.code} {bundle.scanned ? "· escaneado" : "· sin escanear"}</dd></div>
-                  <div><dt>Código de etiqueta</dt><dd>{data.labelCode || "—"}</dd></div>
-                  <div><dt>Orden</dt><dd>#{line.externalRef}</dd></div>
-                </dl>
-                {/* TODO(api): los bultos no registran qué productos llevan; se listan los de la orden. */}
-                <ul className="manifest-products" aria-label="Productos de la orden">
-                  {data.items.map((item) => <li key={item.sku}>{productName(line.companyId, item.sku)} · SKU {item.sku} · {item.quantity}</li>)}
-                </ul>
-              </article>
-            );
-          })}
-        </div>
-      </details>
+            // TODO(api): los bultos no registran qué productos llevan; se resumen los de la orden.
+            const products = data.items.map((i) => `${productName(line.companyId, i.sku)} ×${i.quantity}`).join(", ");
+            return {
+              key: bundle.code,
+              cells: [
+                bundle.code,
+                <span key="s" className={bundle.scanned ? "bundle-scanned" : "bundle-missing"}>{bundle.scanned ? "Escaneado" : "Sin escanear"}</span>,
+                data.labelCode || "—",
+                `#${line.externalRef}`,
+                <span key="p" className="cell-truncate" title={products}>{products || "—"}</span>,
+              ],
+            };
+          })} />
+      </Accordion>
     </div>
   );
 }

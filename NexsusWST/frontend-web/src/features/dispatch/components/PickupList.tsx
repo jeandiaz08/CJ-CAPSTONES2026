@@ -73,9 +73,9 @@ export function PickupList({ courierName, rows, marked, selected, notice, canOpe
                 const inManifest = row.manifestId != null;
                 return (
                   <tr key={order.id} className={block ? "is-blocked" : ""}>
-                    <td>
-                      <input type="checkbox" aria-label={`Seleccionar orden ${order.externalRef}`} disabled={!canOperate || !!block || inManifest}
-                        checked={inManifest || selected.includes(order.id)} onChange={() => onToggle(order.id)} />
+                    <td title={!block && !inManifest && done === 0 ? "Escanea al menos un bulto" : undefined}>
+                      <input type="checkbox" aria-label={`Seleccionar orden ${order.externalRef}`} disabled={!canOperate || !!block || inManifest || done === 0}
+                        checked={inManifest || (done > 0 && selected.includes(order.id))} onChange={() => onToggle(order.id)} />
                     </td>
                     <td>{order.label.status === "ready" ? order.label.trackingCode || "—" : "—"}</td>
                     <td>
