@@ -71,6 +71,11 @@ jobs:
     name: SonarQube
     runs-on: ubuntu-latest
     needs: [go]
+    # Este trabajo corre desde la raíz: el primer paso se ejecuta antes del
+    # checkout, cuando la carpeta NexsusWST todavía no existe.
+    defaults:
+      run:
+        working-directory: .
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
@@ -90,7 +95,6 @@ jobs:
           path: coverage
       - name: Ubicar la cobertura de Go
         if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != ''
-        working-directory: .
         run: |
           cp coverage/coverage-core/coverage.out NexsusWST/backend-core/coverage.out
           cp coverage/coverage-orders/coverage.out NexsusWST/orders-service/coverage.out
