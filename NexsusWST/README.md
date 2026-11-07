@@ -285,6 +285,34 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 En producción: imágenes compiladas sin herramientas de desarrollo, usuario sin privilegios, sin dashboard de Traefik, sin puertos de BD expuestos y la red `data` es interna. Si WeStorage entrega un PostgreSQL administrado, quita el servicio `postgres` y apunta `DATABASE_URL` a esa instancia con `sslmode=require`.
 
+### Producción detrás de Cloudflare (SCRUM-247, PV-20)
+
+Capa opcional sobre la de producción (`docker-compose.cloudflare.yml` + `infrastructure/traefik/traefik.cloudflare.yml`). Sin ella, producción sigue igual (Let's Encrypt por HTTP).
+
+1. En Cloudflare: registro `A` del dominio de Nexus apuntando al droplet, con el proxy activo (nube naranja), y en SSL/TLS el modo **Full (strict)**.
+2. Crea un token de API con permiso **Zone → DNS → Edit** sobre la zona y ponlo en `CLOUDFLARE_DNS_API_TOKEN` del `.env`. Traefik lo usa para pedir el certificado de Let's Encrypt por DNS (funciona con el proxy activo). Cambia el correo de `certificatesResolvers` en `traefik.cloudflare.yml`, igual que en `traefik.prod.yml`.
+3. `make prod-cf-up` (para bajar: `make prod-cf-down`).
+
+Qué cambia:
+
+- **Solo entra tráfico de Cloudflare**: quien vaya directo a la IP del servidor recibe 403, aunque falsee las cabeceras de Cloudflare.
+- **IP real del visitante**: Traefik solo acepta `X-Forwarded-For` de las IP de Cloudflare, así Keycloak (bloqueo por fuerza bruta) y los registros ven la IP real y nadie la puede falsear.
+- Los rangos de Cloudflare están en los dos archivos de Traefik; `make cloudflare-ips` los compara con los publicados (conviene antes de cada despliegue).
+- Recomendado además en el droplet: firewall que solo abra 80/443 a esos rangos (y 22 a quien administra).
+
+### Integración continua (SCRUM-197)
+
+El pipeline corre los mismos pasos en **GitHub Actions** (`.github/workflows/ci.yml`, en cada push a `main`, `test`, `jean_dev` o `cristopher_dev` y en cada PR) y en **GitLab CI** (`.gitlab-ci.yml`, si el proyecto se sube a GitLab). Los dos llaman a `scripts/ci.sh`:
+
+| Paso | Qué revisa |
+| --- | --- |
+| Go · core / orders | `gofmt`, `go vet` y pruebas con detector de carreras y cobertura (`coverage.out`). Las pruebas que necesitan PostgreSQL se saltan. |
+| Frontend | `npm ci`, lint, tipos (`tsc`) y build de producción |
+| Imágenes | Construye las imágenes de producción (sin publicarlas) |
+| SonarQube | Análisis con la cobertura de Go (`sonar-project.properties`). Se salta solo si no está configurado. |
+
+Para activar SonarQube: en GitHub, el secreto `SONAR_TOKEN` y las variables `SONAR_HOST_URL` (y `SONAR_ORGANIZATION` si es SonarCloud); en GitLab, las mismas como variables de CI/CD. Antes de subir puedes correr lo mismo con `make ci` (necesita Go 1.26 y Node 22).
+
 ### Cambios de configuración de Keycloak en un realm ya creado
 
 Keycloak importa `infrastructure/keycloak/import/nexuswst-realm.json` **solo la primera vez**. Si el realm ya existe (tu entorno o el servidor), aplica los cambios con:

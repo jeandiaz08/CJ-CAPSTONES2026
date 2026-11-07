@@ -1,0 +1,102 @@
+# Integración continua de NexusWST (H-17-T03 / SCRUM-197).
+# Mismos pasos que .gitlab-ci.yml: ambos llaman a NexsusWST/scripts/ci.sh.
+name: CI
+
+on:
+  push:
+    branches: [main, test, jean_dev, cristopher_dev]
+    paths: ["NexsusWST/**", ".github/workflows/ci.yml"]
+  pull_request:
+    branches: [main, test]
+    paths: ["NexsusWST/**", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: NexsusWST
+
+jobs:
+  go:
+    name: Go · ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: core
+            dir: backend-core
+          - service: orders
+            dir: orders-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: NexsusWST/${{ matrix.dir }}/go.sum
+      - run: ./scripts/ci.sh ${{ matrix.service }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}
+          path: NexsusWST/${{ matrix.dir }}/coverage.out
+          retention-days: 7
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: NexsusWST/frontend-web/package-lock.json
+      - run: ./scripts/ci.sh frontend
+
+  images:
+    name: Imágenes de producción
+    runs-on: ubuntu-latest
+    needs: [go, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/ci.sh images
+
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    needs: [go]
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+      SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+    steps:
+      - name: ¿Está configurado SonarQube?
+        if: env.SONAR_TOKEN == '' || env.SONAR_HOST_URL == ''
+        run: echo "::notice::SonarQube se omite. Configura el secreto SONAR_TOKEN y la variable SONAR_HOST_URL (y SONAR_ORGANIZATION si es SonarCloud)."
+      - uses: actions/checkout@v4
+        if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != ''
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != ''
+        with:
+          pattern: coverage-*
+          path: coverage
+      - name: Ubicar la cobertura de Go
+        if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != ''
+        working-directory: .
+        run: |
+          cp coverage/coverage-core/coverage.out NexsusWST/backend-core/coverage.out
+          cp coverage/coverage-orders/coverage.out NexsusWST/orders-service/coverage.out
+      - uses: SonarSource/sonarqube-scan-action@v5
+        if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != ''
+        with:
+          projectBaseDir: NexsusWST
+          args: >
+            ${{ vars.SONAR_ORGANIZATION != '' && format('-Dsonar.organization={0}', vars.SONAR_ORGANIZATION) || '' }}

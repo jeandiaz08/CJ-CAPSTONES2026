@@ -1,10 +1,11 @@
 # Atajos (opcionales). En Windows sin make, copia el comando de la derecha.
 DC=docker compose
 DCPROD=docker compose -f docker-compose.yml -f docker-compose.prod.yml
+DCCF=$(DCPROD) -f docker-compose.cloudflare.yml
 THEME_DIR=infrastructure/keycloak/theme
 THEME_JAR=$(THEME_DIR)/dist_keycloak/nexuswst-keycloak-theme.jar
 
-.PHONY: theme up down logs ps restart rebuild psql redis-cli test-core test-orders tidy migrate-new seed-dev backup restore keycloak-update prod-up prod-down nuke
+.PHONY: theme up down logs ps restart rebuild psql redis-cli test-core test-orders tidy migrate-new seed-dev backup restore keycloak-update ci prod-up prod-down prod-cf-up prod-cf-down cloudflare-ips nuke
 
 theme:         ## Compila el .jar del tema de Keycloak (solo requiere Docker)
 	docker run --rm -v "$(PWD)/$(THEME_DIR):/app" -w /app node:22-bookworm-slim sh docker-build.sh
@@ -45,5 +46,13 @@ prod-up: $(THEME_JAR)
 	$(DCPROD) up -d --build
 prod-down:
 	$(DCPROD) down
+prod-cf-up: $(THEME_JAR) ## Producción detrás de Cloudflare (solo tráfico de Cloudflare, TLS por DNS)
+	$(DCCF) up -d --build
+prod-cf-down:
+	$(DCCF) down
+cloudflare-ips: ## Revisa que los rangos de Cloudflare en Traefik sigan al día
+	./scripts/cloudflare-ips.sh
+ci:            ## Mismos pasos del pipeline (Go y frontend); requiere Go 1.26 y Node 22
+	./scripts/ci.sh all
 nuke:          ## ¡BORRA volúmenes (BD y Redis)! Solo desarrollo
 	$(DC) down -v
