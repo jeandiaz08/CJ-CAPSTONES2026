@@ -146,6 +146,19 @@ Una orden entra al registro **Cancelada** (de inmediato) o cuando pasa **1 año 
 - `previousStatus`: «Estaba en», el estado antes del cierre. `stale: true` si entró por tiempo y no por estar Cancelada.
 - `motive`: para las que entran por tiempo, «Más de 1 año sin movimiento · {motivo original}»; para las Canceladas, el motivo sin el prefijo «Cancelada por {nombre} ({perfil}): » (quién ya va en `closedBy`).
 
+### Registro de acciones (Tarea 06, RF-28) — solo Administrador y Jefe de Operaciones
+
+Se lee de la vista `activity_log` (migración Órdenes `000009_activity_log`), que une `order_events` (órdenes, empaque, etiqueta y «Despachar igual»), la creación y el cierre de `manifests` y `user_audit` del Core. Solo lectura; retención de **1 año** (no devuelve nada más antiguo y no borra nada). Cliente, Empaque y Analista reciben 403. `TODO(PV-21)`: acotar al Jefe a sus bodegas.
+
+| Método | Ruta | Detalle |
+| --- | --- | --- |
+| GET | `/v1/activity` | Filtros: `module=orders\|packing\|dispatch\|users` (otro valor: 422), `from`/`to` (AAAA-MM-DD), `actor` (id o parte del nombre), `role`, `kind=human\|system`, `q` (n° de orden, de manifiesto o nombre de usuario), `company_id` (solo esa empresa; sin él, el alcance del usuario más lo que no tiene empresa), `limit` (1–200, defecto 50), `offset`. Respuesta `{items:[{id, occurredAt, actor:{id?, name, role?, kind}, module, action, entity:{type: order\|manifest\|user, id, label}, companyId?, companyName?, warehouse?, reason?, details}], total, limit, offset}`. Lo más reciente primero |
+
+- `action`: el evento de la orden (`create`, `validate`, `cancel`, `hand_over`, `start_packing`, `release_packing`, `register`, `packed`, `add`, …), `label_{estado}` y `print_label` (empaque), `dispatch_anyway`, `manifest_created`, `manifest_closed`, o la acción de `user_audit` (`created`, `updated`, `enabled`, `disabled`, `password_reset`, `password_email_sent`, `linked`, …).
+- `actor`: `kind: system` para el worker y los procesos (Invas, «Sistema»); `role` es el perfil **actual** del usuario (los eventos no guardan el de ese momento).
+- `details` sale filtrado por una lista de campos permitidos: `fromStatus`, `toStatus`, `courier`, `labelCode`, `packages`, `orders`, `kind`, `manifestId`, `waveId`, `reason`, `authorizedBy`, `packagesTotal`, `scannedPackages`, `missingPackages`, `pickerName`, `pickerId`, `vehiclePlate`, `notes`, `name`, `role`, `permissions`, `companies`, `allCompanies`, `username`, `withoutEmail`, `temporary`, `source` y `targetRole`; un cambio viene como `{from, to}`. Nunca salen credenciales, secretos, tokens ni el `keycloakId`.
+- Fuera de alcance (mejora futura): cambios de configuración (cortes, horario de operación, olas, couriers, integraciones) y catálogos del Core.
+
 ### Edición, anulación y cancelación (H-09, CU-06)
 
 | Método | Ruta | Cuerpo | Notas |

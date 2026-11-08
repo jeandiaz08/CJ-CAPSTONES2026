@@ -59,6 +59,27 @@ test.describe.serial("Registro histórico", () => {
     expect((await cliente2("GET", "/v1/orders/registry?company_id=1")).status).toBe(403);
   });
 
+  test("API /v1/activity: solo Admin y Jefe, por apartado, sin secretos ni nada de más de 1 año", async () => {
+    type Item = { occurredAt: string; module: string; action: string; actor: { name: string; kind: string }; entity: { type: string; label: string }; details: Record<string, unknown> };
+    for (const email of ["cliente1@nexus.local", "empaque@nexus.local"]) expect((await (await ordersApi(email))("GET", "/v1/activity")).status).toBe(403);
+    expect((await jefe("GET", "/v1/activity?module=config")).status).toBe(422);
+    const admin = await ordersApi("admin@nexus.local");
+    const yearAgo = Date.now() - 365 * 24 * 3600 * 1000;
+    for (const section of ["orders", "packing", "dispatch", "users"]) {
+      const res = await admin<{ items: Item[]; total: number }>("GET", `/v1/activity?module=${section}&limit=200`);
+      expect(res.status).toBe(200);
+      expect(res.body.total, `${section} tiene acciones en el seed`).toBeGreaterThan(0);
+      expect(res.body.items.every((i) => i.module === section && Date.parse(i.occurredAt) >= yearAgo)).toBe(true);
+      expect(JSON.stringify(res.body)).not.toMatch(/keycloakId|password|token|secret/i);
+    }
+    // El seed tiene una entrega de hace 14 meses: el registro de acciones ya no la devuelve.
+    const old = (await jefe<{ items: Item[] }>("GET", "/v1/activity?module=orders&q=48257769242&limit=200")).body.items;
+    expect(old.map((i) => i.action)).toEqual([]);
+    const system = (await jefe<{ items: Item[] }>("GET", "/v1/activity?module=orders&kind=system&limit=50")).body.items;
+    expect(system.length).toBeGreaterThan(0);
+    expect(system.every((i) => i.actor.kind === "system" && i.actor.name === "Sistema")).toBe(true);
+  });
+
   test("Jefe: menú, pestañas, tabla, panel y filtros", async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/ordenes/historial");

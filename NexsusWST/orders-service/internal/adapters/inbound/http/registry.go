@@ -15,21 +15,23 @@ import (
 	"github.com/nexuswst/orders-service/internal/shared/httpx"
 )
 
-// HistoryHandler - «Registro histórico» (Tarea 06, cambio de Jean; ver
+// HistoryHandler - «Registro histórico» y «Registro de acciones» (Tarea 06, cambio de Jean; ver
 // backend_pendientes «Cambios de backend hechos por Jean»). Va en un archivo
 // propio para no tocar handler.go; se monta con una línea en cmd/api/main.go.
 type HistoryHandler struct {
-	h        *Handler // writeErr
-	registry *application.Registry
+	h           *Handler // writeErr
+	registry    *application.Registry
+	activityLog *application.Activity
 }
 
-func NewHistoryHandler(registry *application.Registry, log *slog.Logger) *HistoryHandler {
-	return &HistoryHandler{h: &Handler{log: log}, registry: registry}
+func NewHistoryHandler(registry *application.Registry, activity *application.Activity, log *slog.Logger) *HistoryHandler {
+	return &HistoryHandler{h: &Handler{log: log}, registry: registry, activityLog: activity}
 }
 
 func (x *HistoryHandler) Register(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	mux.Handle("GET /v1/orders/registry", auth(http.HandlerFunc(x.list)))
 	mux.Handle("GET /v1/orders/registry/export", auth(http.HandlerFunc(x.export)))
+	mux.Handle("GET /v1/activity", auth(http.HandlerFunc(x.activity)))
 }
 
 type registryDTO struct {
