@@ -19,7 +19,7 @@ export function RegistryView() {
   const actions = internal && params.get("tab") === "acciones";
   return (
     <div className="orders-view registry-view">
-      <PageHeader title="Órdenes" actions={<><LiveBadge live={live} /><NotificationBell /></>} />
+      <PageHeader title="Registro histórico" actions={<><LiveBadge live={live} /><NotificationBell /></>} />
       <Tabs items={[
         { href: "/ordenes/registro", label: "Registro órdenes", active: !actions },
         ...(internal ? [{ href: "/ordenes/registro?tab=acciones", label: "Registro de acciones", active: actions }] : []),

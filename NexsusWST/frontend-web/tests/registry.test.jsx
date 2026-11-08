@@ -52,6 +52,7 @@ describe('Registro histórico: «Registro órdenes»',()=>{
 
   it('Jefe: dos pestañas, columnas del mockup y una fila por orden',async()=>{
     await mount();
+    expect(host.querySelector('.page-header h1').textContent).toBe('Registro histórico');
     expect([...host.querySelectorAll('.view-tabs a')].map(a=>a.textContent)).toEqual(['Registro órdenes','Registro de acciones']);
     expect([...host.querySelectorAll('.registry-list th')].map(t=>t.textContent)).toEqual(['','N° orden','Cliente','Cerrada por','Motivo','Estado','Fecha']);
     const cells=[...host.querySelectorAll('.registry-list tbody tr')][0].querySelectorAll('td');

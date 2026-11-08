@@ -65,6 +65,7 @@ test.describe.serial("Registro histórico", () => {
     await expect(page).toHaveURL(/\/ordenes\/registro$/, { timeout: 90_000 }); // la primera visita compila la ruta
     await page.locator(".sidebar-nav .nav-link", { hasText: "Órdenes" }).click();
     await expect(page.locator('.nav-submenu a[href="/ordenes/registro"]')).toHaveText(/Registro histórico/);
+    await expect(page.locator(".page-header h1")).toHaveText("Registro histórico");
     await expect(page.locator(".view-tabs a")).toHaveText(["Registro órdenes", "Registro de acciones"]);
     await expect(page.locator(".registry-list thead th")).toHaveText(["", "N° orden", "Cliente", "Cerrada por", "Motivo", "Estado", "Fecha"], { timeout: 60_000 });
 
