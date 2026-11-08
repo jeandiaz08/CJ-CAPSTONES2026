@@ -1014,13 +1014,20 @@ func (h *Handler) readyByCourier(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) manifests(w http.ResponseWriter, r *http.Request) {
-	id, _ := tenant.From(r.Context())
-	list, err := h.svc.Manifests(r.Context(), id, r.URL.Query().Get("status"))
+	id, ids, ok := scope(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	f := ports.ManifestFilter{Status: q.Get("status"), Courier: q.Get("courier"), CompanyIDs: ids}
+	f.Limit, _ = strconv.Atoi(q.Get("limit"))
+	f.Offset, _ = strconv.Atoi(q.Get("offset"))
+	list, total, limit, err := h.svc.Manifests(r.Context(), id, f)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"data": list})
+	httpx.JSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "limit": limit, "offset": max(f.Offset, 0)})
 }
 
 func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {
@@ -1048,12 +1055,15 @@ func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) manifest(w http.ResponseWriter, r *http.Request) {
-	id, _ := tenant.From(r.Context())
+	id, ids, ok := scope(w, r)
+	if !ok {
+		return
+	}
 	mid, ok := pathInt(w, r, "id")
 	if !ok {
 		return
 	}
-	m, err := h.svc.Manifest(r.Context(), id, mid)
+	m, err := h.svc.Manifest(r.Context(), id, ids, mid)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return

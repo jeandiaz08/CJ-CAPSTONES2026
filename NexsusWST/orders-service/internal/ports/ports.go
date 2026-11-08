@@ -236,6 +236,14 @@ type Manifest struct {
 	Summary *ManifestSummary `json:"summary,omitempty"`
 }
 
+// ManifestFilter: CompanyIDs nil = todas; con empresas, solo los manifiestos
+// que tienen al menos una orden de ellas.
+type ManifestFilter struct {
+	Status, Courier string
+	CompanyIDs      []int64
+	Limit, Offset   int
+}
+
 // ManifestObservation es una observación de una orden al entregarla (p. ej. un
 // producto que faltó dentro de un bulto).
 type ManifestObservation struct {
@@ -310,7 +318,8 @@ type FulfillmentRepository interface {
 	ReadyByCourier(ctx context.Context, companyIDs []int64) ([]CourierQueue, error)
 	CreateManifest(ctx context.Context, courier string, orderIDs []int64, actor string) (Manifest, error)
 	Manifest(ctx context.Context, id int64) (Manifest, error)
-	Manifests(ctx context.Context, status string, limit int) ([]Manifest, error)
+	// Manifests lista por filtro y devuelve el total para paginar (Traspaso Órdenes A2).
+	Manifests(ctx context.Context, f ManifestFilter) ([]Manifest, int, error)
 	ScanPackage(ctx context.Context, manifestID int64, code, actor string) (ManifestLine, error)
 	SetLineStatus(ctx context.Context, manifestID, orderID int64, status, movedTo string) error
 	OpenManifestOf(ctx context.Context, orderID int64) (int64, error)

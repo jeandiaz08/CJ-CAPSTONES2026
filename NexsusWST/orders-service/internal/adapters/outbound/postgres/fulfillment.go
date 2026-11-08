@@ -361,24 +361,48 @@ func (r *FulfillmentRepository) bundles(ctx context.Context, manifestID, orderID
 	return out, rows.Err()
 }
 
-func (r *FulfillmentRepository) Manifests(ctx context.Context, status string, limit int) ([]ports.Manifest, error) {
-	rows, err := r.db.Query(ctx, `SELECT id FROM manifests WHERE ($1='' OR status=$1) ORDER BY id DESC LIMIT $2`, status, limit)
+func (r *FulfillmentRepository) Manifests(ctx context.Context, f ports.ManifestFilter) ([]ports.Manifest, int, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT m.id, count(*) OVER () FROM manifests m
+		WHERE ($1='' OR m.status=$1) AND ($2='' OR m.courier=$2)
+		  AND ($3::bigint[] IS NULL OR EXISTS (SELECT 1 FROM manifest_lines l JOIN orders o ON o.id=l.order_id
+		                                       WHERE l.manifest_id=m.id AND o.company_id = ANY($3)))
+		ORDER BY m.id DESC LIMIT $4 OFFSET $5`, f.Status, f.Courier, f.CompanyIDs, f.Limit, f.Offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	ids, err := collect[int64](rows)
-	if err != nil {
-		return nil, err
+	var ids []int64
+	total := 0
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id, &total); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if len(ids) == 0 && f.Offset > 0 {
+		// Página fuera de rango: el total se cuenta aparte.
+		if err := r.db.QueryRow(ctx, `SELECT count(*) FROM manifests m
+			WHERE ($1='' OR m.status=$1) AND ($2='' OR m.courier=$2)
+			  AND ($3::bigint[] IS NULL OR EXISTS (SELECT 1 FROM manifest_lines l JOIN orders o ON o.id=l.order_id
+			                                       WHERE l.manifest_id=m.id AND o.company_id = ANY($3)))`,
+			f.Status, f.Courier, f.CompanyIDs).Scan(&total); err != nil {
+			return nil, 0, err
+		}
 	}
 	out := make([]ports.Manifest, 0, len(ids))
 	for _, id := range ids {
 		m, err := r.Manifest(ctx, id)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, m)
 	}
-	return out, nil
+	return out, total, nil
 }
 
 func (r *FulfillmentRepository) ScanPackage(ctx context.Context, manifestID int64, code, actor string) (ports.ManifestLine, error) {

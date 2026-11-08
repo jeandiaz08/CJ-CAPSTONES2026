@@ -397,7 +397,9 @@ func (s *Service) CreateManifest(ctx context.Context, id tenant.Identity, scope 
 	return res, err
 }
 
-func (s *Service) Manifest(ctx context.Context, id tenant.Identity, manifestID int64) (ports.Manifest, error) {
+// Manifest es el detalle de un manifiesto. Con alcance por empresas (RF-03) solo
+// se ven sus órdenes; si no tiene ninguna, el manifiesto «no existe».
+func (s *Service) Manifest(ctx context.Context, id tenant.Identity, scope []int64, manifestID int64) (ports.Manifest, error) {
 	if !canDispatch(id) && !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps) {
 		return ports.Manifest{}, domain.ErrForbidden
 	}
@@ -405,15 +407,72 @@ func (s *Service) Manifest(ctx context.Context, id tenant.Identity, manifestID i
 	if err != nil {
 		return m, err
 	}
+	if !scopeManifest(&m, scope) {
+		return ports.Manifest{}, domain.ErrNotFound
+	}
 	s.summarize(ctx, &m)
 	return m, nil
 }
 
-func (s *Service) Manifests(ctx context.Context, id tenant.Identity, status string) ([]ports.Manifest, error) {
+const (
+	manifestsDefaultLimit = 20
+	manifestsMaxLimit     = 100
+)
+
+// Manifests lista los manifiestos con alcance por empresas, filtro por estado y
+// courier, y paginación (Traspaso Órdenes A2). Devuelve el total y el límite usado.
+func (s *Service) Manifests(ctx context.Context, id tenant.Identity, f ports.ManifestFilter) ([]ports.Manifest, int, int, error) {
 	if !canDispatch(id) && !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps) {
-		return nil, domain.ErrForbidden
+		return nil, 0, 0, domain.ErrForbidden
 	}
-	return s.Fulfillment.Manifests(ctx, status, 50)
+	switch f.Status = strings.TrimSpace(f.Status); f.Status {
+	case "", "open", "closed":
+	default:
+		return nil, 0, 0, fail(domain.ErrInvalid, "Estado de manifiesto inválido: usa open o closed.")
+	}
+	f.Courier = strings.ToLower(strings.TrimSpace(f.Courier))
+	f.Limit, f.Offset = clampPage(f.Limit, f.Offset)
+	list, total, err := s.Fulfillment.Manifests(ctx, f)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	for i := range list {
+		scopeManifest(&list[i], f.CompanyIDs)
+	}
+	return list, total, f.Limit, nil
+}
+
+func clampPage(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = manifestsDefaultLimit
+	}
+	if limit > manifestsMaxLimit {
+		limit = manifestsMaxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+// scopeManifest deja solo las líneas de las empresas del alcance (nil = todas) y
+// dice si quedó alguna.
+func scopeManifest(m *ports.Manifest, scope []int64) bool {
+	if scope == nil {
+		return true
+	}
+	allowed := map[int64]bool{}
+	for _, c := range scope {
+		allowed[c] = true
+	}
+	lines := m.Lines[:0:0]
+	for _, l := range m.Lines {
+		if allowed[l.CompanyID] {
+			lines = append(lines, l)
+		}
+	}
+	m.Lines = lines
+	return len(lines) > 0
 }
 
 // ScanPackage marca un bulto como verificado (marcándolo o con lector).
