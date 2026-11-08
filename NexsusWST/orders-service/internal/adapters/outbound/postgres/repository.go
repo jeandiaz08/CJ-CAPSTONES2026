@@ -259,10 +259,10 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Ord
 	case ports.ViewAssignment:
 		where = append(where, assignmentUniverse)
 	case ports.ViewRegistry:
-		where = append(where, `(o.status='cancelled' OR (o.status='handed_over' AND o.handed_over_at < now() - interval '365 days'))`)
+		where = append(where, inRegistry) // registry.go (Tarea 06, Jean)
 	case ports.ViewAll:
 	default:
-		where = append(where, `o.status<>'cancelled' AND (o.status<>'handed_over' OR o.handed_over_at IS NULL OR o.handed_over_at >= now() - interval '365 days')`)
+		where = append(where, "NOT "+inRegistry)
 	}
 	if q := strings.TrimSpace(f.Search); q != "" {
 		add(`(o.id::text = ? OR o.external_ref ILIKE '%' || ? || '%' OR o.recipient_name ILIKE '%' || ? || '%' OR o.courier_code = ?)`, q)

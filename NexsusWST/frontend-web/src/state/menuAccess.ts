@@ -30,7 +30,7 @@ export const MENU: MenuEntry[] = [
       { name: "Todas las órdenes", href: "/ordenes/todas/listado", access: INTERNAL_AND_CLIENT },
       { name: "Empaque", href: "/ordenes/empaque", access: PACKING },
       { name: "Retiro y entrega", href: "/ordenes/retiro", access: DISPATCH },
-      { name: "Registro histórico", href: "/ordenes/historial", access: INTERNAL_AND_CLIENT },
+      { name: "Registro histórico", href: "/ordenes/registro", access: INTERNAL_AND_CLIENT },
     ],
   },
   {
@@ -61,6 +61,8 @@ const ROUTES: { path: string; access: Access }[] = [
   { path: "/ordenes/empaque", access: PACKING },
   { path: "/empaque", access: PACKING },
   { path: "/ordenes/retiro", access: DISPATCH },
+  { path: "/ordenes/registro", access: INTERNAL_AND_CLIENT },
+  { path: "/ordenes/historial", access: INTERNAL_AND_CLIENT },
   { path: "/olas", access: INTERNAL },
   { path: "/reglas-olas", access: INTERNAL },
   { path: "/incidencias", access: INTERNAL },

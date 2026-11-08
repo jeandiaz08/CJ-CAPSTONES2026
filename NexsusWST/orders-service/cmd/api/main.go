@@ -161,6 +161,7 @@ func main() {
 
 	origins := strings.Split(envOr("WS_ALLOWED_ORIGINS", envOr("APP_DOMAIN", "localhost")), ",")
 	ordershttp.NewHandler(svc, rdb, profiles, log, origins).Register(mux, requireAuth)
+	ordershttp.NewHistoryHandler(application.NewRegistry(postgres.NewRegistry(db)), log).Register(mux, requireAuth) // Registro histórico (Tarea 06, Jean)
 	webhooks.NewHandler(svc, log).Register(mux)
 
 	handler := httpserver.Chain(mux,

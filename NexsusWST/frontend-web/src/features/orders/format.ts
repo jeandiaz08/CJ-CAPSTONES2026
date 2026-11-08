@@ -8,3 +8,5 @@ export const ORIGIN_OPTIONS=[{value:"manual",label:"Orden manual"},{value:"bulk"
 export const SITUATION_LABELS:Record<string,string>={en_cola:"En cola",invas_agotado:"Invas agotó reintentos",fuera_corte:"Fuera de corte",sin_regla:"Sin regla que calce"};
 export const DOCUMENT_KINDS:Record<string,string>={factura:"Factura",boleta:"Boleta",guia_despacho:"Guía de despacho",etiqueta:"Etiqueta",otro:"Otro"};
 export function originLabel(order:Pick<Order,"source"|"channel">){return order.source==="manual"?"Orden manual":order.source==="bulk"?"Carga masiva":channelLabel(order.channel)}
+// Actor de un evento: «user:{id} {nombre}» (API), «system:…», «Sistema» o «Invas» (procesos), o un nombre suelto.
+export function actorName(raw?:string){const value=(raw??"").trim();const user=value.match(/^user:(\d+)\s*(.*)$/);if(user)return user[2].trim()||`Usuario #${user[1]}`;return !value||/^system:/i.test(value)||/^(sistema|invas|worker)$/i.test(value)?"Sistema":value}
