@@ -2,6 +2,8 @@
 import { ArrowBigRight, Star, StarOff } from "lucide-react";
 import { CompactTable } from "@/components/CompactTable";
 import { TrackingSection } from "./TrackingSection";
+import { EventTimeline } from "./EventTimeline";
+import { Modal } from "@/components/Modal";
 import {originLabel,channelLabel,dispatchLabel,warehouseLabel} from "../format";
 import {useState} from "react";
 import { getOrder,downloadOrderDocument,type Order } from "@/services/orders";
@@ -15,7 +17,6 @@ import { PriorityBadge } from "./PriorityMark";
 import { ResolveIncidentDialog, ResolveVoidedDialog } from "./ResolveDialogs";
 import { cancelBlockReason, canManageOrders, canOperate } from "../rules";
 import type { CatalogItem, Company } from "@/services/core";
-export function todoAction() { }
 export const dateLabel = (s: string) => new Intl.DateTimeFormat("es-CL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/Santiago" }).format(new Date(s)).replace(",", "").replaceAll("-", "/") + " hrs";
 export function OrderDetail({ id, companyId, role, revision, labels, inModal = false, companyName, courierName, assignment = false, onChanged, companies = [], couriers = [] }: {
     onChanged?: (order?: Order) => void;
@@ -31,6 +32,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
 }) {
     const [downloadError,setDownloadError]=useState<string|null>(null);
     const [dialog,setDialog]=useState<"cancel"|"priority"|"edit"|"resolve"|null>(null);
+    const [history,setHistory]=useState(false);
     const resource = useOrderResource(() => getOrder(id, companyId), `${id}:${companyId}:${revision}`, `${id}:${companyId}`);
     const order = resource.data?.order;
     const products = useOrderResource(() => order ? productsForCompany(order.companyId) : Promise.resolve([]), `products:${order?.companyId}`);
@@ -61,7 +63,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
     <section>
     <header>
     <h3>Historial de estados</h3>
-    <button onClick={todoAction} className="text-button">Ver todo</button>
+    <button onClick={()=>setHistory(true)} className="text-button" disabled={!events.length}>Ver todo</button>
     </header>{last ? <>
         <div className="state-history"><div><strong>{labels[last.fromStatus]||"Creación"}</strong><small>{previous?.actor||"—"}</small><small>{previous?dateLabel(previous.occurredAt):"—"}</small></div><ArrowBigRight aria-label="Cambió a"/><div><strong>{labels[last.toStatus]||order.statusLabel}</strong><small>{last.actor}</small><small>{dateLabel(last.occurredAt)}</small></div></div>
         </> : <p>Sin cambios registrados</p>}</section>
@@ -113,6 +115,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
     </div>
     {dialog==="cancel"&&<CancelOrderDialog {...dialogProps}/>}
     {dialog==="priority"&&<PriorityDialog {...dialogProps}/>}
+    {history&&<Modal title={`Historial de estados · orden #${order.externalRef}`} onClose={()=>setHistory(false)} panelClassName="history-modal"><EventTimeline events={events} labels={labels} horizontal/></Modal>}
     {dialog==="resolve"&&order.status==="voided"&&<ResolveVoidedDialog {...dialogProps} events={events} products={products.data??[]}/>}
     {dialog==="resolve"&&order.status==="incident"&&<ResolveIncidentDialog {...dialogProps} events={events} couriers={couriers} labels={labels}/>}
     {dialog==="edit"&&<OrderFormModal order={order} companies={companies} couriers={couriers} defaultCompanyId={order.companyId} onClose={()=>setDialog(null)} onConflict={()=>onChanged?.()} onSaved={updated=>{setDialog(null);onChanged?.(updated);}}/>}

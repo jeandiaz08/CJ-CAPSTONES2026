@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { SideDrawer } from "@/components/SideDrawer";
+import { FiltersModal } from "@/components/FiltersModal";
 import { ROLE_LABELS } from "@/state/auth";
 
 export type ActivityFilterValues = { from: string; to: string; actor: string; role: string; kind: string };
@@ -25,7 +25,7 @@ export function ActivityFiltersDrawer({ values, defaults, onApply, onClose }: {
     onApply(draft);
   };
   return (
-    <SideDrawer title="Filtros" onClose={onClose} footer={<>
+    <FiltersModal title="Filtros" onClose={onClose} footer={<>
       <button type="button" className="btn ghost" onClick={() => onApply(defaults)}>Limpiar</button>
       <button type="button" className="btn form-submit-primary" onClick={apply}>Aplicar</button>
     </>}>
@@ -61,6 +61,6 @@ export function ActivityFiltersDrawer({ values, defaults, onApply, onClose }: {
           </select>
         </div>
       </div>
-    </SideDrawer>
+    </FiltersModal>
   );
 }

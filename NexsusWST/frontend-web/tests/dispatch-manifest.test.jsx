@@ -64,8 +64,10 @@ describe('Retiro: manifiesto en un modal y entrega',()=>{
     expect(orderRow('R2').querySelector('.cell-truncate').title).toBe('Andes Outdoor SpA (demo)');
     expect([...table('Bultos del manifiesto').querySelectorAll('th')].map(t=>t.textContent)).toEqual(['Bulto','Estado','Código de etiqueta','Orden','Productos']);
     const b=[...table('Bultos del manifiesto').querySelectorAll('tbody tr')].find(r=>r.textContent.startsWith('NX-2-2'));
-    expect([...b.querySelectorAll('td')].map(t=>t.textContent)).toEqual(['NX-2-2','Sin escanear','BX-2','#R2','Mouse ×3, Teclado ×1']);
-    expect(b.querySelector('.cell-truncate').title).toBe('Mouse ×3, Teclado ×1');
+    expect([...b.querySelectorAll('td')].slice(0,4).map(t=>t.textContent)).toEqual(['NX-2-2','Sin escanear','BX-2','#R2']);
+    // Productos completos, uno por línea y sin elipsis.
+    const cell=b.querySelector('td.is-products');expect(cell.querySelector('.cell-truncate')).toBeNull();
+    expect([...cell.querySelectorAll('.bundle-products li')].map(l=>l.textContent)).toEqual(['Mouse ×3','Teclado ×1']);
   });
   it('«Despachar igual»: solo en incompletas; deshabilitado sin bultos escaneados; pide quién retira y por qué',async()=>{
     await mount();await openModal();
@@ -94,6 +96,12 @@ describe('Retiro: manifiesto en un modal y entrega',()=>{
     await click(btn('Despachar igual',orderRow('R2')));let d=dialogs().at(-1);await setValue(d.querySelector('input'),'Juan Pérez');await setValue(d.querySelector('textarea'),'Bulto dañado');await submit(d.querySelector('form'));
     await click(btn('Confirmar entrega',manifest()));d=dialogs().at(-1);
     expect(d.querySelector('input').value).toBe('Juan Pérez');
+    // Diseño de la imagen: «Quien retira» con Nombre conductor, RUT y Patente; luego el transporte y el aviso.
+    expect([...d.querySelectorAll('.delivery-form h3')].map(x=>x.textContent)).toEqual(['Quien retira','Transporte']);
+    expect([...d.querySelectorAll('label')].map(x=>x.textContent)).toEqual(['Nombre conductor *','RUT','Patente','Empresa del transporte','Notas']);
+    expect([...d.querySelectorAll('.delivery-pair label')].map(x=>x.textContent)).toEqual(['RUT','Patente']);
+    expect(d.querySelector('.delivery-hint').textContent).toBe('Fecha y hora se registran solas, después de cerrar cualquier cambio genera incidencia');
+    expect([...d.querySelectorAll('.form-modal-foot button')].map(x=>x.textContent)).toEqual(['Confirmar entrega','Cancelar']);
     const inputs=[...d.querySelectorAll('input')];await setValue(inputs[3],'Transportes Sur');await setValue(d.querySelector('textarea'),'Retiro de la tarde');
     await submit(d.querySelector('form'));
     const body=s.calls.find(c=>/close$/.test(c.path)).body;
