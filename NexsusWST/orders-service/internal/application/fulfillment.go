@@ -12,6 +12,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nexuswst/orders-service/internal/domain"
 	"github.com/nexuswst/orders-service/internal/ports"
@@ -459,11 +460,32 @@ func labelBlock(o domain.Order) string {
 // las órdenes completas pasan a «Entregada al courier». Una orden con bultos
 // faltantes queda para el siguiente retiro (H-13 escenario 2), salvo que venga
 // en anyway: «Despachar igual» autorizado por Jefe o Admin con motivo (H-13-T08).
-func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifestID int64, pickerName, pickerID, plate, notes string, anyway []DispatchAnyway) (CloseResult, error) {
+// CloseInput son los datos del cierre del manifiesto (POST /close).
+type CloseInput struct {
+	PickerName   string `json:"pickerName"`
+	PickerID     string `json:"pickerId"`
+	VehiclePlate string `json:"vehiclePlate"`
+	// TransportCompany: empresa del transporte de quien retira (A3).
+	TransportCompany string `json:"transportCompany"`
+	Notes            string `json:"notes"`
+	// Observations: observación opcional por orden del manifiesto (A4).
+	Observations []ports.ManifestObservation `json:"observations"`
+	// «Despachar igual» (H-13-T08): órdenes con bultos faltantes que se autorizan.
+	DispatchAnyway []DispatchAnyway `json:"dispatchAnyway"`
+}
+
+const (
+	maxTransportCompany = 120
+	maxObservation      = 500
+	transportPrefix     = "Empresa del transporte:"
+	observationPrefix   = "Observación · #"
+)
+
+func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifestID int64, in CloseInput) (CloseResult, error) {
 	if !canDispatch(id) {
 		return CloseResult{}, fail(domain.ErrForbidden, "Necesitas el permiso Despacho.")
 	}
-	pickerName, pickerID, plate = strings.TrimSpace(pickerName), strings.TrimSpace(pickerID), strings.ToUpper(strings.TrimSpace(plate))
+	pickerName, pickerID, plate := strings.TrimSpace(in.PickerName), strings.TrimSpace(in.PickerID), strings.ToUpper(strings.TrimSpace(in.VehiclePlate))
 	if pickerName == "" {
 		return CloseResult{}, fail(domain.ErrInvalid, "Registra el nombre de quien retira.")
 	}
@@ -474,7 +496,11 @@ func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifes
 	if m.Status != "open" {
 		return CloseResult{}, fail(domain.ErrConflict, "El manifiesto ya está cerrado.")
 	}
-	authorized, err := checkDispatchAnyway(id, m, anyway)
+	company, notes, obs, err := closeDetails(m, in)
+	if err != nil {
+		return CloseResult{}, err
+	}
+	authorized, err := checkDispatchAnyway(id, m, in.DispatchAnyway)
 	if err != nil {
 		return CloseResult{}, err
 	}
@@ -534,6 +560,56 @@ func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifes
 		_ = s.Fulfillment.SetLineStatus(ctx, m.ID, l.OrderID, "delivered", "")
 		res.Delivered = append(res.Delivered, l.OrderID)
 	}
-	m.PickerName, m.PickerID, m.VehiclePlate, m.Notes = pickerName, pickerID, plate, strings.TrimSpace(notes)
-	return res, s.Fulfillment.CloseManifest(ctx, m, id.Actor())
+	m.PickerName, m.PickerID, m.VehiclePlate, m.TransportCompany, m.Notes = pickerName, pickerID, plate, company, notes
+	return res, s.Fulfillment.CloseManifest(ctx, m, obs, id.Actor())
+}
+
+// closeDetails valida la empresa del transporte y las observaciones del cierre.
+// Compatibilidad con el front que las manda dentro de notes: si los campos
+// vienen vacíos, saca de notes la línea «Empresa del transporte: X» y las
+// líneas «Observación · #ref · texto» de órdenes del manifiesto.
+func closeDetails(m ports.Manifest, in CloseInput) (company, notes string, obs []ports.ManifestObservation, err error) {
+	company = strings.TrimSpace(in.TransportCompany)
+	byRef := map[string]int64{}
+	inManifest := map[int64]bool{}
+	for _, l := range m.Lines {
+		byRef[l.ExternalRef] = l.OrderID
+		inManifest[l.OrderID] = true
+	}
+	var keep []string
+	for _, line := range strings.Split(in.Notes, "\n") {
+		t := strings.TrimSpace(line)
+		switch {
+		case company == "" && strings.HasPrefix(t, transportPrefix):
+			company = strings.TrimSpace(strings.TrimPrefix(t, transportPrefix))
+			continue
+		case len(in.Observations) == 0 && strings.HasPrefix(t, observationPrefix):
+			ref, text, ok := strings.Cut(strings.TrimPrefix(t, observationPrefix), " · ")
+			if oid, found := byRef[ref]; ok && found {
+				obs = append(obs, ports.ManifestObservation{OrderID: oid, Text: text})
+				continue
+			}
+		}
+		keep = append(keep, line)
+	}
+	notes = strings.TrimSpace(strings.Join(keep, "\n"))
+	if utf8.RuneCountInString(company) > maxTransportCompany {
+		return "", "", nil, fail(domain.ErrInvalid, "La empresa del transporte admite hasta %d caracteres.", maxTransportCompany)
+	}
+	obs = append(obs, in.Observations...)
+	out := make([]ports.ManifestObservation, 0, len(obs))
+	for _, o := range obs {
+		o.Text = strings.TrimSpace(o.Text)
+		if o.Text == "" {
+			continue
+		}
+		if !inManifest[o.OrderID] {
+			return "", "", nil, fail(domain.ErrInvalid, "La orden #%d no está en el manifiesto #%d.", o.OrderID, m.ID)
+		}
+		if utf8.RuneCountInString(o.Text) > maxObservation {
+			return "", "", nil, fail(domain.ErrInvalid, "La observación de la orden #%d admite hasta %d caracteres.", o.OrderID, maxObservation)
+		}
+		out = append(out, o)
+	}
+	return company, notes, out, nil
 }

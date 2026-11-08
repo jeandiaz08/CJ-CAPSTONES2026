@@ -308,9 +308,9 @@ func (r *FulfillmentRepository) CreateManifest(ctx context.Context, courier stri
 func (r *FulfillmentRepository) Manifest(ctx context.Context, id int64) (ports.Manifest, error) {
 	var m ports.Manifest
 	err := r.db.QueryRow(ctx, `SELECT id, courier, status, created_by, created_at, COALESCE(closed_by,''), closed_at,
-		COALESCE(picker_name,''), COALESCE(picker_id,''), COALESCE(vehicle_plate,''), COALESCE(notes,'')
+		COALESCE(picker_name,''), COALESCE(picker_id,''), COALESCE(vehicle_plate,''), COALESCE(transport_company,''), COALESCE(notes,'')
 		FROM manifests WHERE id=$1`, id).Scan(&m.ID, &m.Courier, &m.Status, &m.CreatedBy, &m.CreatedAt, &m.ClosedBy, &m.ClosedAt,
-		&m.PickerName, &m.PickerID, &m.VehiclePlate, &m.Notes)
+		&m.PickerName, &m.PickerID, &m.VehiclePlate, &m.TransportCompany, &m.Notes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, domain.ErrNotFound
 	}
@@ -431,14 +431,26 @@ func (r *FulfillmentRepository) OpenManifestOf(ctx context.Context, orderID int6
 	return id, err
 }
 
-func (r *FulfillmentRepository) CloseManifest(ctx context.Context, m ports.Manifest, actor string) error {
-	tag, err := r.db.Exec(ctx, `UPDATE manifests SET status='closed', closed_by=$2, closed_at=now(), picker_name=$3,
-		picker_id=NULLIF($4,''), vehicle_plate=NULLIF($5,''), notes=NULLIF($6,'') WHERE id=$1 AND status='open'`,
-		m.ID, actor, m.PickerName, m.PickerID, m.VehiclePlate, m.Notes)
-	if err == nil && tag.RowsAffected() == 0 {
-		return domain.ErrConflict
-	}
-	return err
+func (r *FulfillmentRepository) CloseManifest(ctx context.Context, m ports.Manifest, obs []ports.ManifestObservation, actor string) error {
+	return pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE manifests SET status='closed', closed_by=$2, closed_at=now(), picker_name=$3,
+			picker_id=NULLIF($4,''), vehicle_plate=NULLIF($5,''), transport_company=NULLIF($6,''), notes=NULLIF($7,'')
+			WHERE id=$1 AND status='open'`,
+			m.ID, actor, m.PickerName, m.PickerID, m.VehiclePlate, m.TransportCompany, m.Notes)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return domain.ErrConflict
+		}
+		for _, o := range obs {
+			details := map[string]any{"kind": "observacion_entrega", "manifestId": m.ID}
+			if err := addEventDetails(ctx, tx, o.OrderID, "manifest", "observation", "", "", actor, o.Text, details); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ---------------- Cargas masivas ----------------

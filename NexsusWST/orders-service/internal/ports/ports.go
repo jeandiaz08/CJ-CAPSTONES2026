@@ -218,20 +218,29 @@ type Document struct {
 }
 
 type Manifest struct {
-	ID           int64          `json:"id"`
-	Courier      string         `json:"courier"`
-	Status       string         `json:"status"`
-	CreatedBy    string         `json:"createdBy"`
-	CreatedAt    time.Time      `json:"createdAt"`
-	ClosedBy     string         `json:"closedBy,omitempty"`
-	ClosedAt     *time.Time     `json:"closedAt,omitempty"`
-	PickerName   string         `json:"pickerName,omitempty"`
-	PickerID     string         `json:"pickerId,omitempty"`
-	VehiclePlate string         `json:"vehiclePlate,omitempty"`
-	Notes        string         `json:"notes,omitempty"`
-	Lines        []ManifestLine `json:"lines"`
+	ID           int64      `json:"id"`
+	Courier      string     `json:"courier"`
+	Status       string     `json:"status"`
+	CreatedBy    string     `json:"createdBy"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	ClosedBy     string     `json:"closedBy,omitempty"`
+	ClosedAt     *time.Time `json:"closedAt,omitempty"`
+	PickerName   string     `json:"pickerName,omitempty"`
+	PickerID     string     `json:"pickerId,omitempty"`
+	VehiclePlate string     `json:"vehiclePlate,omitempty"`
+	// TransportCompany: empresa del transporte de quien retira (Traspaso Órdenes A3).
+	TransportCompany string         `json:"transportCompany,omitempty"`
+	Notes            string         `json:"notes,omitempty"`
+	Lines            []ManifestLine `json:"lines"`
 	// Summary lo calcula la aplicación al leer el manifiesto.
 	Summary *ManifestSummary `json:"summary,omitempty"`
+}
+
+// ManifestObservation es una observación de una orden al entregarla (p. ej. un
+// producto que faltó dentro de un bulto).
+type ManifestObservation struct {
+	OrderID int64  `json:"orderId"`
+	Text    string `json:"text"`
 }
 
 type ManifestLine struct {
@@ -305,7 +314,9 @@ type FulfillmentRepository interface {
 	ScanPackage(ctx context.Context, manifestID int64, code, actor string) (ManifestLine, error)
 	SetLineStatus(ctx context.Context, manifestID, orderID int64, status, movedTo string) error
 	OpenManifestOf(ctx context.Context, orderID int64) (int64, error)
-	CloseManifest(ctx context.Context, m Manifest, actor string) error
+	// CloseManifest cierra el manifiesto y guarda, en la misma transacción, las
+	// observaciones por orden como eventos de la orden (Traspaso Órdenes A4).
+	CloseManifest(ctx context.Context, m Manifest, obs []ManifestObservation, actor string) error
 
 	SaveImport(ctx context.Context, companyID int64, filename string, total, created int, errs []RowError, actor string) (int64, error)
 }

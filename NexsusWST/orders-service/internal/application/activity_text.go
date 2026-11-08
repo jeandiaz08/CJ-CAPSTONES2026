@@ -31,6 +31,7 @@ var activityActions = map[string]string{
 	// retiro y entrega
 	"manifest_created": "Creó manifiesto", "manifest_closed": "Cerró manifiesto (entrega)", "dispatch_anyway": "Despachar igual",
 	"add": "Agregó la orden al manifiesto", "manifest_leave": "La orden salió del manifiesto",
+	"observation": "Observación de la entrega",
 	// usuarios
 	"created": "Usuario creado", "updated": "Usuario editado", "enabled": "Usuario activado", "disabled": "Usuario desactivado",
 	"password_reset": "Contraseña temporal generada", "password_email_sent": "Correo de contraseña enviado",
@@ -66,8 +67,8 @@ func statusLabel(s any) string {
 	return str
 }
 
-// transportCompany - el front manda la empresa del transporte como primera línea de notes
-// («Empresa del transporte: X»); el resto son observaciones. TODO(api): campo propio en /close.
+// transportCompany - antes de Órdenes 000012 el front mandaba la empresa del transporte
+// como primera línea de notes («Empresa del transporte: X»); el resto son observaciones.
 func transportCompany(notes string) (company, observation string) {
 	lines := strings.Split(strings.TrimSpace(notes), "\n")
 	if len(lines) > 0 && strings.HasPrefix(lines[0], "Empresa del transporte:") {
@@ -135,7 +136,7 @@ func detailLines(module string, d map[string]any) []string {
 		delete(labels, "reason") // tiene su columna
 	}
 	if module == "dispatch" {
-		for k, v := range map[string]string{"pickerName": "Quien retira", "pickerId": "RUT", "vehiclePlate": "Patente", "notes": "Notas"} {
+		for k, v := range map[string]string{"pickerName": "Quien retira", "pickerId": "RUT", "vehiclePlate": "Patente", "transportCompany": "Empresa del transporte", "notes": "Notas"} {
 			labels[k] = v
 		}
 	}
@@ -195,6 +196,11 @@ func presentActivity(it *ActivityItem, courierName string) {
 	}
 	if notes, ok := it.Details["notes"].(string); ok && it.Module == "dispatch" {
 		it.TransportCompany, it.Observation = transportCompany(notes)
+	}
+	// Desde Órdenes 000012 la empresa tiene columna propia; notes queda como respaldo
+	// para los manifiestos cerrados antes.
+	if company, ok := it.Details["transportCompany"].(string); ok && company != "" {
+		it.TransportCompany = company
 	}
 	it.DetailLines = detailLines(it.Module, it.Details)
 }

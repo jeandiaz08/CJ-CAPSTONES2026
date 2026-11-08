@@ -1087,18 +1087,11 @@ func (h *Handler) closeManifest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var body struct {
-		PickerName   string `json:"pickerName"`
-		PickerID     string `json:"pickerId"`
-		VehiclePlate string `json:"vehiclePlate"`
-		Notes        string `json:"notes"`
-		// «Despachar igual» (H-13-T08): órdenes con bultos faltantes que Jefe o Admin autoriza.
-		DispatchAnyway []application.DispatchAnyway `json:"dispatchAnyway"`
-	}
+	var body application.CloseInput
 	if !decode(w, r, &body) {
 		return
 	}
-	res, err := h.svc.CloseManifest(r.Context(), id, mid, body.PickerName, body.PickerID, body.VehiclePlate, body.Notes, body.DispatchAnyway)
+	res, err := h.svc.CloseManifest(r.Context(), id, mid, body)
 	if err != nil {
 		h.writeErr(w, r, err)
 		return

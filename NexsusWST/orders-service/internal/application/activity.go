@@ -30,7 +30,7 @@ var activityFields = map[string]bool{
 	"fromStatus": true, "toStatus": true, "courier": true, "labelCode": true, "packages": true,
 	"kind": true, "manifestId": true, "waveId": true, "reason": true, "authorizedBy": true,
 	"packagesTotal": true, "scannedPackages": true, "missingPackages": true,
-	"orders": true, "pickerName": true, "pickerId": true, "vehiclePlate": true, "notes": true,
+	"orders": true, "pickerName": true, "pickerId": true, "vehiclePlate": true, "notes": true, "transportCompany": true,
 	// usuarios (user_audit del Core)
 	"name": true, "role": true, "permissions": true, "companies": true, "allCompanies": true,
 	"username": true, "withoutEmail": true, "temporary": true, "source": true, "targetRole": true,
