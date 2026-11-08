@@ -29,7 +29,8 @@ import { OrderDetail, dateLabel } from "./OrderDetail";
 export function OrdersListing({assignment=false}:{assignment?:boolean}) {
     const { session, companyId } = useAuth();
     const params = useSearchParams(), router = useRouter(), pathname = usePathname();
-    const [selected, setSelected] = useState<number | null>(null), [checks, setChecks] = useState<Set<number>>(new Set()), [mobile, setMobile] = useState(false), [revision, setRevision] = useState(0), [filtersOpen, setFiltersOpen] = useState(false), [creating, setCreating] = useState(false);
+    // ?order= (enlace de un N° de orden o de /ordenes/[id]) abre ese detalle aunque la orden no esté en la página.
+    const [selected, setSelected] = useState<number | null>(() => Number(params.get("order")) || null), [checks, setChecks] = useState<Set<number>>(new Set()), [mobile, setMobile] = useState(false), [revision, setRevision] = useState(0), [filtersOpen, setFiltersOpen] = useState(false), [creating, setCreating] = useState(false);
     const page = Math.max(0, Number(params.get("page")) || 0);
     const limit = [20, 50, 100].includes(Number(params.get("limit"))) ? Number(params.get("limit")) : 20;
     const urlQuery = params.get("q") ?? "";
@@ -56,7 +57,12 @@ export function OrdersListing({assignment=false}:{assignment?:boolean}) {
         if (replace) router.replace(href); else router.push(href);
     };
     useEffect(() => { const m = matchMedia("(max-width:1279px)"); const update = () => setMobile(m.matches); update(); m.addEventListener("change", update); return () => m.removeEventListener("change", update); }, []);
-    useEffect(() => { setSelected(null); setChecks(new Set()); }, [scopeCompany, page, filtersKey]);
+    const lastScope = useRef(`${scopeCompany}:${page}:${filtersKey}`);
+    useEffect(() => { const scope = `${scopeCompany}:${page}:${filtersKey}`; if (scope === lastScope.current) return; lastScope.current = scope; setSelected(null); setChecks(new Set()); }, [scopeCompany, page, filtersKey]);
+    // El ?order= se usa una vez: se quita de la URL para que no vuelva a abrirse al navegar.
+    useEffect(() => { if (params.get("order")) updateUrl(next => next.delete("order"), true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useEffect(() => { if (!loading)
         setRevision(v => v + 1); }, [orders, loading]);
     // El buscador escribe en la URL con debounce; si la URL cambia por fuera (atrás, Limpiar), manda la URL.

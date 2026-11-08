@@ -124,7 +124,7 @@ Contiene estos campos:
 
 | Método | Ruta | Detalle |
 | --- | --- | --- |
-| GET | `/v1/orders` | Filtros: `status=a,b`, `view=` (vacío = bandeja: órdenes en curso y Entregadas de hasta 365 días desde `handed_over_at`; nunca Canceladas · `registro` = Canceladas y Entregadas de más de 365 días · `all`), `q` (n°, referencia, destinatario o código courier), `courier`, `channel`, `source=manual\|bulk\|webhook`, `situation=en_cola\|invas_agotado\|fuera_corte\|sin_regla` (valor desconocido: 422), `from`/`to` (AAAA-MM-DD), `priority=true`, `without_wave=true`, `incident_kind`, `ids=1,2`, `sort=recent\|oldest\|updated\|priority` (por defecto, lo más reciente primero; en `view=asignacion`, el orden de la cola: corte, prioridad y antigüedad), `limit` (≤200), `offset`. Respuesta `{data, total, limit, offset}` |
+| GET | `/v1/orders` | Filtros: `status=a,b`, `view=` (vacío = bandeja: todo lo que **no** está en el Registro histórico · `registro` = Canceladas y órdenes con más de 1 año sin cambiar de estado, ver «Registro histórico» · `all`), `q` (n°, referencia, destinatario o código courier), `courier`, `channel`, `source=manual\|bulk\|webhook`, `situation=en_cola\|invas_agotado\|fuera_corte\|sin_regla` (valor desconocido: 422), `from`/`to` (AAAA-MM-DD), `priority=true`, `without_wave=true`, `incident_kind`, `ids=1,2`, `sort=recent\|oldest\|updated\|priority` (por defecto, lo más reciente primero; en `view=asignacion`, el orden de la cola: corte, prioridad y antigüedad), `limit` (≤200), `offset`. Respuesta `{data, total, limit, offset}` |
 | GET | `/v1/orders/summary` | Conteo por estado de todas las órdenes del alcance; respeta `company_id` y no aplica los demás filtros |
 | GET | `/v1/orders/export` | Mismos filtros; `format=xlsx` (defecto) o `csv`. Con `ids=` exporta **los seleccionados**. Máx. 10.000 filas |
 | GET | `/v1/orders/warehouses` | Bodegas distintas que ya aparecen en órdenes del alcance. Solo Jefe/Admin. Sugerencias para las reglas de ola. |
@@ -132,6 +132,34 @@ Contiene estos campos:
 | POST | `/v1/orders/import` | multipart: `file` (.xlsx o .csv, máx. 5 MB) + `companyId`. **201** todo creado · **207** parte con errores: `{ordersCreated, orderIds, totalRows, failedRows, errors[{row, ref, message}]}`. Varias filas con la misma referencia = una orden con varios productos. |
 | GET | `/v1/orders/import/template` | Plantilla `.xlsx` con hoja «Instrucciones», listas desplegables de couriers, tipos de despacho y comunas activas y filas de ejemplo; con `company_id` agrega los SKU activos de esa empresa. `?format=csv`: mismas columnas y ejemplos, sin listas. Las filas cuya referencia empieza con `EJEMPLO-` no se importan. |
 | GET | `/v1/orders/{id}` | `{order, events[], packages[], documents[], tracking{available, events[]}}` |
+
+### Registro histórico (Tarea 06, RF-28) — Administrador, Jefe de Operaciones y Cliente (su empresa)
+
+Una orden entra al registro **Cancelada** (de inmediato) o cuando pasa **1 año desde su último cambio de estado** (cualquier estado; para las Entregadas cuenta `handed_over_at`). El último cambio es el último evento con `to_status` distinto de `from_status`; sin eventos, `created_at`. La bandeja (`GET /v1/orders` sin `view`) excluye exactamente esas órdenes. Empaque y Analista reciben 403; el Cliente ve solo su empresa (alcance del token, `company_id` ajeno = 403).
+
+| Método | Ruta | Detalle |
+| --- | --- | --- |
+| GET | `/v1/orders/registry` | Filtros: `q` (n° de orden), `status=a,b`, `courier`, `company_id`, `from`/`to` (AAAA-MM-DD, sobre la fecha del cierre), `ids=1,2`, `limit` (1–200, defecto 20), `offset`. Respuesta `{data:[{id, externalRef, companyId, companyName, courier, courierName, status, statusLabel, previousStatus, previousStatusLabel, closedAt, closedBy:{id?, name, role?, kind: human\|system}, reason, motive, stale}], total, limit, offset}`. Orden: cierre más reciente primero |
+| GET | `/v1/orders/registry/export` | Mismos filtros; `format=xlsx` (defecto) o `csv`. Columnas: N° orden, Cliente, Cerrada por, Perfil, Motivo, Estado, Estaba en, Courier, Fecha. Máx. 10.000 filas |
+
+- `closedBy`: actor del último cambio de estado. `kind: system` para procesos (Invas, worker); `role` es el perfil **actual** del usuario (el evento no guarda el de ese momento) y falta en actores antiguos sin `user:{id}`.
+- `previousStatus`: «Estaba en», el estado antes del cierre. `stale: true` si entró por tiempo y no por estar Cancelada.
+- `motive`: para las que entran por tiempo, «Más de 1 año sin movimiento · {motivo original}»; para las Canceladas, el motivo sin el prefijo «Cancelada por {nombre} ({perfil}): » (quién ya va en `closedBy`).
+
+### Registro de acciones (Tarea 06, RF-28) — solo Administrador y Jefe de Operaciones
+
+Se lee de la vista `activity_log` (migración Órdenes `000009_activity_log`), que une `order_events` (órdenes, empaque, etiqueta y «Despachar igual»), la creación y el cierre de `manifests` y `user_audit` del Core. Solo lectura; retención de **1 año** (no devuelve nada más antiguo y no borra nada). Cliente, Empaque y Analista reciben 403. `TODO(PV-21)`: acotar al Jefe a sus bodegas.
+
+| Método | Ruta | Detalle |
+| --- | --- | --- |
+| GET | `/v1/activity` | Filtros: `module=orders\|packing\|dispatch\|users` (otro valor: 422), `from`/`to` (AAAA-MM-DD), `actor` (id o parte del nombre), `role`, `kind=human\|system`, `q` (n° de orden, de manifiesto o nombre de usuario), `company_id` (solo esa empresa; sin él, el alcance del usuario más lo que no tiene empresa), `limit` (1–200, defecto 50), `offset`. Respuesta `{items:[{id, occurredAt, actor:{id?, name, role?, kind}, module, action, actionLabel, entity:{type: order\|manifest\|user, id, label}, companyId?, companyName?, warehouse?, reason?, details, statusChange?, courierName?, transportCompany?, observation?, detailLines[]}], total, limit, offset}`. Lo más reciente primero. `q=#12` busca el manifiesto 12 (creación, cierre y órdenes despachadas igual en él) |
+| GET | `/v1/activity/export` | Mismos filtros; `module` obligatorio (422 sin él). Excel con las columnas del apartado: Órdenes (Fecha y hora, Actor, Perfil, Humano/Sistema, Acción, N° orden, Cliente, Estado anterior → nuevo, Motivo u observación, Detalle), Empaque (… Bultos, Código de etiqueta, Observación), Retiro y entrega (… N° manifiesto, Courier, Órdenes, Bultos, Quien retira, RUT, Patente, Empresa del transporte, Observación) y Usuarios (… Usuario afectado, Perfil afectado, Detalle). Máx. 10.000 filas |
+
+- `action`: el evento de la orden (`create`, `validate`, `cancel`, `hand_over`, `start_packing`, `release_packing`, `register`, `packed`, `add`, …), `label_{estado}` y `print_label` (empaque), `dispatch_anyway`, `manifest_created`, `manifest_closed`, o la acción de `user_audit` (`created`, `updated`, `enabled`, `disabled`, `password_reset`, `password_email_sent`, `linked`, …).
+- Textos listos para mostrar (los mismos del Excel): `actionLabel` (acción en español), `statusChange` («Validada → En preparación»), `courierName`, `transportCompany` y `observation` (de las notas del manifiesto: la primera línea «Empresa del transporte: …» y el resto) y `detailLines` (el antes y el después completo, una línea por dato, por ejemplo «Perfil: Empaque → Jefe de Operaciones»).
+- `actor`: `kind: system` para el worker y los procesos (Invas, «Sistema»); `role` es el perfil **actual** del usuario (los eventos no guardan el de ese momento).
+- `details` sale filtrado por una lista de campos permitidos: `fromStatus`, `toStatus`, `courier`, `labelCode`, `packages`, `orders`, `kind`, `manifestId`, `waveId`, `reason`, `authorizedBy`, `packagesTotal`, `scannedPackages`, `missingPackages`, `pickerName`, `pickerId`, `vehiclePlate`, `notes`, `name`, `role`, `permissions`, `companies`, `allCompanies`, `username`, `withoutEmail`, `temporary`, `source` y `targetRole`; un cambio viene como `{from, to}`. Nunca salen credenciales, secretos, tokens ni el `keycloakId`.
+- Fuera de alcance (mejora futura): cambios de configuración (cortes, horario de operación, olas, couriers, integraciones) y catálogos del Core.
 
 ### Edición, anulación y cancelación (H-09, CU-06)
 
@@ -189,7 +217,7 @@ Contiene estos campos:
 | POST | `/v1/dispatch/manifests/{id}/scan` | `{code}` marca un bulto (manual o con lector) |
 | POST | `/v1/dispatch/manifests/{id}/close` | `{pickerName, pickerId?, vehiclePlate?, notes?, dispatchAnyway?[{orderId, reason}]}` → `{delivered[], pending[], incomplete[]}`. Las órdenes con bultos faltantes no se entregan y quedan para el siguiente retiro, salvo las de `dispatchAnyway` («Despachar igual», H-13-T08). |
 
-**«Despachar igual» (H-13-T08, PV-09).** Solo el Jefe de Operaciones o el Administrador lo autoriza (403 para el resto, aunque tenga el permiso Despacho), y quien cierra igual necesita el permiso Despacho. Cada orden necesita un motivo de al menos 5 caracteres, debe estar incluida en el manifiesto, tener bultos sin escanear y al menos uno escaneado (si no, 422 y el manifiesto no se cierra). La orden pasa a «Entregada al courier» y queda en `incomplete[]`. En su historial (`GET /v1/orders/{id}`) el evento trae `details`:
+**«Despachar igual» (H-13-T08, PV-09).** Lo autoriza quien tenga el **permiso Despacho**, sin importar el perfil (403 sin el permiso), igual que para cerrar el manifiesto. Cada orden necesita un motivo de al menos 5 caracteres, debe estar incluida en el manifiesto, tener bultos sin escanear y al menos uno escaneado (si no, 422 y el manifiesto no se cierra). La orden pasa a «Entregada al courier» y queda en `incomplete[]`. En su historial (`GET /v1/orders/{id}`) el evento trae `details`:
 
 ```json
 {"kind": "despacho_incompleto", "manifestId": 12, "courier": "starken", "waveId": "OLA-AM",

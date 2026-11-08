@@ -59,6 +59,27 @@ test.describe.serial("Registro histórico", () => {
     expect((await cliente2("GET", "/v1/orders/registry?company_id=1")).status).toBe(403);
   });
 
+  test("API /v1/activity: solo Admin y Jefe, por apartado, sin secretos ni nada de más de 1 año", async () => {
+    type Item = { occurredAt: string; module: string; action: string; actor: { name: string; kind: string }; entity: { type: string; label: string }; details: Record<string, unknown> };
+    for (const email of ["cliente1@nexus.local", "empaque@nexus.local"]) expect((await (await ordersApi(email))("GET", "/v1/activity")).status).toBe(403);
+    expect((await jefe("GET", "/v1/activity?module=config")).status).toBe(422);
+    const admin = await ordersApi("admin@nexus.local");
+    const yearAgo = Date.now() - 365 * 24 * 3600 * 1000;
+    for (const section of ["orders", "packing", "dispatch", "users"]) {
+      const res = await admin<{ items: Item[]; total: number }>("GET", `/v1/activity?module=${section}&limit=200`);
+      expect(res.status).toBe(200);
+      expect(res.body.total, `${section} tiene acciones en el seed`).toBeGreaterThan(0);
+      expect(res.body.items.every((i) => i.module === section && Date.parse(i.occurredAt) >= yearAgo)).toBe(true);
+      expect(JSON.stringify(res.body)).not.toMatch(/keycloakId|password|token|secret/i);
+    }
+    // El seed tiene una entrega de hace 14 meses: el registro de acciones ya no la devuelve.
+    const old = (await jefe<{ items: Item[] }>("GET", "/v1/activity?module=orders&q=48257769242&limit=200")).body.items;
+    expect(old.map((i) => i.action)).toEqual([]);
+    const system = (await jefe<{ items: Item[] }>("GET", "/v1/activity?module=orders&kind=system&limit=50")).body.items;
+    expect(system.length).toBeGreaterThan(0);
+    expect(system.every((i) => i.actor.kind === "system" && i.actor.name === "Sistema")).toBe(true);
+  });
+
   test("Jefe: menú, pestañas, tabla, panel y filtros", async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/ordenes/historial");
@@ -134,6 +155,73 @@ test.describe.serial("Registro histórico", () => {
     await expect(page).not.toHaveURL(/order=/);
     await page.getByRole("button", { name: "Excel acciones" }).click();
     expect(await page.locator(".dropdown-menu").evaluate((m) => { const b = m.getBoundingClientRect(); return b.left >= 0 && b.right <= window.innerWidth; })).toBe(true);
+  });
+
+  test("Registro de acciones: chips, título con total, columnas por apartado, fila desplegable y Excel", async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/ordenes/registro");
+    await page.locator(".view-tabs a", { hasText: "Registro de acciones" }).click();
+    await expect(page).toHaveURL(/tab=acciones/);
+    const chips = page.locator(".activity-chips .packing-chip");
+    await expect(chips).toHaveText(["Órdenes", "Empaque", "Retiro y entrega", "Usuarios"], { timeout: 60_000 });
+    await expect(chips.first()).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".activity-title")).toHaveText(/^Órdenes · \d+ acci(ón|ones)$/);
+    await expect(page.locator(".activity-list thead th")).toHaveText(["Fecha y hora", "Actor", "Perfil", "Humano/Sistema", "Acción", "N° orden", "Cliente", "Estado anterior → nuevo", "Motivo u observación", "Detalle"]);
+    const first = page.locator(".activity-list tbody tr").first();
+    await first.click();
+    await expect(page.locator(".activity-detail-row")).toHaveCount(1);
+    await expect(page.locator(".activity-detail-row")).toContainText("Acción");
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Exportar registro" }).click()]);
+    expect(download.suggestedFilename()).toMatch(/^registro-acciones-orders-.*\.xlsx$/);
+
+    // Solo procesos: todas las filas dicen «Sistema».
+    await page.getByRole("button", { name: /^Filtros/ }).click();
+    await page.getByLabel("Humano/Sistema").selectOption("system");
+    await page.getByRole("button", { name: "Aplicar" }).click();
+    await expect(page).toHaveURL(/kind=system/);
+    await expect(page.locator(".activity-list tbody tr td:nth-child(4)").first()).toHaveText("Sistema");
+    expect(new Set(await page.locator(".activity-list tbody tr td:nth-child(4)").allTextContents())).toEqual(new Set(["Sistema"]));
+
+    // Retiro y entrega: el seed deja un manifiesto abierto; su número filtra el apartado.
+    await page.getByRole("button", { name: "Limpiar filtros" }).click();
+    await expect(page).not.toHaveURL(/kind=/);
+    await chips.nth(2).click();
+    await expect(page).toHaveURL(/section=dispatch/);
+    await expect(page.locator(".activity-list thead th")).toHaveText(["Fecha y hora", "Actor", "Perfil", "Acción", "N° manifiesto", "Courier", "Órdenes", "Bultos", "Quien retira", "RUT", "Patente", "Empresa del transporte", "Observación"]);
+    const manifest = page.locator(".activity-list tbody tr", { hasText: "Creó manifiesto" }).first().locator("a.activity-link");
+    const number = (await manifest.textContent())!;
+    await manifest.click();
+    await expect(page).toHaveURL(new RegExp(`q=%23${number.slice(1)}`));
+    await expect(page.locator(".activity-list tbody tr", { hasText: "Creó manifiesto" })).toHaveCount(1);
+
+    await chips.nth(3).click();
+    await expect(page.locator(".activity-title")).toHaveText(/^Usuarios · /);
+    await expect(page.locator(".activity-list thead th, .activity-list p.pad").first()).toBeVisible();
+  });
+
+  test("N° de orden: abre el detalle de Todas las órdenes; /ordenes/[id] redirige (o al registro)", async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/ordenes/registro?tab=acciones&section=orders");
+    const link = page.locator(".activity-list tbody tr", { hasText: "48257769201" }).first().locator("a.activity-link");
+    await link.click();
+    await expect(page).toHaveURL(/\/ordenes\/todas\/listado$/, { timeout: 60_000 });
+    await expect(page.locator(".orders-detail-panel h2")).toHaveText("Detalle de orden #48257769201");
+
+    const registry = (await jefe<{ data: Entry[] }>("GET", "/v1/orders/registry?q=48257769242")).body.data[0];
+    await page.goto(`/ordenes/${registry.id}`);
+    await expect(page).toHaveURL(`/ordenes/registro?order=${registry.id}`, { timeout: 60_000 });
+    await expect(page.locator(".registry-panel h2")).toHaveText("Registro orden #48257769242");
+  });
+
+  test("Teléfono: los chips del registro de acciones se desplazan en una fila, sin scroll de la página", async () => {
+    await page.setViewportSize({ width: 360, height: 800 });
+    await page.goto("/ordenes/registro?tab=acciones&section=dispatch");
+    const chips = page.locator(".activity-chips");
+    await expect(chips).toBeVisible({ timeout: 60_000 });
+    expect(await chips.evaluate((c) => [getComputedStyle(c).flexWrap, getComputedStyle(c).overflowX])).toEqual(["nowrap", "auto"]);
+    const tops = await page.locator(".activity-chips .packing-chip").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 
   test("Cliente: solo «Registro órdenes»; Empaque no tiene el submenú y vuelve al Home", async ({ browser }) => {
