@@ -10,4 +10,5 @@ import (
 // TODO (RF-04): Create, Update, SetActive.
 type CompanyRepository interface {
 	List(ctx context.Context, companyIDs []int64, search string) ([]domain.Company, error)
+	SetWave(ctx context.Context, id int64, code *string) error
 }

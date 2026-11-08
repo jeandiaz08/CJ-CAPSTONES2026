@@ -38,7 +38,9 @@ export const getDispatchCouriers = (companyId: number | null) =>
 export const listManifests = (status: "open" | "closed") => api<{ data: Manifest[] }>("orders", `/v1/dispatch/manifests?status=${status}`);
 export const createManifest = (courier: string, orderIds: number[]) =>
   post<{ manifest: Manifest; excluded: string[] }>("/v1/dispatch/manifests", { courier, orderIds });
-export type CloseResult = { delivered: number[]; pending: number[] };
-export const closeManifest = (manifestId: number, body: { pickerName: string; pickerId: string; vehiclePlate: string; notes: string }) =>
+// incomplete: entregadas con bultos faltantes por «Despachar igual» (también vienen en delivered).
+export type CloseResult = { delivered: number[]; pending: number[]; incomplete?: number[] };
+export type DispatchAnyway = { orderId: number; reason: string };
+export const closeManifest = (manifestId: number, body: { pickerName: string; pickerId: string; vehiclePlate: string; notes: string; dispatchAnyway: DispatchAnyway[] }) =>
   post<CloseResult>(`/v1/dispatch/manifests/${manifestId}/close`, body);
 export const scanPackage = (manifestId: number, code: string) => post<ManifestLine>(`/v1/dispatch/manifests/${manifestId}/scan`, { code });

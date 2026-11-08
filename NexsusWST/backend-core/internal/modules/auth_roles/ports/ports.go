@@ -7,7 +7,7 @@ import (
 )
 
 type ListFilter struct {
-	Query  string // correo o nombre
+	Query  string // correo, nombre de usuario o nombre
 	Role   string
 	Active *bool
 	Limit  int
@@ -22,6 +22,7 @@ type UserRepository interface {
 	DeleteNote(ctx context.Context, userID, noteID int64) error
 	GetByID(ctx context.Context, id int64) (domain.User, error)
 	GetByEmail(ctx context.Context, email string) (domain.User, error)
+	GetByUsername(ctx context.Context, username string) (domain.User, error)
 	List(ctx context.Context, f ListFilter) ([]domain.User, int, error)
 	Insert(ctx context.Context, keycloakID string, d domain.Draft, actorID *int64) (domain.User, error)
 	Update(ctx context.Context, id int64, d domain.Draft, actorID int64) error
@@ -45,5 +46,9 @@ type IdentityProvider interface {
 	SetEnabled(ctx context.Context, keycloakID string, enabled bool) error
 	Logout(ctx context.Context, keycloakID string) error // cierra todas sus sesiones
 	SendSetPasswordEmail(ctx context.Context, keycloakID string) error
+	// Usuarios sin correo (H-02-T09): alta con nombre de usuario y contraseña
+	// temporal; Keycloak pide cambiarla en el siguiente ingreso.
+	CreateLocalUser(ctx context.Context, username, name string) (keycloakID string, err error) // domain.ErrUsernameTaken si existe
+	SetTemporaryPassword(ctx context.Context, keycloakID, password string) error
 	DeleteUser(ctx context.Context, keycloakID string) error // solo para deshacer un alta fallida
 }

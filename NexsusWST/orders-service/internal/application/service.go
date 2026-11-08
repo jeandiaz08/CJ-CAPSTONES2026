@@ -45,6 +45,8 @@ type Deps struct {
 	Log           *slog.Logger
 	Now           func() time.Time // reloj; en las pruebas se fija
 	DevMode       bool             // permite simular eventos de Invas (pick_confirmed) en desarrollo
+	// LabelRetryEvery: «cada N minutos» del reintento de etiquetas (H-16-T06). 0 = 5 minutos.
+	LabelRetryEvery time.Duration
 }
 
 type Service struct {
@@ -329,7 +331,8 @@ func (s *Service) checkCorrections(ctx context.Context, before domain.Order, aft
 
 // Cancel deja la orden Cancelada (terminal, oculta, no se elimina). Si la
 // orden ya está en una ola de Invas, queda en Incidencia hasta que Operaciones
-// confirme la intervención en Invas (CU-06).
+// confirme la intervención en Invas (CU-06). El cliente solo puede cancelar
+// antes de la preparación (H-09-T07): desde ahí lo pide a WeStorage.
 func (s *Service) Cancel(ctx context.Context, id tenant.Identity, scope []int64, orderID int64, reason string) (domain.Order, error) {
 	if !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps, tenant.RoleCliente) {
 		return domain.Order{}, domain.ErrForbidden
@@ -349,6 +352,10 @@ func (s *Service) Cancel(ctx context.Context, id tenant.Identity, scope []int64,
 		return o, nil
 	}
 	internal := id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps)
+	if !internal && !o.ClientCanCancel() {
+		return domain.Order{}, fail(domain.ErrInvalidTransition,
+			"La orden ya pasó a preparación en la bodega («%s»): ya no puedes cancelarla desde Nexus. Pide la cancelación a WeStorage.", domain.Labels[o.Status])
+	}
 	msg := fmt.Sprintf("%s (%s): %s", id.Name, id.Role, reason)
 
 	if o.InInvas() && !(o.Status == domain.StatusIncident && internal) {

@@ -29,18 +29,20 @@ describe('Campana: avisos del WebSocket en memoria',()=>{
     await mount();expect(bell().getAttribute('aria-label')).toBe('Notificaciones');expect(host.querySelector('.notification-count')).toBeNull();
     await act(async()=>bell().click());expect(host.querySelector('.notification-popover').textContent).toContain('Sin avisos por ahora');
   });
-  it('incidencia, etiqueta disponible y entrega; lo demás no entra',async()=>{
+  it('incidencia, etiqueta disponible, despacho incompleto y entrega; lo demás no entra',async()=>{
     await mount();
     await send(notification(1,'incident','Orden #1 en Incidencia'));
     await send(notification(2,'label_ready','Etiqueta lista: orden #2'));
     await send(notification(3,'voided','Orden #3 Anulada'));
     await send(notification(4,'label_failed','Sin etiqueta'));
+    await send(notification(5,'despacho_incompleto','Despacho incompleto: orden #5'));
     await send({type:'order.changed',orderId:9,companyId:7,status:'ready_pickup',version:2});
     await send({type:'order.changed',orderId:9,companyId:7,status:'handed_over',version:3});
     expect(h.calls).toContain('/v1/orders/9');
-    expect(host.querySelector('.notification-count').textContent).toBe('3');expect(bell().getAttribute('aria-label')).toBe('Notificaciones, 3 sin leer');
+    expect(host.querySelector('.notification-count').textContent).toBe('4');expect(bell().getAttribute('aria-label')).toBe('Notificaciones, 4 sin leer');
     await act(async()=>bell().click());
-    expect(items()).toEqual(['Orden #48259 entregada al courier','Etiqueta lista: orden #2','Orden #1 en Incidencia']);
+    expect(items()).toEqual(['Orden #48259 entregada al courier','Despacho incompleto: orden #5','Etiqueta lista: orden #2','Orden #1 en Incidencia']);
+    expect(host.querySelector('.notice-despacho_incompleto svg')).toBeTruthy();
     expect(host.querySelector('.notification-count')).toBeNull();
   });
   it('no repite un aviso y guarda solo los últimos 20',async()=>{

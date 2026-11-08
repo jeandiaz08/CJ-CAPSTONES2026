@@ -14,6 +14,7 @@ import (
 var (
 	ErrNotFound       = errors.New("usuario no encontrado")
 	ErrEmailTaken     = errors.New("el correo ya está registrado")
+	ErrUsernameTaken  = errors.New("el nombre de usuario ya está registrado")
 	ErrInvalid        = errors.New("datos de usuario inválidos")
 	ErrSelfChange     = errors.New("no puedes cambiar tu propio rol, permisos, empresas ni estado")
 	ErrIdPUnavailable = errors.New("el proveedor de identidad (Keycloak) no está disponible; no se hicieron cambios")
@@ -29,7 +30,8 @@ var (
 type User struct {
 	ID           int64
 	KeycloakID   string
-	Email        string
+	Email        string // vacío en usuarios sin correo (H-02-T09)
+	Username     string // solo en usuarios sin correo; con correo, el usuario es el correo
 	Name         string
 	Role         string
 	Permissions  []string
@@ -44,6 +46,7 @@ type User struct {
 // Draft son los datos que el administrador puede fijar.
 type Draft struct {
 	Email        string
+	Username     string // usuario sin correo (H-02-T09): solo personal interno
 	Name         string
 	Role         string
 	Permissions  []string
@@ -54,9 +57,21 @@ type Draft struct {
 // Normalize limpia y valida un borrador. Devuelve un mensaje legible.
 func (d *Draft) Normalize() (string, bool) {
 	d.Email = strings.ToLower(strings.TrimSpace(d.Email))
+	d.Username = strings.ToLower(strings.TrimSpace(d.Username))
 	d.Name = strings.TrimSpace(d.Name)
-	if a, err := mail.ParseAddress(d.Email); err != nil || a.Address != d.Email {
-		return "correo inválido", false
+	switch {
+	case d.Email != "" && d.Username != "":
+		return "indica correo o nombre de usuario, no ambos (con correo, el usuario es el correo)", false
+	case d.Email != "":
+		if a, err := mail.ParseAddress(d.Email); err != nil || a.Address != d.Email {
+			return "correo inválido", false
+		}
+	case d.Username == "":
+		return "indica el correo o, para personal de bodega sin correo, un nombre de usuario", false
+	case !ValidUsername(d.Username):
+		return "nombre de usuario inválido: de 3 a 40 caracteres, solo minúsculas, números, punto, guion o guion bajo, y debe empezar con letra o número", false
+	case !slices.Contains(InternalRoles, d.Role):
+		return "un usuario sin correo debe ser personal interno de WeStorage (no cliente)", false
 	}
 	if d.Name == "" || len(d.Name) > 120 {
 		return "el nombre es obligatorio (máx. 120 caracteres)", false
@@ -94,6 +109,24 @@ func (d *Draft) Normalize() (string, bool) {
 	return "", true
 }
 
+// ValidUsername: 3 a 40 caracteres [a-z0-9._-], empieza con letra o número.
+// Sin «@» para que nunca se confunda con un correo al iniciar sesión.
+func ValidUsername(u string) bool {
+	if len(u) < 3 || len(u) > 40 {
+		return false
+	}
+	for i, r := range u {
+		alnum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if !alnum && (i == 0 || (r != '.' && r != '_' && r != '-')) {
+			return false
+		}
+	}
+	return true
+}
+
+// HasEmail indica si el usuario puede recibir correos (definir o recuperar contraseña).
+func (u User) HasEmail() bool { return u.Email != "" }
+
 // Changes describe una edición parcial.
 type Changes struct {
 	Name         *string
@@ -105,7 +138,7 @@ type Changes struct {
 
 // Apply devuelve el borrador resultante de aplicar los cambios al usuario.
 func (u User) Apply(c Changes) Draft {
-	d := Draft{Email: u.Email, Name: u.Name, Role: u.Role, Permissions: u.Permissions,
+	d := Draft{Email: u.Email, Username: u.Username, Name: u.Name, Role: u.Role, Permissions: u.Permissions,
 		AllCompanies: u.AllCompanies, Companies: u.Companies}
 	if c.Name != nil {
 		d.Name = *c.Name

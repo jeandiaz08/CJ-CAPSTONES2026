@@ -19,7 +19,7 @@ type Repository struct{ db *pgxpool.Pool }
 func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
 
 const selectUser = `
-SELECT u.id, COALESCE(u.keycloak_id::text, ''), u.email, u.name, u.role, u.permissions, u.all_companies,
+SELECT u.id, COALESCE(u.keycloak_id::text, ''), COALESCE(u.email::text, ''), COALESCE(u.username::text, ''), u.name, u.role, u.permissions, u.all_companies,
        u.active, u.last_login_at, u.created_at, u.updated_at,
        COALESCE(array_agg(uc.company_id ORDER BY uc.company_id) FILTER (WHERE uc.company_id IS NOT NULL), '{}')
 FROM users u
@@ -27,7 +27,7 @@ LEFT JOIN user_companies uc ON uc.user_id = u.id`
 
 func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
-	err := row.Scan(&u.ID, &u.KeycloakID, &u.Email, &u.Name, &u.Role, &u.Permissions, &u.AllCompanies,
+	err := row.Scan(&u.ID, &u.KeycloakID, &u.Email, &u.Username, &u.Name, &u.Role, &u.Permissions, &u.AllCompanies,
 		&u.Active, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt, &u.Companies)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, domain.ErrNotFound
@@ -43,6 +43,10 @@ func (r *Repository) GetByEmail(ctx context.Context, email string) (domain.User,
 	return scanUser(r.db.QueryRow(ctx, selectUser+` WHERE u.email = $1 GROUP BY u.id`, email))
 }
 
+func (r *Repository) GetByUsername(ctx context.Context, username string) (domain.User, error) {
+	return scanUser(r.db.QueryRow(ctx, selectUser+` WHERE u.username = $1 GROUP BY u.id`, username))
+}
+
 func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.User, int, error) {
 	where, args := []string{"TRUE"}, []any{}
 	add := func(cond string, v any) {
@@ -50,7 +54,7 @@ func (r *Repository) List(ctx context.Context, f ports.ListFilter) ([]domain.Use
 		where = append(where, fmt.Sprintf(cond, len(args)))
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
-		add("(u.email ILIKE '%%' || $%[1]d || '%%' OR u.name ILIKE '%%' || $%[1]d || '%%')", q)
+		add("(u.email ILIKE '%%' || $%[1]d || '%%' OR u.username ILIKE '%%' || $%[1]d || '%%' OR u.name ILIKE '%%' || $%[1]d || '%%')", q)
 	}
 	if f.Role != "" {
 		add("u.role = $%d", f.Role)
@@ -92,15 +96,18 @@ func (r *Repository) Insert(ctx context.Context, keycloakID string, d domain.Dra
 			kc = keycloakID
 		}
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO users (keycloak_id, email, name, role, permissions, all_companies, created_by, updated_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $7) RETURNING id`,
-			kc, d.Email, d.Name, d.Role, d.Permissions, d.AllCompanies, actorID).Scan(&id); err != nil {
+			INSERT INTO users (keycloak_id, email, username, name, role, permissions, all_companies, created_by, updated_by)
+			VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), $4, $5, $6, $7, $8, $8) RETURNING id`,
+			kc, d.Email, d.Username, d.Name, d.Role, d.Permissions, d.AllCompanies, actorID).Scan(&id); err != nil {
 			return err
 		}
 		return setCompanies(ctx, tx, id, d.Companies)
 	})
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" {
+		if strings.Contains(pg.ConstraintName, "username") {
+			return domain.User{}, domain.ErrUsernameTaken
+		}
 		return domain.User{}, domain.ErrEmailTaken
 	}
 	if err != nil {

@@ -18,6 +18,9 @@ type queueOrders struct {
 	assigned []int64
 	ranks    map[int64]string
 	checked  []int64
+	waves    map[int64]string // ola asignada por orden (PV-19)
+	reasons  map[int64]string
+	events   []string
 }
 
 func (f *queueOrders) RuleCandidates(context.Context, int) ([]domain.Order, error) {
@@ -34,8 +37,14 @@ func (f *queueOrders) List(_ context.Context, q ports.ListFilter) ([]domain.Orde
 	return out, len(out), nil
 }
 
-func (f *queueOrders) AssignWave(_ context.Context, _, ids []int64, _, _, _ string, ranks map[int64]string) ([]int64, error) {
+func (f *queueOrders) AssignWave(_ context.Context, _, ids []int64, waveID, _, reason string, ranks map[int64]string) ([]int64, error) {
 	f.assigned = append(f.assigned, ids...)
+	if f.waves == nil {
+		f.waves, f.reasons = map[int64]string{}, map[int64]string{}
+	}
+	for _, id := range ids {
+		f.waves[id], f.reasons[id] = waveID, reason
+	}
 	if f.ranks == nil {
 		f.ranks = map[int64]string{}
 	}
@@ -43,6 +52,11 @@ func (f *queueOrders) AssignWave(_ context.Context, _, ids []int64, _, _, _ stri
 		f.ranks[id] = rank
 	}
 	return ids, nil
+}
+
+func (f *queueOrders) AddEvent(_ context.Context, id int64, _, event, _, reason string) error {
+	f.events = append(f.events, event+": "+reason)
+	return nil
 }
 
 func (f *queueOrders) Get(context.Context, []int64, int64) (domain.Order, error) {
@@ -81,7 +95,19 @@ func (f queueRules) List(context.Context, bool) ([]ports.WaveRule, error) {
 type queueWMS struct{ ports.WMSGateway }
 
 func (queueWMS) ListWaves(context.Context) ([]ports.Wave, error) {
-	return []ports.Wave{{ID: "OLA-GEN", Code: "GEN", Name: "General"}}, nil
+	return []ports.Wave{{ID: "OLA-GEN", Code: "GEN", Name: "General"}, {ID: "OLA-AM", Code: "AM", Name: "Mañana"},
+		{ID: "OLA-FRIO", Code: "FRIO", Name: "Frío"}}, nil
+}
+
+// queueCatalog: ola por producto o cliente de cada orden (PV-19).
+type queueCatalog struct {
+	ports.CatalogReader
+	products map[int64][]string
+	company  map[int64]string
+}
+
+func (c queueCatalog) WavePreference(_ context.Context, orderID, _ int64) ([]string, string, error) {
+	return c.products[orderID], c.company[orderID], nil
 }
 
 var santiago = func() *time.Location {
@@ -106,8 +132,12 @@ func queueOrder(id int64, courier string, priority bool, created time.Time) doma
 }
 
 func engineAt(now time.Time, sched domain.OperationSchedule, orders ...domain.Order) (*RulesEngine, *queueOrders) {
+	return engineWith(now, sched, queueCatalog{}, false, orders...)
+}
+
+func engineWith(now time.Time, sched domain.OperationSchedule, cat queueCatalog, noRules bool, orders ...domain.Order) (*RulesEngine, *queueOrders) {
 	repo := &queueOrders{orders: orders}
-	svc := NewService(Deps{Orders: repo, Rules: queueRules{schedule: sched}, WMS: queueWMS{}, Notifier: silentNotifier{}, Now: func() time.Time { return now }})
+	svc := NewService(Deps{Orders: repo, Catalog: cat, Rules: queueRules{schedule: sched, noRules: noRules}, WMS: queueWMS{}, Notifier: silentNotifier{}, Now: func() time.Time { return now }})
 	return NewRulesEngine(svc), repo
 }
 
@@ -208,7 +238,7 @@ func TestEngineLimitKeepsEarliestCutoffs(t *testing.T) {
 
 func TestEngineWithoutRulesOnlyChecksWhatItCouldAssign(t *testing.T) {
 	repo := &queueOrders{orders: []domain.Order{queueOrder(1, "temprano", false, when(2, 7, 0)), queueOrder(2, "tarde", false, when(2, 7, 0))}}
-	svc := NewService(Deps{Orders: repo, Rules: queueRules{schedule: schedule(), noRules: true}, Now: func() time.Time { return when(2, 9, 0) }})
+	svc := NewService(Deps{Orders: repo, Catalog: queueCatalog{}, Rules: queueRules{schedule: schedule(), noRules: true}, Now: func() time.Time { return when(2, 9, 0) }})
 	if _, err := NewRulesEngine(svc).RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}

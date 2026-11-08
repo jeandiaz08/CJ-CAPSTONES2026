@@ -8,8 +8,10 @@ import { ORIGIN_OPTIONS, SITUATION_LABELS } from "../format";
 type Option = { value: string; label: string };
 
 // Filtros de la pestaña activa. Los cambios se aplican recién al pulsar «Aplicar».
-export function OrderFiltersDrawer({ assignment, values, companies, couriers, statuses, onApply, onClose }: {
+// registry: Registro histórico, sin Origen ni «Solo en curso»; las fechas son las del cierre.
+export function OrderFiltersDrawer({ assignment, registry = false, values, companies, couriers, statuses, onApply, onClose }: {
   assignment: boolean;
+  registry?: boolean;
   values: FilterValues;
   companies: Option[] | null; // null: el usuario tiene una sola empresa y no se muestra
   couriers: Option[];
@@ -46,7 +48,7 @@ export function OrderFiltersDrawer({ assignment, values, companies, couriers, st
             </select>
           </div>
         )}
-        {assignment ? (
+        {registry ? null : assignment ? (
           <div className="modal-field">
             <label htmlFor={`${id}-situation`}>Situación</label>
             <select id={`${id}-situation`} value={draft.situation} onChange={(e) => set({ situation: e.target.value })}>
@@ -70,7 +72,7 @@ export function OrderFiltersDrawer({ assignment, values, companies, couriers, st
             {couriers.map((courier) => <option key={courier.value} value={courier.value}>{courier.label}</option>)}
           </select>
         </div>
-        {!assignment && (
+        {!assignment && !registry && (
           <label className="filter-switch">
             <input type="checkbox" role="switch" checked={draft.onlyActive} onChange={(e) => toggleOnlyActive(e.target.checked)} />
             <span>Solo en curso</span>
@@ -88,11 +90,11 @@ export function OrderFiltersDrawer({ assignment, values, companies, couriers, st
         </fieldset>
         <div className="filter-dates">
           <div className="modal-field">
-            <label htmlFor={`${id}-from`}>Desde</label>
+            <label htmlFor={`${id}-from`}>{registry ? "Cerrada desde" : "Desde"}</label>
             <input id={`${id}-from`} type="date" value={draft.from} aria-invalid={!!dateError} onChange={(e) => { setDateError(null); set({ from: e.target.value }); }} />
           </div>
           <div className="modal-field">
-            <label htmlFor={`${id}-to`}>Hasta</label>
+            <label htmlFor={`${id}-to`}>{registry ? "Cerrada hasta" : "Hasta"}</label>
             <input id={`${id}-to`} type="date" value={draft.to} aria-invalid={!!dateError} onChange={(e) => { setDateError(null); set({ to: e.target.value }); }} />
           </div>
         </div>

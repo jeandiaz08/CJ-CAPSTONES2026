@@ -5,6 +5,7 @@ package ports
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"time"
 
@@ -61,6 +62,9 @@ type EventRecord struct {
 	Actor      string    `json:"actor"`
 	Reason     string    `json:"reason"`
 	OccurredAt time.Time `json:"occurredAt"`
+	// Details: datos ordenados del evento (p. ej. bultos faltantes de un
+	// «Despachar igual»). Vacío en la mayoría de los eventos.
+	Details json.RawMessage `json:"details,omitempty"`
 }
 
 // TransitionOpts - efectos que acompañan un cambio de estado en la MISMA transacción.
@@ -68,6 +72,8 @@ type TransitionOpts struct {
 	ReleaseCommitted bool  // libera el stock comprometido de la orden
 	ClearWave        bool  // quita la ola (p. ej. al volver a validar)
 	Jobs             []Job // trabajos para la cola (outbox)
+	// Details se guarda en order_events.details junto al cambio de estado.
+	Details any
 }
 
 type OrderRepository interface {
@@ -119,7 +125,13 @@ type ProductOption struct{ SKU, Description string }
 
 type CatalogReader interface {
 	MissingSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
-	KitSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
+	// Kits (SCRUM-100): líneas de stock con los kits expandidos en sus
+	// componentes, y kits que aún no tienen composición.
+	StockLines(ctx context.Context, companyID int64, items []domain.Item) ([]domain.Item, error)
+	EmptyKits(ctx context.Context, companyID int64, skus []string) ([]string, error)
+	// Ola por producto o cliente (PV-19): olas distintas de los productos de
+	// la orden y ola por defecto del cliente ("" si no tiene).
+	WavePreference(ctx context.Context, orderID, companyID int64) (productWaves []string, companyWave string, err error)
 	CompanyActive(ctx context.Context, companyID int64) (bool, error)
 	CourierActive(ctx context.Context, code string) (bool, error)
 	Communes(ctx context.Context) ([]string, error)
@@ -218,6 +230,8 @@ type Manifest struct {
 	VehiclePlate string         `json:"vehiclePlate,omitempty"`
 	Notes        string         `json:"notes,omitempty"`
 	Lines        []ManifestLine `json:"lines"`
+	// Summary lo calcula la aplicación al leer el manifiesto.
+	Summary *ManifestSummary `json:"summary,omitempty"`
 }
 
 type ManifestLine struct {
@@ -230,6 +244,22 @@ type ManifestLine struct {
 	Status        string           `json:"status"` // included, moved, cancelled, pending_packages, delivered
 	MovedTo       string           `json:"movedTo,omitempty"`
 	Packages      []ManifestBundle `json:"packages"`
+}
+
+// ManifestSummary - lo que pidió Ismael en el manifiesto (PV-09, H-13-T09):
+// cuántas órdenes y bultos salen y de qué empresas.
+type ManifestSummary struct {
+	Orders    int               `json:"orders"`
+	Packages  int               `json:"packages"`
+	Scanned   int               `json:"scanned"`
+	Companies []ManifestCompany `json:"companies"`
+}
+
+type ManifestCompany struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Orders   int    `json:"orders"`
+	Packages int    `json:"packages"`
 }
 
 type ManifestBundle struct {

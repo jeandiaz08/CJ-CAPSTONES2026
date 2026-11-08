@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { FormModal } from "@/components/FormModal";
 import { apiErrorMessage } from "@/services/api";
 import type { ManifestLine } from "@/services/dispatch";
-import { lineProgress, type DispatchAuthorization } from "../manifest";
+import { lineProgress, MIN_DISPATCH_REASON, type DispatchAuthorization } from "../manifest";
 
 const MAX_TEXT = 140;
 
@@ -36,10 +36,14 @@ export function DispatchAnywayModal({ line, authorizedBy, defaultPicker, onClose
   const [errors, setErrors] = useState<{ picker?: string; reason?: string }>({});
   const { missing } = lineProgress(line);
   const submit = () => {
-    const next = { picker: picker.trim() ? undefined : "Indica quién retira.", reason: reason.trim() ? undefined : "Indica por qué sale sin ese bulto o producto." };
+    const why = reason.trim();
+    const next = {
+      picker: picker.trim() ? undefined : "Indica quién retira.",
+      reason: !why ? "Indica por qué sale sin ese bulto o producto." : [...why].length < MIN_DISPATCH_REASON ? `Escribe al menos ${MIN_DISPATCH_REASON} caracteres.` : undefined,
+    };
     setErrors(next);
     if (next.picker || next.reason) return;
-    onConfirm({ orderId: line.orderId, externalRef: line.externalRef, missing, pickerName: picker.trim(), authorizedBy, at: now.toISOString(), reason: reason.trim() });
+    onConfirm({ orderId: line.orderId, externalRef: line.externalRef, missing, pickerName: picker.trim(), authorizedBy, at: now.toISOString(), reason: why });
   };
   return (
     <FormModal title="Despachar igual" onClose={onClose} onSubmit={submit} submitLabel="Autorizar despacho" submitTone="highlight">
@@ -112,7 +116,7 @@ export function ConfirmDeliveryModal({ defaultPicker, onClose, onConfirm }: {
 
 export type DeliverySummary = {
   manifestId: number;
-  delivered: { ref: string }[];
+  delivered: { ref: string; reason?: string }[];
   pending: { ref: string; reason: string }[];
   incidents: { ref: string; reason: string }[];
 };

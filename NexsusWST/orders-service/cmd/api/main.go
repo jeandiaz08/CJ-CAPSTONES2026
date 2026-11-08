@@ -83,6 +83,12 @@ func main() {
 		log.Warn("integraciones deshabilitadas", "err", err)
 	}
 	labelPending, _ := strconv.Atoi(envOr("COURIER_SIM_LABEL_PENDING", "1"))
+	// Reintento de etiquetas «cada N minutos» (H-16-T06): p. ej. 5m, 10m. Vacío o inválido = 5m.
+	labelEvery, err := time.ParseDuration(envOr("LABEL_RETRY_EVERY", "5m"))
+	if err != nil || labelEvery < 30*time.Second {
+		log.Warn("LABEL_RETRY_EVERY inválido (mínimo 30s); se usa 5m", "valor", os.Getenv("LABEL_RETRY_EVERY"))
+		labelEvery = 5 * time.Minute
+	}
 	simCourier := courier.NewSimulated(labelPending) // [SIMULADO] hasta habilitar cada courier/canal (PV-08)
 	svc := application.NewService(application.Deps{
 		Orders:        postgres.NewRepository(db),
@@ -102,6 +108,8 @@ func main() {
 		Secrets:  secrets,
 		Log:      log,
 		DevMode:  cfg.IsDevelopment(),
+
+		LabelRetryEvery: labelEvery,
 	})
 	validator := application.NewValidator(svc)
 	rules := application.NewRulesEngine(svc)
@@ -153,6 +161,7 @@ func main() {
 
 	origins := strings.Split(envOr("WS_ALLOWED_ORIGINS", envOr("APP_DOMAIN", "localhost")), ",")
 	ordershttp.NewHandler(svc, rdb, profiles, log, origins).Register(mux, requireAuth)
+	ordershttp.NewHistoryHandler(application.NewRegistry(postgres.NewRegistry(db)), log).Register(mux, requireAuth) // Registro histórico (Tarea 06, Jean)
 	webhooks.NewHandler(svc, log).Register(mux)
 
 	handler := httpserver.Chain(mux,

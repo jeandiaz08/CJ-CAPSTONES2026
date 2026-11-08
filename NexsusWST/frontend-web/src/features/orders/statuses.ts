@@ -17,7 +17,7 @@ export const STATUS: Record<OrderStatus, { label: string; tone: Tone }> = {
   handed_over: { label: "Entregada al courier", tone: "ok" },
   incident: { label: "Incidencia", tone: "danger" },
   voided: { label: "Anulada", tone: "danger" },
-  cancelled: { label: "Cancelada", tone: "muted" },
+  cancelled: { label: "Cancelada", tone: "danger" },
 };
 
 export const STATUS_ORDER: OrderStatus[] = [

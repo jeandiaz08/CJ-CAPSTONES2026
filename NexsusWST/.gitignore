@@ -1,5 +1,7 @@
 # Secretos
 .env
+# Respaldos de la base (datos reales: nunca al repositorio)
+backups/
 *.pem
 *.key
 infrastructure/traefik/letsencrypt/

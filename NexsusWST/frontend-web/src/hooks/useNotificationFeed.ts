@@ -7,7 +7,7 @@ import { useOrdersSocket, type OrderChanged } from "./useOrdersSocket";
 // Avisos de la campana: los que llegan por WebSocket mientras la app está abierta. Se guardan
 // solo en memoria (los últimos 20); recargar la página los borra.
 // TODO(api): GET /v1/notifications ya guarda los avisos; usarlo para no perderlos al recargar.
-export type NoticeKind = "incident" | "label_ready" | "delivered";
+export type NoticeKind = "incident" | "label_ready" | "delivered" | "despacho_incompleto";
 export type Notice = { key: string; kind: NoticeKind; title: string; body: string; orderId: number | null; at: string; read: boolean };
 
 const MAX_NOTICES = 20;
@@ -38,7 +38,7 @@ type NotificationMessage = OrderChanged & {
 
 async function handle(message: NotificationMessage) {
   const n = message.notification;
-  if (message.type === "notification" && n && (n.kind === "incident" || n.kind === "label_ready")) {
+  if (message.type === "notification" && n && (n.kind === "incident" || n.kind === "label_ready" || n.kind === "despacho_incompleto")) {
     push({ key: `notification:${n.id}`, kind: n.kind, title: n.title, body: n.body, orderId: n.orderId, at: n.createdAt });
     return;
   }
