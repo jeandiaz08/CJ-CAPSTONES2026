@@ -45,7 +45,10 @@ func (r *ActivityRepo) Activity(ctx context.Context, f ports.ActivityFilter) ([]
 	if f.Kind != "" {
 		add("a.actor_kind = ?", f.Kind)
 	}
-	if q := strings.TrimPrefix(strings.TrimSpace(f.Search), "#"); q != "" {
+	if q := strings.TrimSpace(f.Search); strings.HasPrefix(q, "#") {
+		// «#12»: el manifiesto 12 (creación, cierre y las órdenes despachadas igual en él).
+		add("(a.entity_label = ? OR a.details->>'manifestId' = substr(?, 2))", q)
+	} else if q != "" {
 		add("(a.entity_id = ? OR a.entity_label ILIKE '%' || ? || '%')", q)
 	}
 	if f.From != nil {
@@ -63,10 +66,11 @@ func (r *ActivityRepo) Activity(ctx context.Context, f ports.ActivityFilter) ([]
 	args = append(args, f.Limit, f.Offset)
 	rows, err := r.db.Query(ctx, `
 		SELECT a.id, a.occurred_at, a.actor_id, a.actor_name, COALESCE(a.actor_role, ''), a.actor_kind, a.module, a.action,
-		       a.entity_type, a.entity_id, COALESCE(a.entity_label, ''), a.company_id, COALESCE(c.name, ''),
+		       a.entity_type, a.entity_id, COALESCE(a.entity_label, ''), a.company_id, COALESCE(c.name, ''), COALESCE(cr.name, ''),
 		       COALESCE(a.warehouse, ''), COALESCE(a.reason, ''), COALESCE(a.details, '{}'::jsonb)
 		FROM activity_log a
 		LEFT JOIN companies c ON c.id = a.company_id
+		LEFT JOIN couriers cr ON cr.code = a.details->>'courier'
 		WHERE `+w+`
 		ORDER BY a.occurred_at DESC, a.id DESC
 		LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)
@@ -79,7 +83,7 @@ func (r *ActivityRepo) Activity(ctx context.Context, f ports.ActivityFilter) ([]
 		var e ports.ActivityEntry
 		var details []byte
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.ActorID, &e.ActorName, &e.ActorRole, &e.ActorKind, &e.Module, &e.Action,
-			&e.EntityType, &e.EntityID, &e.EntityLabel, &e.CompanyID, &e.CompanyName, &e.Warehouse, &e.Reason, &details); err != nil {
+			&e.EntityType, &e.EntityID, &e.EntityLabel, &e.CompanyID, &e.CompanyName, &e.CourierName, &e.Warehouse, &e.Reason, &details); err != nil {
 			return nil, 0, err
 		}
 		if err := json.Unmarshal(details, &e.Details); err != nil {

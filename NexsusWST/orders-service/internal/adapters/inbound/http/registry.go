@@ -32,6 +32,7 @@ func (x *HistoryHandler) Register(mux *http.ServeMux, auth func(http.Handler) ht
 	mux.Handle("GET /v1/orders/registry", auth(http.HandlerFunc(x.list)))
 	mux.Handle("GET /v1/orders/registry/export", auth(http.HandlerFunc(x.export)))
 	mux.Handle("GET /v1/activity", auth(http.HandlerFunc(x.activity)))
+	mux.Handle("GET /v1/activity/export", auth(http.HandlerFunc(x.activityExport)))
 }
 
 type registryDTO struct {

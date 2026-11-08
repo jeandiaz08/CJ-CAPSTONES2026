@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -58,5 +59,35 @@ func TestActivityRetentionLimitAndSafeDetails(t *testing.T) {
 		if d["role"] != "empaque" || perm["secret"] != nil || perm["to"] == nil {
 			t.Fatalf("detalle %v", d)
 		}
+	}
+}
+
+func TestActivityTexts(t *testing.T) {
+	it := ActivityItem{Module: "dispatch", Action: "manifest_closed", Details: map[string]any{"courier": "starken",
+		"notes": "Empresa del transporte: Transportes Sur\nObservación · #1 · faltó un cable", "pickerName": "Juan"}}
+	presentActivity(&it, "Starken")
+	if it.ActionLabel != "Cerró manifiesto (entrega)" || it.CourierName != "Starken" || it.TransportCompany != "Transportes Sur" ||
+		it.Observation != "Observación · #1 · faltó un cable" {
+		t.Fatalf("retiro %+v", it)
+	}
+	u := ActivityItem{Module: "users", Action: "updated", Details: map[string]any{
+		"role": map[string]any{"from": "empaque", "to": "jefe_operaciones"}, "permissions": map[string]any{"from": []any{}, "to": []any{"despacho"}}}}
+	presentActivity(&u, "")
+	if want := []string{"Permisos: — → despacho", "Perfil: Empaque → Jefe de Operaciones"}; len(u.DetailLines) != 2 || u.DetailLines[0] != want[0] || u.DetailLines[1] != want[1] {
+		t.Fatalf("usuarios %v", u.DetailLines)
+	}
+	o := ActivityItem{Module: "orders", Action: "validate", Details: map[string]any{"fromStatus": "validating", "toStatus": "validated"}}
+	presentActivity(&o, "")
+	if o.StatusChange != "En validación → Validada" || o.ActionLabel != "Validada" {
+		t.Fatalf("órdenes %+v", o)
+	}
+	if err := NewActivity(&fakeActivity{}).Export(context.Background(), who(tenant.RoleAdmin), ports.ActivityFilter{}, io.Discard); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("exportar sin apartado: %v", err)
+	}
+	if err := NewActivity(&fakeActivity{}).Export(context.Background(), who(tenant.RoleEmpaque), ports.ActivityFilter{Module: "users"}, io.Discard); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("exportar como Empaque: %v", err)
+	}
+	if err := NewActivity(&fakeActivity{}).Export(context.Background(), who(tenant.RoleJefeOps), ports.ActivityFilter{Module: "users"}, io.Discard); err != nil {
+		t.Fatal(err)
 	}
 }

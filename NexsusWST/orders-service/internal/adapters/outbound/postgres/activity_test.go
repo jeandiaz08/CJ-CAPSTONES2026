@@ -145,6 +145,7 @@ func TestActivityLogView(t *testing.T) {
 		"perfil":            {ports.ActivityFilter{Role: "jefe_operaciones", Module: "packing"}, []string{"packing/print_label", "packing/start_packing"}},
 		"actor por id":      {ports.ActivityFilter{Actor: jsonNum(jefe), Module: "orders"}, []string{}},
 		"n° de orden":       {ports.ActivityFilter{Search: "ACT-ORD-2"}, []string{"orders/create"}},
+		"#manifiesto":       {ports.ActivityFilter{Search: "#" + jsonNum(manifest)}, []string{"dispatch/manifest_closed", "dispatch/manifest_created"}},
 		"empresa explícita": {ports.ActivityFilter{CompanyID: &other}, []string{"orders/create"}},
 		"alcance del jefe":  {ports.ActivityFilter{CompanyIDs: []int64{other}, Module: "orders"}, []string{"orders/create"}},
 	} {

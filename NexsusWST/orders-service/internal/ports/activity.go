@@ -16,7 +16,7 @@ type ActivityFilter struct {
 	Actor      string  // id de usuario o parte del nombre
 	Role       string
 	Kind       string // human | system
-	Search     string // N° de orden, de manifiesto o nombre de usuario
+	Search     string // N° de orden, de manifiesto («#12») o nombre de usuario
 	From, To   *time.Time
 	Since      time.Time // retención: nada anterior (lo fija la aplicación)
 	Limit      int
@@ -39,6 +39,7 @@ type ActivityEntry struct {
 	EntityLabel string
 	CompanyID   *int64
 	CompanyName string
+	CourierName string // nombre del courier de details.courier
 	Warehouse   string
 	Reason      string
 	Details     map[string]any

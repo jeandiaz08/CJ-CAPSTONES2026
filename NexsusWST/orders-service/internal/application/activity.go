@@ -66,12 +66,19 @@ type ActivityItem struct {
 	Actor       Actor          `json:"actor"`
 	Module      string         `json:"module"`
 	Action      string         `json:"action"`
+	ActionLabel string         `json:"actionLabel"`
 	Entity      ActivityEntity `json:"entity"`
 	CompanyID   *int64         `json:"companyId,omitempty"`
 	CompanyName string         `json:"companyName,omitempty"`
 	Warehouse   string         `json:"warehouse,omitempty"` // hoy casi siempre vacío; sirve para PV-21
 	Reason      string         `json:"reason,omitempty"`
 	Details     map[string]any `json:"details"`
+	// Textos listos para la pantalla y el Excel (activity_text.go).
+	StatusChange     string   `json:"statusChange,omitempty"` // «Validada → En preparación»
+	CourierName      string   `json:"courierName,omitempty"`
+	TransportCompany string   `json:"transportCompany,omitempty"` // de notes del manifiesto
+	Observation      string   `json:"observation,omitempty"`      // notes sin la empresa del transporte
+	DetailLines      []string `json:"detailLines"`                // el antes y el después completo
 }
 
 type ActivityEntity struct {
@@ -92,6 +99,13 @@ func canReadActivity(id tenant.Identity) bool {
 }
 
 func (a *Activity) List(ctx context.Context, id tenant.Identity, f ports.ActivityFilter) ([]ActivityItem, int, error) {
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	return a.list(ctx, id, f)
+}
+
+func (a *Activity) list(ctx context.Context, id tenant.Identity, f ports.ActivityFilter) ([]ActivityItem, int, error) {
 	if !canReadActivity(id) {
 		return nil, 0, fail(domain.ErrForbidden, "El registro de acciones es solo para Administrador y Jefe de Operaciones.")
 	}
@@ -100,9 +114,6 @@ func (a *Activity) List(ctx context.Context, id tenant.Identity, f ports.Activit
 	}
 	if f.Kind != "" && !slices.Contains(activityKinds, f.Kind) {
 		return nil, 0, fail(domain.ErrInvalid, "Tipo de actor desconocido: usa human o system.")
-	}
-	if f.Limit <= 0 || f.Limit > 200 {
-		f.Limit = 50
 	}
 	if f.Offset < 0 {
 		f.Offset = 0
@@ -114,14 +125,16 @@ func (a *Activity) List(ctx context.Context, id tenant.Identity, f ports.Activit
 	}
 	out := make([]ActivityItem, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, ActivityItem{
+		it := ActivityItem{
 			ID: e.ID, OccurredAt: e.OccurredAt,
 			Actor:  Actor{ID: e.ActorID, Name: e.ActorName, Role: e.ActorRole, Kind: e.ActorKind},
 			Module: e.Module, Action: e.Action,
 			Entity:    ActivityEntity{Type: e.EntityType, ID: e.EntityID, Label: e.EntityLabel},
 			CompanyID: e.CompanyID, CompanyName: e.CompanyName, Warehouse: e.Warehouse, Reason: e.Reason,
 			Details: safeDetails(e.Details),
-		})
+		}
+		presentActivity(&it, e.CourierName)
+		out = append(out, it)
 	}
 	return out, total, nil
 }

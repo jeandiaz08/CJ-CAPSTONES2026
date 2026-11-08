@@ -1,9 +1,11 @@
 package http
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/nexuswst/orders-service/internal/domain"
 	"github.com/nexuswst/orders-service/internal/ports"
@@ -30,6 +32,24 @@ func (x *HistoryHandler) activity(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "limit": limit, "offset": f.Offset})
+}
+
+// activityExport - GET /v1/activity/export?module=…: Excel con lo filtrado del apartado y sus columnas.
+func (x *HistoryHandler) activityExport(w http.ResponseWriter, r *http.Request) {
+	id, _ := tenant.From(r.Context())
+	f, err := activityFilter(r, id)
+	if err != nil {
+		x.h.writeErr(w, r, err)
+		return
+	}
+	var buf bytes.Buffer
+	if err := x.activityLog.Export(r.Context(), id, f, &buf); err != nil {
+		x.h.writeErr(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", `attachment; filename="registro-acciones-`+f.Module+"-"+time.Now().Format("20060102-1504")+`.xlsx"`)
+	_, _ = w.Write(buf.Bytes())
 }
 
 func activityFilter(r *http.Request, id tenant.Identity) (ports.ActivityFilter, error) {
