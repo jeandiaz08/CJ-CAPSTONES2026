@@ -359,9 +359,26 @@ func (s *Service) CreateManifest(ctx context.Context, id tenant.Identity, scope 
 	if err != nil {
 		return ManifestResult{}, err
 	}
+	// Sin etiqueta no se entrega (Traspaso Órdenes A1). Si el operador eligió las
+	// órdenes, se rechaza todo antes de tocar nada; si no, se dejan fuera.
+	if len(orderIDs) > 0 {
+		var blocked []string
+		for _, o := range orders {
+			if reason := labelBlock(o); reason != "" {
+				blocked = append(blocked, fmt.Sprintf("#%d %s: %s", o.ID, o.ExternalRef, reason))
+			}
+		}
+		if len(blocked) > 0 {
+			return ManifestResult{}, fail(domain.ErrInvalid, "Sin etiqueta no se entrega al courier. Quita del manifiesto: %s.", strings.Join(blocked, "; "))
+		}
+	}
 	var include []int64
 	res := ManifestResult{Excluded: []string{}}
 	for _, o := range orders {
+		if reason := labelBlock(o); reason != "" {
+			res.Excluded = append(res.Excluded, fmt.Sprintf("#%d: %s", o.ID, reason))
+			continue
+		}
 		if !cs.CoversAll && !containsFold(cs.Communes, o.Commune) {
 			reason := fmt.Sprintf("El courier %s no tiene cobertura en %s", courier, o.Commune)
 			if from, err := o.Incident(domain.IncidentCourierCover); err == nil {
@@ -415,6 +432,27 @@ type CloseResult struct {
 	Pending   []int64 `json:"pending"` // bultos incompletos: quedan para el siguiente retiro
 	// Incomplete: entregadas con bultos faltantes por «Despachar igual» (también están en Delivered).
 	Incomplete []int64 `json:"incomplete"`
+	// NoLabel: sin etiqueta utilizable al cerrar (también están en Pending).
+	NoLabel []int64 `json:"noLabel"`
+}
+
+// labelBlock dice por qué la orden no puede entregarse al courier por su
+// etiqueta, o "" si puede: etiqueta lista, o courier con estrategia «Buscar en
+// oficina» (no lleva etiqueta de API).
+func labelBlock(o domain.Order) string {
+	if o.LabelStrategy == domain.LabelStrategyOffice {
+		return ""
+	}
+	switch o.LabelStatus {
+	case domain.LabelReady, domain.LabelOffice:
+		return ""
+	case domain.LabelPending:
+		return "la etiqueta aún se está generando"
+	case domain.LabelFailed:
+		return "la etiqueta falló (reintenta o corrige los datos)"
+	default:
+		return "no tiene etiqueta"
+	}
 }
 
 // CloseManifest - el courier retira: se registran los datos de quien retira y
@@ -440,7 +478,7 @@ func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifes
 	if err != nil {
 		return CloseResult{}, err
 	}
-	res := CloseResult{Delivered: []int64{}, Pending: []int64{}, Incomplete: []int64{}}
+	res := CloseResult{Delivered: []int64{}, Pending: []int64{}, Incomplete: []int64{}, NoLabel: []int64{}}
 	evidence := fmt.Sprintf("Manifiesto #%d · retira %s", m.ID, pickerName)
 	if pickerID != "" {
 		evidence += " (" + pickerID + ")"
@@ -459,6 +497,14 @@ func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifes
 		o, err := s.Orders.Get(ctx, nil, l.OrderID)
 		if err != nil {
 			return res, err
+		}
+		// La etiqueta pudo fallar o anularse después de armar el manifiesto: la
+		// orden queda para el siguiente retiro y «Despachar igual» no lo salta.
+		if labelBlock(o) != "" {
+			_ = s.Fulfillment.SetLineStatus(ctx, m.ID, l.OrderID, "pending_packages", "")
+			res.Pending = append(res.Pending, l.OrderID)
+			res.NoLabel = append(res.NoLabel, l.OrderID)
+			continue
 		}
 		if reason, ok := authorized[l.OrderID]; ok && !complete && o.Status == domain.StatusReadyPickup {
 			if err := s.dispatchIncomplete(ctx, id, m, l, o, reason, evidence); err != nil {

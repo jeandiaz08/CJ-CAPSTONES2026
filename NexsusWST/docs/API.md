@@ -336,10 +336,10 @@ Se lee de la vista `activity_log` (migración Órdenes `000009_activity_log`), q
 | Método | Ruta | Detalle |
 | --- | --- | --- |
 | GET | `/v1/dispatch/couriers` | Órdenes y bultos listos por courier |
-| POST | `/v1/dispatch/manifests` | `{courier, orderIds?}` → manifiesto abierto. Las comunas sin cobertura salen y pasan a Incidencia (`excluded[]`). |
+| POST | `/v1/dispatch/manifests` | `{courier, orderIds?}` → manifiesto abierto. Las comunas sin cobertura salen y pasan a Incidencia (`excluded[]`). Sin etiqueta no se entrega: con `orderIds`, si alguna no tiene etiqueta lista (`none`, `pending`, `failed`) responde **422** con la lista; sin `orderIds`, esas órdenes quedan en `excluded[]`. Los courier «Buscar en oficina» no llevan etiqueta y no se bloquean. |
 | GET | `/v1/dispatch/manifests[?status=open\|closed]`, `/v1/dispatch/manifests/{id}` | Detalle con líneas y bultos escaneados. El detalle trae `summary {orders, packages, scanned, companies[{id, name, orders, packages}]}` (H-13-T09); las líneas movidas o canceladas no cuentan |
 | POST | `/v1/dispatch/manifests/{id}/scan` | `{code}` marca un bulto (manual o con lector) |
-| POST | `/v1/dispatch/manifests/{id}/close` | `{pickerName, pickerId?, vehiclePlate?, notes?, dispatchAnyway?[{orderId, reason}]}` → `{delivered[], pending[], incomplete[]}`. Las órdenes con bultos faltantes no se entregan y quedan para el siguiente retiro, salvo las de `dispatchAnyway` («Despachar igual», H-13-T08). |
+| POST | `/v1/dispatch/manifests/{id}/close` | `{pickerName, pickerId?, vehiclePlate?, notes?, dispatchAnyway?[{orderId, reason}]}` → `{delivered[], pending[], incomplete[], noLabel[]}`. Las órdenes con bultos faltantes no se entregan y quedan para el siguiente retiro, salvo las de `dispatchAnyway` («Despachar igual», H-13-T08). Se revisa de nuevo la etiqueta: si ya no está lista, la orden queda pendiente (`noLabel[]`, también en `pending[]`) y «Despachar igual» no la salta. |
 
 **«Despachar igual» (H-13-T08, PV-09).** Lo autoriza quien tenga el **permiso Despacho**, sin importar el perfil (403 sin el permiso), igual que para cerrar el manifiesto. Cada orden necesita un motivo de al menos 5 caracteres, debe estar incluida en el manifiesto, tener bultos sin escanear y al menos uno escaneado (si no, 422 y el manifiesto no se cierra). La orden pasa a «Entregada al courier» y queda en `incomplete[]`. En su historial (`GET /v1/orders/{id}`) el evento trae `details`:
 
