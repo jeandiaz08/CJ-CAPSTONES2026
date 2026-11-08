@@ -101,8 +101,18 @@ test.describe.serial("Registro histórico", () => {
     await expect(page.locator(".registry-list tbody tr")).toHaveCount(1);
     await expect(page.locator(".registry-list tbody tr")).toContainText("48257769244");
 
-    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Exportar registro" }).click()]);
+    await page.getByRole("button", { name: "Excel acciones" }).click();
+    await expect(page.locator(".dropdown-menu button")).toHaveText(["Exportar seleccionadas", "Exportar por filtros", "Exportar masivo"]);
+    const [download] = await Promise.all([page.waitForEvent("download"), page.locator(".dropdown-menu button", { hasText: "Exportar masivo" }).click()]);
     expect(download.suggestedFilename()).toMatch(/^registro-ordenes-.*\.xlsx$/);
+    await page.getByRole("button", { name: "Excel acciones" }).click();
+    await page.locator(".dropdown-menu button", { hasText: "Exportar por filtros" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Desde *").fill("2024-01-01");
+    await dialog.getByLabel("Hasta *").fill("2030-12-31");
+    await dialog.getByRole("radio", { name: "csv" }).check();
+    const [csv] = await Promise.all([page.waitForEvent("download"), dialog.getByRole("button", { name: "Exportar" }).click()]);
+    expect(csv.suggestedFilename()).toMatch(/^registro-ordenes-.*\.csv$/);
   });
 
   test("Teléfono: el registro abre en un modal de pantalla completa, sin scroll de la página", async () => {

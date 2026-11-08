@@ -89,13 +89,27 @@ describe('Registro histórico: «Registro órdenes»',()=>{
     nav('order=55');await mount();
     expect(document.querySelector('.registry-modal').textContent).toContain('Esta orden no está en el registro histórico.');
   });
-  it('Exportar: lo filtrado, o solo las seleccionadas',async()=>{
-    nav('status=cancelled');await mount();
-    await click([...host.querySelectorAll('button')].find(b=>b.textContent==='Exportar registro'));
+  it('Excel acciones: las mismas que en Todas las órdenes sin importar, más «Exportar masivo»',async()=>{
+    h.session.user.role='admin';nav('status=cancelled');await mount();
+    const btn=t=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===t);
+    const menu=async()=>click(btn('Excel acciones'));
+    await menu();
+    expect([...document.querySelectorAll('.dropdown-menu button')].map(b=>b.textContent.trim())).toEqual(['Exportar seleccionadas','Exportar por filtros','Exportar masivo']);
+    expect(btn('Exportar seleccionadas').disabled).toBe(true);
+    await click(btn('Exportar masivo'));
     expect(h.downloads.at(-1)).toEqual(['/v1/orders/registry/export?status=cancelled','registro-ordenes.xlsx']);
     await act(async()=>host.querySelector('input[aria-label="Seleccionar orden R2"]').click());await settle();
-    await click([...host.querySelectorAll('button')].find(b=>b.textContent==='Exportar seleccionadas (1)'));
-    expect(h.downloads.at(-1)[0]).toBe('/v1/orders/registry/export?status=cancelled&ids=2');
+    await menu();await click(btn('Exportar seleccionadas (1)'));
+    expect(h.downloads.at(-1)).toEqual(['/v1/orders/registry/export?ids=2&format=xlsx','registro-ordenes.xlsx']);
+    await menu();await click(btn('Exportar por filtros'));
+    const d=document.querySelector('[role="dialog"]');expect(d.textContent).toContain('Exportar por filtros');
+    const [from,to]=d.querySelectorAll('input[type="date"]');
+    const setDate=async(el,v)=>act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))});
+    await setDate(from,'2025-01-01');await setDate(to,'2025-12-31');
+    await act(async()=>[...d.querySelectorAll('input[type="radio"]')][1].click());
+    await act(async()=>d.querySelector('form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));await settle();
+    expect(h.downloads.at(-1)).toEqual(['/v1/orders/registry/export?from=2025-01-01&to=2025-12-31&format=csv&status=cancelled','registro-ordenes.csv']);
+    expect(document.body.textContent).not.toContain('Importar órdenes');
   });
   it('Sin órdenes: un texto claro',async()=>{
     h.rows=[];await mount();expect(host.querySelector('.registry-list').textContent).toContain('No hay órdenes en el registro histórico');

@@ -2,15 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { FileSpreadsheet, Filter, FilterX } from "lucide-react";
+import { Filter, FilterX } from "lucide-react";
 import { Modal } from "@/components/Modal";
 import { StatusBadge } from "@/components/StatusBadge";
 import { showToast } from "@/components/Toast";
 import { useDebounce } from "@/hooks/useDebounce";
 import { getOrderMeta } from "@/services/orders";
 import { listCompanies, getCatalog } from "@/services/core";
-import { exportRegistry, listRegistry, type RegistryEntry, type RegistryFilters } from "@/services/registry";
+import { exportRegistry, exportRegistryFile, listRegistry, type RegistryEntry, type RegistryFilters } from "@/services/registry";
 import { useAuth } from "@/state/auth";
+import { ExcelActions } from "@/features/orders/components/ExcelActions";
 import { OrderFiltersDrawer } from "@/features/orders/components/OrderFiltersDrawer";
 import { dateLabel } from "@/features/orders/components/OrderDetail";
 import { countFilters, readFilters, writeFilters, type FilterValues } from "@/features/orders/filters";
@@ -35,7 +36,6 @@ export function OrdersRegistry({ onLive }: { onLive: (live: boolean) => void }) 
   const lastQuery = useRef(urlQuery);
   const [checks, setChecks] = useState<Set<number>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [mobile, setMobile] = useState(false);
   const [revision, setRevision] = useState(0);
 
@@ -89,18 +89,17 @@ export function OrdersRegistry({ onLive }: { onLive: (live: boolean) => void }) 
   const applyFilters = (values: FilterValues) => { setFiltersOpen(false); updateUrl((next) => { writeFilters(next, values); next.delete("page"); }); };
   const clearAll = () => { lastQuery.current = ""; setQuery(""); router.push(pathname); };
   const toggle = (id: number) => setChecks((previous) => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-  const exportExcel = async () => {
-    setExporting(true);
+  const exportAll = async () => {
     try {
-      await exportRegistry({ ...registryFilters, ...(checks.size ? { ids: [...checks] } : {}) }, scopeCompany);
+      await exportRegistry(registryFilters, scopeCompany);
+      showToast("Exportación descargada.");
     } catch (e) {
       showToast((e as Error).message, "error");
-    } finally {
-      setExporting(false);
     }
   };
 
   const multiCompany = session?.user.allCompanies || (session?.user.companies.length ?? 0) > 1;
+  const companyOptions = multiCompany ? (refs.data?.[0].data ?? []).map((c) => ({ value: String(c.id), label: c.name })) : null;
   const companies = refs.data?.[0].data ?? [], couriers = refs.data?.[1].data ?? [];
   const statusOptions = (refs.data?.[2].statuses ?? []).map((s) => ({ value: s.code as string, label: s.label }));
   const activeFilters = countFilters(filters);
@@ -119,10 +118,9 @@ export function OrdersRegistry({ onLive }: { onLive: (live: boolean) => void }) 
         </label>
         <button className="btn ghost" onClick={() => setFiltersOpen(true)}><Filter size={18} />Filtros{activeFilters ? ` (${activeFilters})` : ""}</button>
         <button className="btn ghost" onClick={clearAll}><FilterX size={18} />Limpiar filtros</button>
-        <button className="btn excel registry-export" disabled={exporting || total === 0} onClick={exportExcel}
-          title={checks.size ? `Exporta las ${checks.size} seleccionadas` : "Exporta lo filtrado"}>
-          <FileSpreadsheet size={18} aria-hidden="true" />{exporting ? "Exportando…" : checks.size ? `Exportar seleccionadas (${checks.size})` : "Exportar registro"}
-        </button>
+        <ExcelActions selectedIds={[...checks]} filters={filters} companies={companies} companyOptions={companyOptions} couriers={couriers} statuses={statusOptions}
+          canImport={false} defaultCompanyId={scopeCompany} onImported={reload} exporter={exportRegistryFile} fileName="registro-ordenes"
+          bulkExport={exportAll} bulkDisabled={total === 0} />
       </div>
       <div className="orders-workspace">
         <section className="orders-list registry-list" aria-label="Registro de órdenes">
@@ -168,7 +166,7 @@ export function OrdersRegistry({ onLive }: { onLive: (live: boolean) => void }) 
         <Modal title={`Registro orden #${entry?.externalRef ?? ""}`} onClose={() => select(null)} panelClassName="registry-modal">{detail}</Modal>
       )}
       {filtersOpen && (
-        <OrderFiltersDrawer assignment={false} registry values={filters} companies={multiCompany ? companies.map((c) => ({ value: String(c.id), label: c.name })) : null}
+        <OrderFiltersDrawer assignment={false} registry values={filters} companies={companyOptions}
           couriers={couriers.map((c) => ({ value: c.code, label: c.name }))} statuses={statusOptions} onApply={applyFilters} onClose={() => setFiltersOpen(false)} />
       )}
     </>

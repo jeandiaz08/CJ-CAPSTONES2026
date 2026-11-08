@@ -98,7 +98,7 @@ func (x *HistoryHandler) list(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"data": data, "total": total, "limit": limit, "offset": f.Offset})
 }
 
-// export - GET /v1/orders/registry/export: Excel con lo filtrado o con ?ids=.
+// export - GET /v1/orders/registry/export: Excel (o ?format=csv) con lo filtrado o con ?ids=.
 func (x *HistoryHandler) export(w http.ResponseWriter, r *http.Request) {
 	id, ids, ok := scope(w, r)
 	if !ok {
@@ -109,12 +109,20 @@ func (x *HistoryHandler) export(w http.ResponseWriter, r *http.Request) {
 		x.h.writeErr(w, r, err)
 		return
 	}
+	format := r.URL.Query().Get("format")
 	var buf bytes.Buffer
-	if err := x.registry.Export(r.Context(), id, f, &buf); err != nil {
+	if err := x.registry.Export(r.Context(), id, f, format, &buf); err != nil {
 		x.h.writeErr(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-	w.Header().Set("Content-Disposition", `attachment; filename="registro-ordenes-`+time.Now().Format("20060102-1504")+`.xlsx"`)
+	name := "registro-ordenes-" + time.Now().Format("20060102-1504")
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		name += ".csv"
+	} else {
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		name += ".xlsx"
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	_, _ = w.Write(buf.Bytes())
 }

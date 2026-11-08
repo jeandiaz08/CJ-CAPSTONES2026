@@ -70,13 +70,17 @@ func TestRegistryAccess(t *testing.T) {
 			t.Fatalf("%s: err %v", c.role, err)
 		}
 		if !c.ok {
-			if err := reg.Export(ctx, who(c.role), ports.RegistryFilter{}, &bytes.Buffer{}); !errors.Is(err, domain.ErrForbidden) {
+			if err := reg.Export(ctx, who(c.role), ports.RegistryFilter{}, "xlsx", &bytes.Buffer{}); !errors.Is(err, domain.ErrForbidden) {
 				t.Fatalf("%s exporta: %v", c.role, err)
 			}
 			continue
 		}
 		if repo.got.Limit != 20 {
 			t.Fatalf("límite fuera de rango → 20, llegó %d", repo.got.Limit)
+		}
+		var out bytes.Buffer
+		if err := reg.Export(ctx, who(c.role), ports.RegistryFilter{}, "csv", &out); err != nil || !bytes.Contains(out.Bytes(), []byte("N° orden;Cliente;Cerrada por")) {
+			t.Fatalf("%s csv: %v %q", c.role, err, out.String())
 		}
 		if rows[0].Motive != StaleMotive || rows[0].ClosedBy.Name != "Jefe" || rows[0].ClosedBy.Role != tenant.RoleJefeOps {
 			t.Fatalf("fila %+v", rows[0])

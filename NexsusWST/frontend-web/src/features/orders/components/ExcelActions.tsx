@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Download, FileSpreadsheet, ListFilter, Upload } from "lucide-react";
+import { Download, FileDown, FileSpreadsheet, ListFilter, Upload } from "lucide-react";
 import { DropdownMenu, type DropdownItem } from "@/components/DropdownMenu";
 import { FileDrop } from "@/components/FileDrop";
 import { FormModal } from "@/components/FormModal";
@@ -13,12 +13,15 @@ import type { FilterValues } from "../filters";
 
 const MAX_IMPORT_BYTES = 5 << 20;
 type Option = { value: string; label: string };
+type Exporter = (params: URLSearchParams, fallbackName: string) => Promise<void>;
 
-function ExportDialog({ filters, companies, couriers, statuses, onClose }: {
+function ExportDialog({ filters, companies, couriers, statuses, exporter, fileName, onClose }: {
   filters: FilterValues;
   companies: Option[] | null;
   couriers: Option[];
   statuses: Option[];
+  exporter: Exporter;
+  fileName: string;
   onClose: () => void;
 }) {
   const id = useId();
@@ -39,7 +42,7 @@ function ExportDialog({ filters, companies, couriers, statuses, onClose }: {
     if (selected.length) params.set("status", selected.join(","));
     setBusy(true);
     try {
-      await exportOrders(params, `ordenes.${form.format}`);
+      await exporter(params, `${fileName}.${form.format}`);
       showToast("Exportación descargada.");
       onClose();
     } catch (e) {
@@ -193,8 +196,10 @@ function ImportDialog({ companies, defaultCompanyId, onClose, onImported }: {
   );
 }
 
-// «Excel acciones»: exportar lo seleccionado o lo filtrado e importar órdenes.
-export function ExcelActions({ selectedIds, filters, companies, companyOptions, couriers, statuses, canImport, defaultCompanyId, onImported }: {
+// «Excel acciones»: exportar lo seleccionado o lo filtrado e importar órdenes. El Registro histórico
+// lo usa con su propio exportador, sin importar y con «Exportar masivo» (todo lo filtrado en pantalla).
+export function ExcelActions({ selectedIds, filters, companies, companyOptions, couriers, statuses, canImport, defaultCompanyId, onImported,
+  exporter = exportOrders, fileName = "ordenes", bulkExport, bulkDisabled = false }: {
   selectedIds: number[];
   filters: FilterValues;
   companies: Company[];
@@ -204,11 +209,15 @@ export function ExcelActions({ selectedIds, filters, companies, companyOptions, 
   canImport: boolean;
   defaultCompanyId: number | null;
   onImported: () => void;
+  exporter?: Exporter;
+  fileName?: string;
+  bulkExport?: () => Promise<void>;
+  bulkDisabled?: boolean;
 }) {
   const [dialog, setDialog] = useState<"export" | "import" | null>(null);
   const exportSelected = async () => {
     try {
-      await exportOrders(new URLSearchParams({ ids: selectedIds.join(","), format: "xlsx" }), "ordenes.xlsx");
+      await exporter(new URLSearchParams({ ids: selectedIds.join(","), format: "xlsx" }), `${fileName}.xlsx`);
       showToast("Exportación descargada.");
     } catch (e) {
       showToast(apiErrorMessage(e), "error");
@@ -217,12 +226,13 @@ export function ExcelActions({ selectedIds, filters, companies, companyOptions, 
   const items: DropdownItem[] = [
     { label: `Exportar seleccionadas${selectedIds.length ? ` (${selectedIds.length})` : ""}`, icon: <Download size={18} aria-hidden="true" />, disabled: selectedIds.length === 0, onSelect: exportSelected },
     { label: "Exportar por filtros", icon: <ListFilter size={18} aria-hidden="true" />, onSelect: () => setDialog("export") },
+    ...(bulkExport ? [{ label: "Exportar masivo", icon: <FileDown size={18} aria-hidden="true" />, disabled: bulkDisabled, onSelect: bulkExport }] : []),
     ...(canImport ? [{ label: "Importar órdenes (Excel)", icon: <Upload size={18} aria-hidden="true" />, onSelect: () => setDialog("import") }] : []),
   ];
   return (
     <>
       <DropdownMenu className="excel-actions" triggerClassName="btn excel" trigger={<><FileSpreadsheet size={18} aria-hidden="true" />Excel acciones</>} items={items} />
-      {dialog === "export" && <ExportDialog filters={filters} companies={companyOptions} couriers={couriers.map((c) => ({ value: c.code, label: c.name }))} statuses={statuses} onClose={() => setDialog(null)} />}
+      {dialog === "export" && <ExportDialog filters={filters} companies={companyOptions} couriers={couriers.map((c) => ({ value: c.code, label: c.name }))} statuses={statuses} exporter={exporter} fileName={fileName} onClose={() => setDialog(null)} />}
       {dialog === "import" && <ImportDialog companies={companies} defaultCompanyId={defaultCompanyId} onClose={() => setDialog(null)} onImported={onImported} />}
     </>
   );

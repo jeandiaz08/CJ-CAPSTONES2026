@@ -52,6 +52,10 @@ export function listRegistry(f: RegistryFilters, companyId: number | null) {
   return api<{ data: RegistryEntry[]; total: number }>("orders", withCompany(`/v1/orders/registry?${p}`, companyId));
 }
 
-// Excel con lo filtrado, o solo con las seleccionadas (ids).
+// «Exportar masivo»: Excel con todo lo filtrado en pantalla.
 export const exportRegistry = (f: RegistryFilters, companyId: number | null) =>
   downloadFile(withCompany(`/v1/orders/registry/export?${registryParams(f)}`, companyId), "registro-ordenes.xlsx");
+
+// «Exportar seleccionadas» y «Exportar por filtros» (ids, fechas, cliente, courier, estado, format).
+export const exportRegistryFile = (params: URLSearchParams, fallbackName: string) =>
+  downloadFile(`/v1/orders/registry/export?${params}`, fallbackName);

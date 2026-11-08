@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"encoding/csv"
+	"fmt"
 	"io"
 	"regexp"
 	"strconv"
@@ -113,8 +115,8 @@ func (r *Registry) List(ctx context.Context, id tenant.Identity, f ports.Registr
 
 var registryHeader = []string{"N° orden", "Cliente", "Cerrada por", "Perfil", "Motivo", "Estado", "Estaba en", "Courier", "Fecha"}
 
-// Export - Excel con lo filtrado (o con las seleccionadas en f.IDs).
-func (r *Registry) Export(ctx context.Context, id tenant.Identity, f ports.RegistryFilter, w io.Writer) error {
+// Export - Excel (por defecto) o CSV con lo filtrado (o con las seleccionadas en f.IDs).
+func (r *Registry) Export(ctx context.Context, id tenant.Identity, f ports.RegistryFilter, format string, w io.Writer) error {
 	f.Offset = 0
 	if !canReadRegistry(id) {
 		return fail(domain.ErrForbidden, "El registro histórico es para Administrador, Jefe de Operaciones y Cliente.")
@@ -141,6 +143,21 @@ func (r *Registry) Export(ctx context.Context, id tenant.Identity, f ports.Regis
 		rows = append(rows, []any{e.ExternalRef, e.CompanyName, actor.Name, RoleLabels[actor.Role], registryMotive(e),
 			domain.Labels[domain.Status(e.Status)], domain.Labels[domain.Status(e.PreviousStatus)], courier,
 			e.ClosedAt.In(loc).Format("2006-01-02 15:04")})
+	}
+	if format == "csv" {
+		_, _ = w.Write([]byte("ï»¿")) // BOM: Excel abre bien los acentos
+		cw := csv.NewWriter(w)
+		cw.Comma = ';'
+		_ = cw.Write(registryHeader)
+		for _, row := range rows {
+			rec := make([]string, len(row))
+			for i, v := range row {
+				rec[i] = fmt.Sprint(v)
+			}
+			_ = cw.Write(rec)
+		}
+		cw.Flush()
+		return cw.Error()
 	}
 	return xlsx.Write(w, "Registro de órdenes", registryHeader, rows)
 }
