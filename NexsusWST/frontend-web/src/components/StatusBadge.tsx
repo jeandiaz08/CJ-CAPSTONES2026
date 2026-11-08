@@ -1,5 +1,5 @@
 import type { OrderStatus } from "@/services/orders";
-const tones: Record<OrderStatus, string> = { pending: "neutral", validating: "processing", validated: "info", picking: "processing", picked: "info", packing: "warn", ready_pickup: "ok", handed_over: "ok", incident: "danger", voided: "warn", cancelled: "neutral" };
+const tones: Record<OrderStatus, string> = { pending: "neutral", validating: "processing", validated: "info", picking: "processing", picked: "info", packing: "warn", ready_pickup: "ok", handed_over: "ok", incident: "danger", voided: "danger", cancelled: "danger" };
 export function StatusBadge({ status, label }: {
     status: OrderStatus;
     label?: string;

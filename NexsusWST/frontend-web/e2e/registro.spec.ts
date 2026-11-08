@@ -72,6 +72,7 @@ test.describe.serial("Registro histórico", () => {
     await expect(row).toContainText("Jefe de Operaciones Demo");
     await expect(row.locator("td").nth(4)).toHaveAttribute("title", "Más de 1 año sin movimiento · Retiro confirmado");
     await expect(row.locator(".badge")).toHaveText("Entregada al courier");
+    for (const ref of ["48257769243", "48257769244"]) await expect(page.locator(".registry-list tbody tr", { hasText: ref }).locator(".badge")).toHaveClass(/tone-danger/);
     await expect(page.locator(".registry-list tbody tr", { hasText: CONTROL })).toHaveCount(0);
 
     await row.click();
@@ -103,6 +104,8 @@ test.describe.serial("Registro histórico", () => {
 
     await page.getByRole("button", { name: "Excel acciones" }).click();
     await expect(page.locator(".dropdown-menu button")).toHaveText(["Exportar seleccionadas", "Exportar por filtros", "Exportar masivo"]);
+    const inside = async () => page.locator(".dropdown-menu").evaluate((m) => { const b = m.getBoundingClientRect(); return b.left >= 0 && b.right <= window.innerWidth; });
+    expect(await inside(), "el menú de Excel queda dentro de la pantalla").toBe(true);
     const [download] = await Promise.all([page.waitForEvent("download"), page.locator(".dropdown-menu button", { hasText: "Exportar masivo" }).click()]);
     expect(download.suggestedFilename()).toMatch(/^registro-ordenes-.*\.xlsx$/);
     await page.getByRole("button", { name: "Excel acciones" }).click();
@@ -128,6 +131,8 @@ test.describe.serial("Registro histórico", () => {
     await modal.getByRole("button", { name: /Cerrar/ }).first().click();
     await expect(modal).toHaveCount(0);
     await expect(page).not.toHaveURL(/order=/);
+    await page.getByRole("button", { name: "Excel acciones" }).click();
+    expect(await page.locator(".dropdown-menu").evaluate((m) => { const b = m.getBoundingClientRect(); return b.left >= 0 && b.right <= window.innerWidth; })).toBe(true);
   });
 
   test("Cliente: solo «Registro órdenes»; Empaque no tiene el submenú y vuelve al Home", async ({ browser }) => {
