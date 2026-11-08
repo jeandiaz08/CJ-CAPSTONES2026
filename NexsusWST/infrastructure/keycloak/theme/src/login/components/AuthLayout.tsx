@@ -30,6 +30,16 @@ export default function AuthLayout({ title, children, centered = false, notifica
     document.documentElement.lang = "es-CL";
   }, [title]);
 
+  // Mismo favicon que la app; sin esto la pestaña muestra el de Keycloak.
+  useEffect(() => {
+    document.querySelectorAll('link[rel~="icon"]').forEach((link) => link.remove());
+    const icon = document.createElement("link");
+    icon.rel = "icon";
+    icon.type = "image/png";
+    icon.href = `${import.meta.env.BASE_URL}brand/favicon.png`;
+    document.head.appendChild(icon);
+  }, []);
+
   return (
     <div className="auth-shell">
       <aside className="auth-brand-panel" aria-label="NexusWST de WeStorage">
