@@ -13,6 +13,21 @@ import (
 
 // Registro histórico (Tarea 06): Canceladas de inmediato; cualquier otra orden con
 // más de 1 año desde su último cambio de estado. La bandeja excluye lo mismo.
+// Las tablas temporales (LIKE) no copian triggers: se les ponen los de Órdenes
+// 000013, que mantienen orders.status_changed_at. Las funciones leen orders y
+// order_events sin esquema, así que dentro de la prueba usan las temporales.
+const (
+	tempOrdersStatusTrigger = `CREATE TRIGGER trg_orders_status_changed_at
+ BEFORE INSERT OR UPDATE OF status, handed_over_at, created_at ON pg_temp.orders
+ FOR EACH ROW EXECUTE FUNCTION orders_status_changed_at_trg();`
+	tempEventsStatusTrigger = `CREATE TRIGGER trg_order_events_status_changed_ins AFTER INSERT ON pg_temp.order_events
+ REFERENCING NEW TABLE AS ev_new FOR EACH STATEMENT EXECUTE FUNCTION order_events_status_changed_at_trg();
+ CREATE TRIGGER trg_order_events_status_changed_upd AFTER UPDATE ON pg_temp.order_events
+ REFERENCING OLD TABLE AS ev_old NEW TABLE AS ev_new FOR EACH STATEMENT EXECUTE FUNCTION order_events_status_changed_at_trg();
+ CREATE TRIGGER trg_order_events_status_changed_del AFTER DELETE ON pg_temp.order_events
+ REFERENCING OLD TABLE AS ev_old FOR EACH STATEMENT EXECUTE FUNCTION order_events_status_changed_at_trg();`
+)
+
 func TestRegistryRuleAndTrayAreComplementary(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -38,6 +53,7 @@ func TestRegistryRuleAndTrayAreComplementary(t *testing.T) {
  CREATE TEMP TABLE job_outbox (LIKE public.job_outbox INCLUDING DEFAULTS);
  CREATE TEMP TABLE cutoffs (LIKE public.cutoffs INCLUDING DEFAULTS);
  CREATE TEMP TABLE cutoff_couriers (LIKE public.cutoff_couriers INCLUDING DEFAULTS);
+ `+tempOrdersStatusTrigger+tempEventsStatusTrigger+`
  INSERT INTO ops_settings(key,value) VALUES('assignment_deadline','12:00');
  INSERT INTO users(id,name,role,email) VALUES(77,'Jefe Uno','jefe_operaciones','jefe-registro@test.local');
  INSERT INTO couriers(code,name) VALUES('starken','Starken');`); err != nil {

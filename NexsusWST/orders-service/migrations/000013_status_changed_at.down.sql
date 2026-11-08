@@ -1,0 +1,11 @@
+BEGIN;
+DROP TRIGGER IF EXISTS trg_order_events_status_changed_ins ON order_events;
+DROP TRIGGER IF EXISTS trg_order_events_status_changed_upd ON order_events;
+DROP TRIGGER IF EXISTS trg_order_events_status_changed_del ON order_events;
+DROP TRIGGER IF EXISTS trg_orders_status_changed_at ON orders;
+DROP FUNCTION IF EXISTS order_events_status_changed_at_trg();
+DROP FUNCTION IF EXISTS orders_status_changed_at_trg();
+DROP FUNCTION IF EXISTS order_status_changed_at(bigint, text, timestamptz, timestamptz);
+DROP INDEX IF EXISTS idx_orders_status_changed;
+ALTER TABLE orders DROP COLUMN IF EXISTS status_changed_at;
+COMMIT;

@@ -13,11 +13,10 @@ import (
 // de backend hechos por Jean»).
 
 // lastStatusChange - fecha del último cambio de estado de la orden o. Para las
-// Entregadas manda handed_over_at; sin eventos, la fecha de creación.
-const lastStatusChange = `COALESCE(CASE WHEN o.status = 'handed_over' THEN o.handed_over_at END,
-	(SELECT max(e.occurred_at) FROM order_events e
-	  WHERE e.order_id = o.id AND e.to_status IS NOT NULL AND e.to_status IS DISTINCT FROM e.from_status),
-	o.created_at)`
+// Entregadas manda handed_over_at; sin eventos, la fecha de creación. Desde
+// Órdenes 000013 vive en orders.status_changed_at (con índice), mantenida por
+// triggers con esa misma regla.
+const lastStatusChange = `o.status_changed_at`
 
 // inRegistry - qué órdenes van al registro: las Canceladas de inmediato y
 // cualquier otra cuando pasa 1 año desde su último cambio de estado. La bandeja

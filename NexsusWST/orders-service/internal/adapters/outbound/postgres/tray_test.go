@@ -34,6 +34,7 @@ func TestTrayRegistryAndFilters(t *testing.T) {
  CREATE TEMP TABLE job_outbox (LIKE public.job_outbox INCLUDING DEFAULTS);
  CREATE TEMP TABLE cutoffs (LIKE public.cutoffs INCLUDING DEFAULTS);
  CREATE TEMP TABLE cutoff_couriers (LIKE public.cutoff_couriers INCLUDING DEFAULTS);
+ `+tempOrdersStatusTrigger+`
  INSERT INTO ops_settings(key,value) VALUES('assignment_deadline','12:00');`); err != nil {
 		t.Fatal(err)
 	}
