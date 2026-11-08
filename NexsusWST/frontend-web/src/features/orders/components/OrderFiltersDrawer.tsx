@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { SideDrawer } from "@/components/SideDrawer";
+import { FiltersModal } from "@/components/FiltersModal";
 import { EMPTY_FILTERS, type FilterValues } from "../filters";
 import { ORIGIN_OPTIONS, SITUATION_LABELS } from "../format";
 
@@ -34,7 +34,7 @@ export function OrderFiltersDrawer({ assignment, registry = false, values, compa
     onApply(draft);
   };
   return (
-    <SideDrawer title="Filtros" onClose={onClose} footer={<>
+    <FiltersModal title="Filtros" onClose={onClose} footer={<>
       <button type="button" className="btn ghost" onClick={() => onApply(EMPTY_FILTERS)}>Limpiar</button>
       <button type="button" className="btn form-submit-primary" onClick={apply}>Aplicar</button>
     </>}>
@@ -100,6 +100,6 @@ export function OrderFiltersDrawer({ assignment, registry = false, values, compa
         </div>
         {dateError && <p className="modal-field-error" role="alert">{dateError}</p>}
       </div>
-    </SideDrawer>
+    </FiltersModal>
   );
 }

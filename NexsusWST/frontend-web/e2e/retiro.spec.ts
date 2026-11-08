@@ -116,6 +116,19 @@ test.describe.serial("Retiro y entrega", () => {
     const orderRow = modal.getByRole("region", { name: "Órdenes del manifiesto" }).locator("tbody tr");
     await expect(orderRow.locator(".manifest-count")).toHaveClass(/is-partial/);
 
+    // Bultos: los productos se ven completos (sin elipsis ni recorte) y las celdas siguen alineadas.
+    await modal.locator(".manifest-accordion summary", { hasText: "Bultos" }).click();
+    const bundles = modal.getByRole("region", { name: "Bultos del manifiesto" });
+    await expect(bundles.locator(".bundle-products li").first()).toBeVisible();
+    const cells = await bundles.evaluate((region) => {
+      const heads = [...region.querySelectorAll("thead th")].map((th) => th.getBoundingClientRect());
+      const misaligned = [...region.querySelectorAll("tbody tr")].flatMap((tr, r) => [...tr.querySelectorAll("td")]
+        .filter((td, c) => Math.abs(td.getBoundingClientRect().left - heads[c].left) > 1 || Math.abs(td.getBoundingClientRect().width - heads[c].width) > 1).map((_, c) => `fila ${r} col ${c}`));
+      const items = [...region.querySelectorAll(".bundle-products li")] as HTMLElement[];
+      return { misaligned, clipped: items.filter((li) => li.scrollWidth > li.clientWidth + 1 || getComputedStyle(li).textOverflow === "ellipsis").length, truncated: region.querySelectorAll("td.is-products .cell-truncate").length };
+    });
+    expect(cells).toEqual({ misaligned: [], clipped: 0, truncated: 0 });
+
     await orderRow.getByRole("button", { name: "Despachar igual" }).click();
     const anyway = page.getByRole("dialog").last();
     await expect(anyway).toContainText(codes[1]);
@@ -131,7 +144,14 @@ test.describe.serial("Retiro y entrega", () => {
 
     await modal.getByRole("button", { name: "Confirmar entrega" }).click();
     const confirm = page.getByRole("dialog").last();
-    await expect(confirm.getByLabel("Nombre de quien retira *")).toHaveValue("Juan Pérez");
+    await expect(confirm.getByLabel("Nombre conductor *")).toHaveValue("Juan Pérez");
+    // Diseño de la imagen: «Quien retira», RUT y Patente en la misma fila, el aviso y Confirmar antes que Cancelar.
+    await expect(confirm.locator(".delivery-form h3")).toHaveText(["Quien retira", "Transporte"]);
+    const [rut, plate] = [await confirm.getByLabel("RUT", { exact: true }).boundingBox(), await confirm.getByLabel("Patente", { exact: true }).boundingBox()];
+    expect(Math.abs(rut!.y - plate!.y)).toBeLessThan(2);
+    expect(rut!.x).toBeLessThan(plate!.x);
+    await expect(confirm.locator(".delivery-hint")).toHaveText("Fecha y hora se registran solas, después de cerrar cualquier cambio genera incidencia");
+    await expect(confirm.locator(".form-modal-foot button")).toHaveText(["Confirmar entrega", "Cancelar"]);
     await confirm.getByLabel(/Empresa del transporte/).fill("Transportes Sur");
     await confirm.getByLabel(/Patente/).fill("AB12CD");
     const [res] = await Promise.all([
@@ -171,7 +191,7 @@ test.describe.serial("Retiro y entrega", () => {
     const modal = page.locator(".manifest-modal");
     await expect(modal.getByRole("region", { name: "Órdenes del manifiesto" }).locator("tbody tr")).toHaveCount(1);
     await modal.getByRole("button", { name: "Confirmar entrega" }).click();
-    await page.getByRole("dialog").last().getByLabel("Nombre de quien retira *").fill("Ana Retira");
+    await page.getByRole("dialog").last().getByLabel("Nombre conductor *").fill("Ana Retira");
     await page.getByRole("dialog").last().getByRole("button", { name: "Confirmar entrega" }).click();
     await expect(page.getByRole("dialog").last()).toContainText("Entregadas al courier (1)");
     const delivered = open.lines[0].orderId;

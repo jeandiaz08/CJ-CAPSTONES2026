@@ -50,11 +50,12 @@ export function ManifestAccordions({ lines, info, productName, orderAction }: {
       </Accordion>
       <Accordion title={`Bultos (${bundles.length})`} open={false}>
         <CompactTable label="Bultos del manifiesto"
-          columns={[{ label: "Bulto" }, { label: "Estado" }, { label: "Código de etiqueta" }, { label: "Orden" }, { label: "Productos", className: "is-text" }]}
+          columns={[{ label: "Bulto" }, { label: "Estado" }, { label: "Código de etiqueta" }, { label: "Orden" }, { label: "Productos", className: "is-text is-products" }]}
           rows={bundles.map(({ line, bundle }) => {
             const data = info(line);
             // TODO(api): los bultos no registran qué productos llevan; se resumen los de la orden.
-            const products = data.items.map((i) => `${productName(line.companyId, i.sku)} ×${i.quantity}`).join(", ");
+            // Completos, uno por línea; si son muchos, la celda hace scroll (la fila no crece sin límite).
+            const products = data.items.map((i) => `${productName(line.companyId, i.sku)} ×${i.quantity}`);
             return {
               key: bundle.code,
               cells: [
@@ -62,7 +63,7 @@ export function ManifestAccordions({ lines, info, productName, orderAction }: {
                 <span key="s" className={bundle.scanned ? "bundle-scanned" : "bundle-missing"}>{bundle.scanned ? "Escaneado" : "Sin escanear"}</span>,
                 data.labelCode || "—",
                 `#${line.externalRef}`,
-                <span key="p" className="cell-truncate" title={products}>{products || "—"}</span>,
+                products.length ? <ul key="p" className="bundle-products">{products.map((p, i) => <li key={i}>{p}</li>)}</ul> : "—",
               ],
             };
           })} />

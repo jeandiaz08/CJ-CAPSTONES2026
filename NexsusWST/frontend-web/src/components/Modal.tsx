@@ -2,6 +2,7 @@
 import { useEffect, useRef, useId } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { lockScroll } from "@/hooks/scrollLock";
 
 // Pila de modales abiertos: Esc y Tab solo actúan sobre el de más arriba.
 const stack: symbol[] = [];
@@ -20,8 +21,7 @@ export function Modal({ title, onClose, children, aside, panelClassName = "", ba
         const self = Symbol("modal");
         stack.push(self);
         const previous = document.activeElement as HTMLElement;
-        const overflow = document.body.style.overflow;
-        document.body.style.overflow = "hidden";
+        const unlock = lockScroll();
         panel.current?.focus();
         const key = (e: KeyboardEvent) => {
             if (stack.at(-1) !== self) return;
@@ -50,7 +50,7 @@ export function Modal({ title, onClose, children, aside, panelClassName = "", ba
         return () => {
             stack.splice(stack.indexOf(self), 1);
             document.removeEventListener("keydown", key);
-            document.body.style.overflow = overflow;
+            unlock();
             previous?.focus();
         };
     }, []);

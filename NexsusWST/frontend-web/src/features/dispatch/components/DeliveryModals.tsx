@@ -8,13 +8,13 @@ import { lineProgress, MIN_DISPATCH_REASON, type DispatchAuthorization } from ".
 
 const MAX_TEXT = 140;
 
-function Field({ id, label, required, value, onChange, error, multiline }: {
-  id: string; label: string; required?: boolean; value: string; onChange: (v: string) => void; error?: string | null; multiline?: boolean;
+function Field({ id, label, required, value, onChange, error, multiline, plain }: {
+  id: string; label: string; required?: boolean; value: string; onChange: (v: string) => void; error?: string | null; multiline?: boolean; plain?: boolean;
 }) {
   const props = { id, value, maxLength: MAX_TEXT, "aria-invalid": !!error, "aria-describedby": error ? `${id}-error` : undefined, onChange: (e: { target: { value: string } }) => onChange(e.target.value) };
   return (
     <div className="modal-field">
-      <label htmlFor={id}>{label}{required ? " *" : " · opcional"}</label>
+      <label htmlFor={id}>{label}{required ? " *" : plain ? "" : " · opcional"}</label>
       {multiline ? <textarea rows={3} {...props} /> : <input {...props} />}
       {error && <span id={`${id}-error`} className="modal-field-error" role="alert">{error}</span>}
     </div>
@@ -104,12 +104,23 @@ export function ConfirmDeliveryModal({ defaultPicker, onClose, onConfirm }: {
     }
   };
   return (
-    <FormModal title="Confirmar entrega" onClose={onClose} onSubmit={submit} submitLabel="Confirmar entrega" submitTone="success" busy={busy} error={error}>
-      <Field id={`${id}-picker`} label="Nombre de quien retira" required value={form.pickerName} onChange={set("pickerName")} error={pickerError} />
-      <Field id={`${id}-rut`} label="RUT o identificación" value={form.pickerId} onChange={set("pickerId")} />
-      <Field id={`${id}-plate`} label="Patente" value={form.vehiclePlate} onChange={set("vehiclePlate")} />
-      <Field id={`${id}-company`} label="Empresa del transporte" value={form.company} onChange={set("company")} />
-      <Field id={`${id}-notes`} label="Notas" value={form.notes} onChange={set("notes")} multiline />
+    <FormModal title="Confirmar entrega" onClose={onClose} onSubmit={submit} submitLabel="Confirmar entrega" submitTone="success" closeLabel="Cancelar" submitFirst busy={busy} error={error}>
+      <div className="delivery-form">
+        <section>
+          <h3>Quien retira</h3>
+          <Field id={`${id}-picker`} label="Nombre conductor" required value={form.pickerName} onChange={set("pickerName")} error={pickerError} />
+          <div className="delivery-pair">
+            <Field id={`${id}-rut`} label="RUT" plain value={form.pickerId} onChange={set("pickerId")} />
+            <Field id={`${id}-plate`} label="Patente" plain value={form.vehiclePlate} onChange={set("vehiclePlate")} />
+          </div>
+        </section>
+        <section>
+          <h3>Transporte</h3>
+          <Field id={`${id}-company`} label="Empresa del transporte" plain value={form.company} onChange={set("company")} />
+          <Field id={`${id}-notes`} label="Notas" plain value={form.notes} onChange={set("notes")} multiline />
+        </section>
+        <p className="delivery-hint">Fecha y hora se registran solas, después de cerrar cualquier cambio genera incidencia</p>
+      </div>
     </FormModal>
   );
 }
