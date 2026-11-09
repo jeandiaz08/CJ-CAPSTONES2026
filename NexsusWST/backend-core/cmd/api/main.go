@@ -114,6 +114,7 @@ func main() {
 	})
 
 	authhttp.NewHandler(authSvc).Register(mux, requireAuth)
+	authhttp.NewProfileHandler(authapp.NewProfiles(authSvc, authpg.NewProfiles(db))).Register(mux, requireAuth) // Clientes › Perfiles (Tarea 07, Jean)
 	clientshttp.NewHandler(clientsSvc).Register(mux, requireAuth)
 	productshttp.NewHandler(productsSvc).Register(mux, requireAuth)
 	catalogshttp.NewHandler(catalogsSvc).Register(mux, requireAuth)

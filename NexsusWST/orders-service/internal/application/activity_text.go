@@ -38,6 +38,7 @@ var activityActions = map[string]string{
 	// empresas cliente (Tarea 07)
 	"company_created": "Empresa creada", "company_updated": "Empresa editada",
 	"company_enabled": "Empresa activada", "company_disabled": "Empresa desactivada",
+	"profiles_imported": "Carga masiva de perfiles",
 }
 
 func actionLabel(a string) string {
@@ -110,7 +111,7 @@ func detailLines(module string, d map[string]any) []string {
 		"waveId": "Ola", "manifestId": "Manifiesto", "authorizedBy": "Autorizó", "missingPackages": "Bultos faltantes",
 		"scannedPackages": "Bultos escaneados", "packagesTotal": "Bultos de la orden",
 		"taxId": "RUT", "email": "Correo", "phone": "Teléfono", "waveCode": "Ola", "wmsCode": "Código Invas",
-		"active": "Estado", "jobTitle": "Cargo", "companyName": "Empresa",
+		"active": "Estado", "jobTitle": "Cargo", "companyName": "Empresa", "created": "Perfiles creados", "rows": "Filas leídas", "failed": "Filas con error",
 	}
 	if module == "dispatch" {
 		for k, v := range map[string]string{"pickerName": "Quien retira", "pickerId": "RUT", "vehiclePlate": "Patente", "notes": "Notas"} {

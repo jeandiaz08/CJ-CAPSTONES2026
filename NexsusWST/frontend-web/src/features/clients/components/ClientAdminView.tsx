@@ -5,6 +5,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { PageHeader } from "@/components/PageHeader";
 import { Tabs } from "@/components/Tabs";
 import { CompaniesTab } from "./CompaniesTab";
+import { ProfilesTab } from "./ProfilesTab";
 
 const BASE = "/clientes/administracion";
 const TABS = [
@@ -16,7 +17,7 @@ type TabKey = (typeof TABS)[number]["key"];
 
 // Clientes › Administración clientes (Tarea 07). Solo lo de las empresas cliente:
 // perfiles de clientes, empresas y sus solicitudes (regla 10 de la matriz).
-// Sin «Gestionar perfiles» queda en lectura. Empresas: Fase 2; Perfiles y Solicitudes: fases 3 y 4.
+// Sin «Gestionar perfiles» queda en lectura. Perfiles: Fase 3; Empresas: Fase 2; Solicitudes: Fase 4.
 export function ClientAdminView() {
   const params = useSearchParams();
   const raw = params.get("tab");
@@ -25,7 +26,7 @@ export function ClientAdminView() {
     <div className="orders-view clients-view">
       <PageHeader title="Administración clientes" actions={<NotificationBell />} />
       <Tabs label="Administración clientes" items={TABS.map((t) => ({ href: `${BASE}?tab=${t.key}`, label: t.label, active: t.key === tab }))} />
-      {tab === "empresas" ? <CompaniesTab /> : (
+      {tab === "empresas" ? <CompaniesTab /> : tab === "perfiles" ? <ProfilesTab scope="client" tab="perfiles" /> : (
         <section className="card placeholder" aria-live="polite">
           <p className="muted">En construcción.</p>
         </section>

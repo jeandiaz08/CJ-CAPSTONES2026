@@ -2,9 +2,11 @@
 // La interfaz solo oculta o deshabilita: el servidor responde 403 sin el permiso (regla 7).
 import { PERM_MANAGE_PROFILES, type AccessUser } from "@/state/menuAccess";
 
+import type { ProfileScope } from "@/services/clients";
+
 // Alcance de las pantallas de perfiles: «client» = Clientes › Administración clientes;
 // «internal» = Configuración › Usuarios WeStorage (tarea siguiente, mismos componentes).
-export type ProfileScope = "client" | "internal";
+export type { ProfileScope };
 
 // ¿Puede crear, editar, activar o desactivar perfiles y empresas, y aprobar solicitudes?
 // Se pregunta por el permiso, nunca por el perfil.

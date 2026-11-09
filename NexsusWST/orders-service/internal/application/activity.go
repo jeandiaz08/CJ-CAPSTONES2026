@@ -37,6 +37,7 @@ var activityFields = map[string]bool{
 	// empresas cliente y solicitudes de perfiles (Tarea 07, Core 000011)
 	"taxId": true, "email": true, "phone": true, "waveCode": true, "wmsCode": true, "active": true,
 	"jobTitle": true, "companyName": true, "requestId": true, "requestKind": true,
+	"created": true, "rows": true, "failed": true, // carga masiva de perfiles
 }
 
 // Dentro de un campo permitido, un cambio viene como {from, to} (por ejemplo, el perfil).

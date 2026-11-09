@@ -1,21 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listAdminCompanies, type AdminCompany, type CompanyFilters } from "@/services/clients";
 
-// Lista de empresas de Administración clientes. Una respuesta vieja no pisa a una más nueva.
-export function useCompanies(filters: CompanyFilters) {
-  const [rows, setRows] = useState<AdminCompany[]>([]);
+// Lista paginada de Administración clientes (empresas, perfiles, solicitudes). `key` identifica los
+// filtros; una respuesta vieja no pisa a una más nueva y la tabla no se vacía al recargar.
+export function usePagedList<T>(load: () => Promise<{ data: T[]; total: number }>, key: string) {
+  const [rows, setRows] = useState<T[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const key = JSON.stringify(filters);
   const latest = useRef(0);
 
   const reload = useCallback(async () => {
     const request = ++latest.current;
     try {
-      const res = await listAdminCompanies(JSON.parse(key));
+      const res = await load(); // `load` solo depende de `key`
       if (request !== latest.current) return;
       setRows(res.data);
       setTotal(res.total);
@@ -25,6 +24,7 @@ export function useCompanies(filters: CompanyFilters) {
     } finally {
       if (request === latest.current) setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
   useEffect(() => {

@@ -9,13 +9,13 @@ import { Modal } from "@/components/Modal";
 import { Badge } from "@/components/StatusBadge";
 import { showToast } from "@/components/Toast";
 import { useDebounce } from "@/hooks/useDebounce";
-import { disableCompany, enableCompany, exportCompanies, getAdminCompany, type AdminCompany, type CompanyFilters } from "@/services/clients";
+import { disableCompany, enableCompany, exportCompanies, getAdminCompany, listAdminCompanies, type AdminCompany, type CompanyFilters } from "@/services/clients";
 import { listWaves } from "@/services/orders";
 import { useAuth } from "@/state/auth";
 import { dateLabel } from "@/features/orders/components/OrderDetail";
 import { useOrderResource } from "@/features/orders/hooks/useOrderResources";
 import { canManageProfiles } from "../access";
-import { useCompanies } from "../hooks/useCompanies";
+import { usePagedList } from "../hooks/usePagedList";
 import { waveLabel, waveOptions } from "../waves";
 import { CompanyDetail } from "./CompanyDetail";
 import { CompanyFiltersModal, countCompanyFilters, type CompanyFilterValues } from "./CompanyFiltersModal";
@@ -59,7 +59,8 @@ export function CompaniesTab() {
     ...(filters.to ? { to: filters.to } : {}),
   }), [filters, urlQuery]);
   const filtersKey = JSON.stringify(apiFilters);
-  const { rows, total, loading, error, reload } = useCompanies({ ...apiFilters, limit, offset: page * limit });
+  const listKey = JSON.stringify({ ...apiFilters, limit, offset: page * limit });
+  const { rows, total, loading, error, reload } = usePagedList(() => listAdminCompanies(JSON.parse(listKey)), listKey);
   const waves = useOrderResource(listWaves, "waves");
   const waveList = waves.data?.data ?? [];
   const waveChoices = waveOptions(waveList, filters.wave && filters.wave !== "general" ? filters.wave : null);

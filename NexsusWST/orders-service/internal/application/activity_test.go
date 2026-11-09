@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,6 +91,11 @@ func TestActivityTexts(t *testing.T) {
 	if want := []string{"RUT: 1 → 2", "Ola: General (según reglas) → AM"}; e.ActionLabel != "Empresa editada" || len(e.DetailLines) != 2 ||
 		e.DetailLines[0] != want[0] || e.DetailLines[1] != want[1] {
 		t.Fatalf("empresa editada %v", e.DetailLines)
+	}
+	imp := ActivityItem{Module: "users", Action: "profiles_imported", Details: safeDetails(map[string]any{"created": float64(2), "rows": float64(5), "failed": float64(3)})}
+	presentActivity(&imp, "")
+	if want := "Perfiles creados: 2|Filas con error: 3|Filas leídas: 5"; imp.ActionLabel != "Carga masiva de perfiles" || strings.Join(imp.DetailLines, "|") != want {
+		t.Fatalf("carga masiva %q %v", imp.ActionLabel, imp.DetailLines)
 	}
 	o := ActivityItem{Module: "orders", Action: "validate", Details: map[string]any{"fromStatus": "validating", "toStatus": "validated"}}
 	presentActivity(&o, "")

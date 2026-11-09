@@ -1,7 +1,8 @@
 // Clientes (Tarea 07). Fase 1: menú, rutas y permiso «Gestionar perfiles».
 // Usa el seed de desarrollo: admin@nexus.local con el permiso y admin.lectura@nexus.local sin él.
 import { expect, test, type Page } from "@playwright/test";
-import { coreApi, login, ordersApi } from "./helpers";
+import { readFileSync } from "node:fs";
+import { coreApi, login, mailSubjects, ordersApi } from "./helpers";
 
 const sidebar = (page: Page) => page.locator(".sidebar");
 
@@ -192,5 +193,110 @@ test.describe.serial("Clientes · Fase 2: Empresas", () => {
     await expect(modal.getByRole("link", { name: "Ver integraciones" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.close();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Fase 3: Administración clientes › Perfiles. Los perfiles de prueba van en las empresas demo
+// («SEED-…»): el seed los borra al recargar. Sus cuentas de Keycloak quedan (solo desarrollo).
+// ---------------------------------------------------------------------------------------------
+type Profile = { id: number; name: string; email: string; username?: string; role: string; permissions: string[]; companyName: string; active: boolean; temporaryPassword?: string };
+
+test.describe.serial("Clientes · Fase 3: Perfiles", () => {
+  const stamp = Date.now();
+  const email = `e2e.perfil.${stamp}@andesoutdoor.cl`;
+  let andes = 0;
+
+  test("API: crear con o sin correo, rol Cliente fijo, correo de Keycloak, editar, desactivar y registro", async () => {
+    const admin = await coreApi("admin@nexus.local");
+    const reader = await coreApi("admin.lectura@nexus.local");
+    const cliente = await coreApi("cliente1@nexus.local");
+    andes = (await admin<{ data: Company[] }>("GET", `/v1/companies?q=${encodeURIComponent("Andes Outdoor")}`)).body.data[0].id;
+
+    expect((await reader("POST", "/v1/profiles", { name: "X", companyId: andes, email })).status).toBe(403);
+    expect((await cliente("GET", "/v1/profiles")).status).toBe(403);
+
+    const created = await admin<Profile>("POST", "/v1/profiles", { name: "E2E Perfil Correo", companyId: andes, email, phone: "+56 9 1234 5678", jobTitle: "Bodega" });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ role: "cliente", permissions: [], companyName: "Andes Outdoor SpA (demo)", active: true });
+    expect(created.body.temporaryPassword).toBeUndefined();
+    // Keycloak envía el enlace para definir la contraseña.
+    await expect.poll(() => mailSubjects(email), { timeout: 20_000 }).not.toHaveLength(0);
+
+    const dup = await admin<{ fields: { field: string }[] }>("POST", "/v1/profiles", { name: "Otro", companyId: andes, email });
+    expect(dup.status).toBe(409);
+    expect(dup.body.fields[0].field).toBe("email");
+
+    const id = created.body.id;
+    expect((await admin<Profile>("PATCH", `/v1/profiles/${id}`, { name: "E2E Perfil Correo", companyId: andes, phone: "+56 2 2222 3333", jobTitle: "Ventas" })).status).toBe(200);
+    expect((await admin("POST", `/v1/profiles/${id}/disable`, { reason: "no" })).status).toBe(422);
+    expect((await admin<Profile>("POST", `/v1/profiles/${id}/disable`, { reason: "Ya no trabaja en la empresa" })).body.active).toBe(false);
+
+    const log = (await (await ordersApi("admin@nexus.local"))<Activity>("GET", `/v1/activity?module=users&q=${encodeURIComponent("E2E Perfil Correo")}&limit=50`)).body.items
+      .filter((i) => i.entity.label === "E2E Perfil Correo");
+    expect(log.map((i) => i.action).sort()).toEqual(["created", "disabled", "updated"]);
+    expect(log.find((i) => i.action === "updated")!.detailLines).toEqual(["Cargo: Bodega → Ventas", "Teléfono: +56 9 1234 5678 → +56 2 2222 3333"]);
+  });
+
+  test("API: importación masiva crea las filas válidas e informa las inválidas con fila y motivo", async () => {
+    const admin = await coreApi("admin@nexus.local");
+    const form = new FormData();
+    form.append("file", new Blob([readFileSync("e2e/fixtures/perfiles-import.xlsx")]), "perfiles-import.xlsx");
+    const res = await admin<{ rows: number; created: { row: number; name: string }[]; errors: { row: number; message: string }[] }>("POST", "/v1/profiles/import", form);
+    expect(res.status).toBe(200);
+    expect(res.body.created.map((c) => [c.row, c.name])).toEqual([[3, "E2E Import Uno"]]);
+    expect(res.body.errors.map((e) => e.row)).toEqual([4, 5, 6, 7]);
+    expect(res.body.errors.map((e) => e.message).join(" | ")).toMatch(/nombre.*RUT 99\.999\.999-9.*desactivada.*Correo inválido/);
+    expect((await (await coreApi("admin.lectura@nexus.local"))("POST", "/v1/profiles/import", form)).status).toBe(403);
+  });
+
+  test("UI: panel del perfil del seed y lectura sin el permiso", async ({ browser }) => {
+    const page = await browser.newPage();
+    await login(page, "admin@nexus.local");
+    await page.goto(`/clientes/administracion?tab=perfiles&q=${encodeURIComponent("Esperanza")}`);
+    await expect(page.getByRole("heading", { name: "Todos los perfiles" })).toBeVisible();
+    await page.getByRole("button", { name: "Ver detalle del perfil Esperanza Gómez", exact: true }).click();
+    const panel = page.locator(".clients-panel");
+    await expect(panel.getByRole("heading", { name: "Detalle de perfil Esperanza Gómez" })).toBeVisible();
+    for (const text of ["Recursos humanos", "Cliente", "Ninguno", "Andes Outdoor SpA (demo)"]) await expect(panel.getByText(text, { exact: true })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Desactivar" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Activar", exact: true })).toHaveCount(0);
+    await page.close();
+
+    const reader = await browser.newPage();
+    await login(reader, "admin.lectura@nexus.local");
+    await reader.goto(`/clientes/administracion?tab=perfiles&q=${encodeURIComponent("Esperanza")}`);
+    await reader.getByRole("button", { name: "Ver detalle del perfil Esperanza Gómez", exact: true }).click();
+    await expect(reader.getByRole("button", { name: "Nuevo perfil" })).toHaveCount(0);
+    for (const t of ["Editar", "Desactivar", "Activar", "Restablecer contraseña"]) await expect(reader.locator(".clients-panel").getByRole("button", { name: t, exact: true })).toHaveCount(0);
+    await reader.close();
+  });
+
+  test("390 px: el detalle del perfil se abre como modal", async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await login(page, "admin@nexus.local");
+    await page.goto(`/clientes/administracion?tab=perfiles&q=${encodeURIComponent("Esperanza")}`);
+    await page.getByRole("button", { name: "Ver detalle del perfil Esperanza Gómez", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByRole("dialog").getByText("Recursos humanos")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.close();
+  });
+});
+
+// Perfil Cliente sin correo (Fase 3), aparte: falla si el realm local exige correo.
+test.describe("Clientes · Fase 3: Perfil sin correo", () => {
+  // Requiere que el realm local no exija correo (realm del repo desde 3b292d4, SCRUM-231).
+  test("API: perfil sin correo con contraseña temporal; restablecer genera otra", async () => {
+    const admin = await coreApi("admin@nexus.local");
+    const andes = (await admin<{ data: Company[] }>("GET", `/v1/companies?q=${encodeURIComponent("Andes Outdoor")}`)).body.data[0].id;
+    const stamp = Date.now();
+    const local = await admin<Profile>("POST", "/v1/profiles", { name: "E2E Perfil Sin Correo", companyId: andes, username: `e2e.${stamp}` });
+    expect(local.status, JSON.stringify(local.body)).toBe(201);
+    expect(local.body.temporaryPassword).toBeTruthy();
+    const reset = await admin<{ emailSent: boolean; temporaryPassword?: string }>("POST", `/v1/profiles/${local.body.id}/password`);
+    expect(reset.status).toBe(200);
+    expect(reset.body.temporaryPassword).toBeTruthy();
+    expect(reset.body.temporaryPassword).not.toBe(local.body.temporaryPassword);
   });
 });
