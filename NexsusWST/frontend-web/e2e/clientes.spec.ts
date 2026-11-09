@@ -291,3 +291,131 @@ test.describe.serial("Clientes · Fase 3: Perfiles", () => {
     await page.close();
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Fase 4: Solicitudes de perfiles. El Cliente de prueba (cliente1) es de la Empresa Demo Uno; el
+// seed de demostración trae ahí 3 pendientes (una por tipo), 1 aprobada y 1 rechazada, y borra al
+// recargar las solicitudes de esa empresa y los perfiles @demouno.cl.
+// ---------------------------------------------------------------------------------------------
+type Req = { id: number; kind: string; status: string; companyName: string; profile: { name: string; email: string }; reviewedBy: { name: string } | null; rejectionReason: string; createdUserId: number | null };
+type ReqList = { data: Req[]; total: number; counts: { pending: number; approved: number; rejected: number } };
+
+test.describe.serial("Clientes · Fase 4: Solicitudes", () => {
+  const stamp = Date.now();
+  const email = `e2e.solicitud.${stamp}@demouno.cl`;
+  let requestId = 0;
+
+  test("API: el Cliente solicita; sin duplicadas pendientes; correo a quien gestiona perfiles; aislamiento", async () => {
+    const cliente = await coreApi("cliente1@nexus.local");
+    const admin = await coreApi("admin@nexus.local");
+    const reader = await coreApi("admin.lectura@nexus.local");
+
+    // Siempre con correo y con motivo.
+    const invalid = await cliente<{ fields: { field: string }[] }>("POST", "/v1/profile-requests", { kind: "new_profile", name: "Sin correo", reason: "no" });
+    expect(invalid.status).toBe(422);
+    expect(invalid.body.fields.map((f) => f.field).sort()).toEqual(["email", "reason"]);
+
+    const body = { kind: "new_profile", name: `E2E Solicitud ${stamp}`, email, jobTitle: "Bodega", reason: "Nuevo encargado en bodega" };
+    const created = await cliente<Req>("POST", "/v1/profile-requests", body);
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ status: "pending", companyName: "Empresa Demo Uno SpA" });
+    requestId = created.body.id;
+    expect((await cliente<{ error: string }>("POST", "/v1/profile-requests", body)).body.error).toBe("request_pending");
+
+    // El seed ya tiene pendiente la desactivación de Bruno Salinas: otra igual se rechaza.
+    const own = (await cliente<ReqList>("GET", "/v1/profile-requests?status=pending")).body;
+    const bruno = own.data.find((r) => r.kind === "deactivation")!;
+    expect(bruno.profile.name).toBe("Bruno Salinas");
+
+    // Correo (Mailpit) a los Administradores activos con «Gestionar perfiles».
+    await expect.poll(async () => (await mailSubjects("admin@nexus.local")).some((s) => s.includes("Nueva solicitud de perfil")), { timeout: 20_000 }).toBe(true);
+    expect((await mailSubjects("admin.lectura@nexus.local")).some((s) => s.includes("Nueva solicitud de perfil"))).toBe(false);
+
+    // El Cliente solo ve su empresa; Administración clientes ve todas (con KPIs).
+    expect(own.data.every((r) => r.companyName === "Empresa Demo Uno SpA")).toBe(true);
+    const otro = await coreApi("cliente2@nexus.local");
+    expect((await otro<ReqList>("GET", "/v1/profile-requests")).body.data.some((r) => r.id === requestId)).toBe(false);
+    expect((await otro("GET", `/v1/profile-requests/${requestId}`)).status).toBe(404);
+    const all = (await reader<ReqList>("GET", "/v1/profile-requests")).body;
+    expect(all.counts.pending).toBeGreaterThanOrEqual(4);
+    expect((await (await coreApi("jefe@nexus.local"))("GET", "/v1/profile-requests")).status).toBe(403);
+
+    // Responder: solo con el permiso.
+    expect((await reader("POST", `/v1/profile-requests/${requestId}/approve`)).status).toBe(403);
+    expect((await cliente("POST", `/v1/profile-requests/${requestId}/approve`)).status).toBe(403);
+    expect((await admin("POST", "/v1/profile-requests", body)).status).toBe(403); // el Administrador gestiona directo
+  });
+
+  test("API: aceptar crea el perfil y avisa al Cliente; rechazar exige motivo; todo queda en el registro", async () => {
+    const admin = await coreApi("admin@nexus.local");
+    const approved = await admin<Req>("POST", `/v1/profile-requests/${requestId}/approve`);
+    expect(approved.status).toBe(200);
+    expect(approved.body.status).toBe("approved");
+    const profile = (await admin<{ email: string; role: string; companyName: string }>("GET", `/v1/profiles/${approved.body.createdUserId}`)).body;
+    expect(profile).toMatchObject({ email, role: "cliente", companyName: "Empresa Demo Uno SpA" });
+    // El perfil creado recibe el enlace de Keycloak y el Cliente, el aviso de respuesta.
+    await expect.poll(() => mailSubjects(email), { timeout: 20_000 }).not.toHaveLength(0);
+    await expect.poll(async () => (await mailSubjects("cliente1@nexus.local")).some((s) => s.includes("fue aprobada")), { timeout: 20_000 }).toBe(true);
+    expect((await admin<{ error: string }>("POST", `/v1/profile-requests/${requestId}/reject`, { reason: "Tarde" })).body.error).toBe("request_reviewed");
+
+    // Rechazar la activación pendiente del seed: motivo obligatorio.
+    const pending = (await admin<ReqList>("GET", "/v1/profile-requests?status=pending&kind=activation")).body.data.find((r) => r.profile.name === "Pablo Ruiz")!;
+    expect((await admin("POST", `/v1/profile-requests/${pending.id}/reject`, { reason: "no" })).status).toBe(422);
+    const rejected = await admin<Req>("POST", `/v1/profile-requests/${pending.id}/reject`, { reason: "Debe esperar a marzo" });
+    expect(rejected.body).toMatchObject({ status: "rejected", rejectionReason: "Debe esperar a marzo", reviewedBy: { name: "Admin Demo" } });
+    await expect.poll(async () => (await mailSubjects("cliente1@nexus.local")).some((s) => s.includes("fue rechazada")), { timeout: 20_000 }).toBe(true);
+
+    const log = (await (await ordersApi("admin@nexus.local"))<Activity>("GET", `/v1/activity?module=users&limit=100`)).body.items;
+    const labels = log.map((i) => i.actionLabel);
+    for (const l of ["Solicitud de perfil creada", "Solicitud de perfil aprobada", "Solicitud de perfil rechazada"]) expect(labels).toContain(l);
+    expect(log.find((i) => i.action === "request_rejected")!.detailLines).toContain("Motivo: Debe esperar a marzo");
+  });
+
+  test("Campana: la solicitud nueva le llega en vivo al Administrador con el permiso, no al Jefe", async ({ browser }) => {
+    const admin = await browser.newPage();
+    await login(admin, "admin@nexus.local");
+    await admin.goto("/ordenes/empaque");
+    await expect(admin.getByText("En vivo")).toBeVisible();
+    const jefe = await browser.newPage();
+    await login(jefe, "jefe@nexus.local");
+    await jefe.goto("/ordenes/empaque");
+    await expect(jefe.getByText("En vivo")).toBeVisible();
+
+    const cliente = await coreApi("cliente1@nexus.local");
+    const res = await cliente<Req>("POST", "/v1/profile-requests", { kind: "new_profile", name: `E2E Campana ${stamp}`, email: `e2e.campana.${stamp}@demouno.cl`, reason: "Aviso en vivo" });
+    expect(res.status).toBe(201);
+    const bell = admin.locator(".notification-bell > button");
+    await expect(bell).toHaveAttribute("aria-label", /sin leer/);
+    await bell.click();
+    const notice = admin.getByRole("link", { name: /Nueva solicitud de perfil/ });
+    await expect(notice).toHaveAttribute("href", `/clientes/administracion?tab=solicitudes&solicitud=${res.body.id}`);
+    await notice.click();
+    await expect(admin.locator(".clients-panel").getByRole("heading", { name: "Detalle de solicitud" })).toBeVisible();
+    await expect(admin.locator(".clients-panel").getByText(`E2E Campana ${stamp}`)).toBeVisible();
+    await expect(jefe.locator(".notification-bell > button")).toHaveAttribute("aria-label", "Notificaciones");
+    await admin.close();
+    await jefe.close();
+  });
+
+  test("UI: KPIs que filtran, aceptar desde el panel y lectura sin el permiso", async ({ browser }) => {
+    const page = await browser.newPage();
+    await login(page, "admin@nexus.local");
+    await page.goto("/clientes/administracion?tab=solicitudes");
+    await page.getByRole("button", { name: /Pendientes/ }).click();
+    await expect(page).toHaveURL(/estado=pending/);
+    await page.getByRole("button", { name: /Ver la solicitud de Bruno Salinas/ }).click();
+    const panel = page.locator(".clients-panel");
+    await expect(panel.getByRole("button", { name: "Editar y aceptar" })).toHaveCount(0); // desactivación
+    await panel.getByRole("button", { name: "Aceptar solicitud" }).click();
+    await page.locator(".form-modal").getByRole("button", { name: "Aceptar solicitud" }).click();
+    await expect(page.getByText("Solicitud aceptada: desactivación de Bruno Salinas.")).toBeVisible();
+    await page.close();
+
+    const reader = await browser.newPage();
+    await login(reader, "admin.lectura@nexus.local");
+    await reader.goto("/clientes/administracion?tab=solicitudes");
+    await reader.getByRole("button", { name: /Ver la solicitud de Luis Pérez/ }).first().click();
+    for (const t of ["Aceptar solicitud", "Editar y aceptar", "Rechazar"]) await expect(reader.locator(".clients-panel").getByRole("button", { name: t, exact: true })).toHaveCount(0);
+    await reader.close();
+  });
+});

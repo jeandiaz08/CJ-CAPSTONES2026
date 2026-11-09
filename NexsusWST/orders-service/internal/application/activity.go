@@ -38,6 +38,7 @@ var activityFields = map[string]bool{
 	"taxId": true, "email": true, "phone": true, "waveCode": true, "wmsCode": true, "active": true,
 	"jobTitle": true, "companyName": true, "requestId": true, "requestKind": true,
 	"created": true, "rows": true, "failed": true, // carga masiva de perfiles
+	"edited": true, // solicitud aceptada con datos editados
 }
 
 // Dentro de un campo permitido, un cambio viene como {from, to} (por ejemplo, el perfil).

@@ -92,10 +92,20 @@ func TestActivityTexts(t *testing.T) {
 		e.DetailLines[0] != want[0] || e.DetailLines[1] != want[1] {
 		t.Fatalf("empresa editada %v", e.DetailLines)
 	}
+	sol := ActivityItem{Module: "users", Action: "request_rejected", Details: safeDetails(map[string]any{"requestKind": "deactivation", "reason": "Debe seguir activo", "name": "Pablo"})}
+	presentActivity(&sol, "")
+	if want := "Nombre: Pablo|Motivo: Debe seguir activo|Tipo de solicitud: Desactivación"; sol.ActionLabel != "Solicitud de perfil rechazada" || strings.Join(sol.DetailLines, "|") != want {
+		t.Fatalf("solicitud %q %v", sol.ActionLabel, sol.DetailLines)
+	}
 	imp := ActivityItem{Module: "users", Action: "profiles_imported", Details: safeDetails(map[string]any{"created": float64(2), "rows": float64(5), "failed": float64(3)})}
 	presentActivity(&imp, "")
 	if want := "Perfiles creados: 2|Filas con error: 3|Filas leídas: 5"; imp.ActionLabel != "Carga masiva de perfiles" || strings.Join(imp.DetailLines, "|") != want {
 		t.Fatalf("carga masiva %q %v", imp.ActionLabel, imp.DetailLines)
+	}
+	vacio := ActivityItem{Module: "users", Action: "company_updated", Details: safeDetails(map[string]any{"phone": map[string]any{"from": "", "to": "+56 2 2222 3333"}})}
+	presentActivity(&vacio, "")
+	if want := "Teléfono: — → +56 2 2222 3333"; strings.Join(vacio.DetailLines, "|") != want {
+		t.Fatalf("dato vacío %v", vacio.DetailLines)
 	}
 	o := ActivityItem{Module: "orders", Action: "validate", Details: map[string]any{"fromStatus": "validating", "toStatus": "validated"}}
 	presentActivity(&o, "")

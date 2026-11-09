@@ -4,3 +4,4 @@ export { CompanyProfilesView } from "./components/CompanyProfilesView";
 export { IntegrationsSoon } from "./components/IntegrationsSoon";
 export { ProfilesTab } from "./components/ProfilesTab";
 export { ProfileFormModal } from "./components/ProfileFormModal";
+export { RequestsTab } from "./components/RequestsTab";

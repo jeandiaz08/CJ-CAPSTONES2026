@@ -116,6 +116,22 @@ Perfil (respuesta): `{id, name, email, hasEmail, phone, jobTitle, role, permissi
 - **Registro:** `created`, `updated` (con `phone`, `jobTitle`, `companyName` en antes y después), `disabled` y `enabled` (con motivo), `password_reset` y `password_email_sent` quedan en `user_audit` del perfil. La carga masiva deja además, por empresa, `profiles_imported` `{created, rows, failed}`. Todo aparece en Registro de acciones › Usuarios.
 - **`/v1/users`** sigue existiendo para la administración general (consulta: Administrador; cambios: permiso).
 
+### Solicitudes de perfiles (Tarea 07, RF-02) — crea: Cliente · consulta: Cliente (su empresa) y Administración clientes · responde: permiso **Gestionar perfiles**
+
+| Método | Ruta | Cuerpo / filtros | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/profile-requests` | `?status=pending\|approved\|rejected&kind=new_profile\|activation\|deactivation&q=&company_id=&from=&to=&ids=&limit=&offset=` | `{data, total, counts:{pending, approved, rejected}, limit, offset}`. `counts` (KPIs) usa los mismos filtros sin el estado. El Cliente recibe solo las de su empresa (el servidor ignora otro `company_id`). Jefe y Empaque: 403. |
+| GET | `/v1/profile-requests/{id}` | | Detalle. Una de otra empresa responde 404 al Cliente. |
+| POST | `/v1/profile-requests` | `{kind, targetUserId?, name?, email?, phone?, jobTitle?, reason}` | Solo el Cliente, para su empresa (201). `new_profile`: `name` y `email` obligatorios (el Cliente siempre tiene correo; 409 si el correo ya tiene perfil). `activation` o `deactivation`: `targetUserId` de un perfil de su empresa (otro: 404) en el estado contrario (si no, 422). `reason` de 5 a 500. **409 `request_pending`** si ya hay una pendiente para el mismo perfil y tipo (índice único de la base). |
+| POST | `/v1/profile-requests/{id}/approve` | sin cuerpo, o `{name, email, phone, jobTitle}` («Editar y aceptar», solo `new_profile`) | Perfil nuevo: se crea como en `POST /v1/profiles` (rol Cliente, empresa de la solicitud; Keycloak envía el enlace). Activación o desactivación: se aplica con el motivo «Solicitud #N: …» (409 `same_state` si el perfil ya está así). 409 `request_reviewed` si ya fue respondida. |
+| POST | `/v1/profile-requests/{id}/reject` | `{reason}` obligatorio (5 a 500) | Rechaza. 409 `request_reviewed` si ya fue respondida. |
+
+Solicitud (respuesta): `{id, companyId, companyName, kind, kindLabel, targetUserId, profile:{name, email, phone, jobTitle}, reason, status, requestedBy:{id, name}, requestedAt, reviewedBy:{id, name}|null, reviewedAt, rejectionReason, createdUserId}`. En activación y desactivación, los datos del perfil se leen del perfil afectado.
+
+- **Registro:** `request_created`, `request_approved` (con `edited` si se editó) y `request_rejected` (con motivo) quedan en `user_audit` con `request_id` y, si hay, el perfil afectado. Salen en Registro de acciones › Usuarios («Solicitud de perfil creada/aprobada/rechazada»).
+- **Campana (WebSocket de Órdenes, mismo canal de Redis por empresa):** al crearla, `{type:"notification", audience:"internal", notification:{id, kind:"profile_request", title, body, requestId, companyId, createdAt}}`; la interfaz la muestra solo a quien tiene «Gestionar perfiles». Al responderla, `audience:"client"`, `kind:"profile_request_reviewed"`, para el Cliente. Sin persistencia (como el resto de la campana).
+- **Correo (SMTP de la app, `SMTP_*` en `.env`; Mailpit en desarrollo):** al crearla, a los usuarios activos con «Gestionar perfiles» y correo; al responderla, al Cliente que la pidió. Texto simple en español con empresa, tipo, nombre del perfil, motivo (y motivo del rechazo) y un enlace a la pantalla (`APP_PUBLIC_URL`). No bloquea: si falla, la acción igual se guarda y el error queda en el log. Sin `SMTP_HOST`, no se envía.
+
 ### Productos y kits (H-04, RF-06) — Administrador, Jefe de Operaciones y Cliente (su empresa)
 
 | Método | Ruta | Cuerpo / filtros | Descripción |

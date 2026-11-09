@@ -97,6 +97,9 @@ services:
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080/auth
       KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://localhost/auth}/realms/nexuswst
       KEYCLOAK_CORE_CLIENT_SECRET: ${KEYCLOAK_CORE_CLIENT_SECRET}
+      # También arma el enlace de los correos de solicitudes de perfiles (Tarea 07). El correo usa
+      # SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_USER, SMTP_PASSWORD y SMTP_STARTTLS, que llegan por
+      # env_file (.env), igual que en Órdenes. Sin SMTP_HOST no se envía (solo queda en el log).
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost}
     depends_on:
       postgres:

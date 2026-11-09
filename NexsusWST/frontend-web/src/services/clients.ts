@@ -125,3 +125,42 @@ export const importProfiles = (scope: ProfileScope, file: File) => {
   form.append("file", file);
   return api<ImportResult>("core", withScope(scope, "/v1/profiles/import"), { method: "POST", body: form });
 };
+
+// ---------------------------------------------------------------------------------------------
+// Solicitudes de perfiles (Tarea 07, Fase 4). El Cliente crea y ve las de su empresa (lo filtra el
+// servidor); Administración clientes ve todas y, con «Gestionar perfiles», acepta o rechaza.
+// ---------------------------------------------------------------------------------------------
+export type RequestKind = "new_profile" | "activation" | "deactivation";
+export type RequestStatus = "pending" | "approved" | "rejected";
+
+export type ProfileRequest = {
+  id: number;
+  companyId: number;
+  companyName: string;
+  kind: RequestKind;
+  kindLabel: string;
+  targetUserId: number | null;
+  profile: { name: string; email: string; phone: string; jobTitle: string };
+  reason: string;
+  status: RequestStatus;
+  requestedBy: { id: number; name: string };
+  requestedAt: string;
+  reviewedBy: { id: number; name: string } | null;
+  reviewedAt: string | null;
+  rejectionReason: string;
+  createdUserId: number | null;
+};
+
+export type RequestFilters = { q?: string; status?: RequestStatus; kind?: RequestKind; from?: string; to?: string; ids?: number[]; limit?: number; offset?: number };
+export type RequestCounts = { pending: number; approved: number; rejected: number };
+export type NewRequest = { kind: RequestKind; targetUserId?: number; name?: string; email?: string; phone?: string; jobTitle?: string; reason: string };
+
+export const listRequests = (f: RequestFilters) =>
+  api<{ data: ProfileRequest[]; total: number; counts: RequestCounts; limit: number; offset: number }>("core", `/v1/profile-requests${query(f)}`);
+export const getRequest = (id: number) => api<ProfileRequest>("core", `/v1/profile-requests/${id}`);
+export const createRequest = (body: NewRequest) => api<ProfileRequest>("core", "/v1/profile-requests", { method: "POST", body: JSON.stringify(body) });
+// Sin cuerpo acepta tal cual; con los datos del perfil es «Editar y aceptar».
+export const approveRequest = (id: number, edits?: { name: string; email: string; phone: string; jobTitle: string }) =>
+  api<ProfileRequest>("core", `/v1/profile-requests/${id}/approve`, { method: "POST", ...(edits ? { body: JSON.stringify(edits) } : {}) });
+export const rejectRequest = (id: number, reason: string) =>
+  api<ProfileRequest>("core", `/v1/profile-requests/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });

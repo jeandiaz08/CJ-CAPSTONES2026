@@ -70,7 +70,8 @@ test.describe.serial("Registro histórico", () => {
       expect(res.status).toBe(200);
       expect(res.body.total, `${section} tiene acciones en el seed`).toBeGreaterThan(0);
       expect(res.body.items.every((i) => i.module === section && Date.parse(i.occurredAt) >= yearAgo)).toBe(true);
-      expect(JSON.stringify(res.body)).not.toMatch(/keycloakId|password|token|secret/i);
+      // Sin credenciales en los datos de cada acción (el nombre de una acción, como «password_email_sent», no es un secreto).
+      expect(JSON.stringify(res.body.items.map((i) => [i.details, (i as Item & { detailLines?: string[] }).detailLines]))).not.toMatch(/keycloakId|password|token|secret/i);
     }
     // El seed tiene una entrega de hace 14 meses: el registro de acciones ya no la devuelve.
     const old = (await jefe<{ items: Item[] }>("GET", "/v1/activity?module=orders&q=48257769242&limit=200")).body.items;

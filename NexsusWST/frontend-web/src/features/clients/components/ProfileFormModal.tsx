@@ -12,16 +12,20 @@ export type CompanyChoice = { id: number; name: string; active: boolean };
 // «Nuevo perfil» y «Editar perfil». Obligatorios: nombre, empresa y correo (el perfil Cliente siempre
 // tiene correo: recibe ahí el enlace para definir su contraseña). El rol queda Cliente fijo, sin
 // permisos internos. Al editar, el correo no cambia (es el acceso a Keycloak). `initial` completa el formulario (por ejemplo, «Editar y
-// aceptar» una solicitud) y `onSaved` recibe el perfil creado o editado.
-export function ProfileFormModal({ scope, profile, initial, companies, title, submitLabel, onClose, onSaved }: {
+// aceptar» una solicitud) y `onSaved` recibe el perfil creado o editado. Con `submitData` el formulario no
+// crea el perfil: entrega los datos (por ejemplo, para aceptar la solicitud con ellos) y `lockCompany` deja
+// la empresa fija.
+export function ProfileFormModal({ scope, profile, initial, companies, title, submitLabel, lockCompany = false, submitData, onClose, onSaved }: {
   scope: ProfileScope;
   profile?: Profile;
   initial?: Partial<ProfileInput>;
   companies: CompanyChoice[];
   title?: string;
   submitLabel?: string;
+  lockCompany?: boolean;
+  submitData?: (body: ProfileInput) => Promise<void>;
   onClose: () => void;
-  onSaved: (profile: Profile) => void | Promise<void>;
+  onSaved?: (profile: Profile) => void | Promise<void>;
 }) {
   const id = useId();
   const [form, setForm] = useState({
@@ -36,7 +40,7 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
   const [formError, setFormError] = useState<string | null>(null);
   const set = (change: Partial<typeof form>) => setForm((f) => ({ ...f, ...change }));
   // Solo empresas activas; al editar se conserva la actual aunque esté desactivada.
-  const options = companies.filter((c) => c.active || c.id === profile?.companyId);
+  const options = companies.filter((c) => c.active || c.id === profile?.companyId || (lockCompany && c.id === initial?.companyId));
 
   const validate = () => {
     const e: Partial<Record<Field, string>> = {};
@@ -58,10 +62,14 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
     const base = { name: form.name.trim(), companyId: Number(form.companyId), phone: form.phone.trim(), jobTitle: form.jobTitle.trim() };
     setBusy(true);
     try {
+      if (submitData) {
+        await submitData({ ...base, email: form.email.trim() });
+        return;
+      }
       const saved = profile
         ? await updateProfile(scope, profile.id, base)
         : await createProfile(scope, { ...base, email: form.email.trim() });
-      await onSaved(saved);
+      await onSaved?.(saved);
     } catch (err) {
       if (err instanceof ApiError && err.fields.length) setErrors(Object.fromEntries(err.fields.map((f) => [f.field, f.message])));
       else setFormError(apiErrorMessage(err));
@@ -85,7 +93,7 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
       submitLabel={submitLabel ?? (profile ? "Guardar cambios" : "Crear perfil")} busy={busy} error={formError}>
       {field("name", "Nombre completo *", <input {...aria("name")} maxLength={120} value={form.name} onChange={(e) => set({ name: e.target.value })} />)}
       {field("companyId", "Empresa *", (
-        <select {...aria("companyId")} value={form.companyId} onChange={(e) => set({ companyId: e.target.value })}>
+        <select {...aria("companyId")} value={form.companyId} disabled={lockCompany} onChange={(e) => set({ companyId: e.target.value })}>
           <option value="" disabled>Elige la empresa</option>
           {options.map((c) => <option key={c.id} value={c.id}>{c.name}{c.active ? "" : " (desactivada)"}</option>)}
         </select>
