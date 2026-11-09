@@ -1,15 +1,18 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Badge } from "@/components/StatusBadge";
 import type { Profile } from "@/services/clients";
 import { dateLabel } from "@/features/orders/components/OrderDetail";
 
 // Panel «Detalle de perfil {nombre}». Rol siempre Cliente, sin permisos internos. Los botones de
 // cambio aparecen solo con «Gestionar perfiles», y Activar o Desactivar según el estado.
-export function ProfileDetail({ profile, canManage, inModal = false, onEdit, onToggle, onPassword }: {
+// `actions` reemplaza los botones de Administración (por ejemplo, las solicitudes del Cliente).
+export function ProfileDetail({ profile, canManage, inModal = false, actions, onEdit, onToggle, onPassword }: {
   profile: Profile;
   canManage: boolean;
   inModal?: boolean;
+  actions?: ReactNode;
   onEdit: () => void;
   onToggle: () => void;
   onPassword: () => void;
@@ -36,7 +39,8 @@ export function ProfileDetail({ profile, canManage, inModal = false, onEdit, onT
           </dl>
         </section>
       </div>
-      {canManage && (
+      {actions && <div className="detail-actions">{actions}</div>}
+      {!actions && canManage && (
         <div className="detail-actions">
           {profile.active
             ? <button type="button" className="btn danger" onClick={onToggle}>Desactivar</button>

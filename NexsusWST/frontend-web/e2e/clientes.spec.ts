@@ -214,7 +214,10 @@ test.describe.serial("Clientes · Fase 3: Perfiles", () => {
     andes = (await admin<{ data: Company[] }>("GET", `/v1/companies?q=${encodeURIComponent("Andes Outdoor")}`)).body.data[0].id;
 
     expect((await reader("POST", "/v1/profiles", { name: "X", companyId: andes, email })).status).toBe(403);
-    expect((await cliente("GET", "/v1/profiles")).status).toBe(403);
+    // Fase 5: el Cliente consulta solo los perfiles de su empresa y no puede crearlos.
+    const own = (await cliente<{ data: { companyId: number }[] }>("GET", "/v1/profiles?limit=200")).body.data;
+    expect(own.some((p) => p.companyId === andes)).toBe(false);
+    expect((await cliente("POST", "/v1/profiles", { name: "X", companyId: andes, email })).status).toBe(403);
 
     const created = await admin<Profile>("POST", "/v1/profiles", { name: "E2E Perfil Correo", companyId: andes, email, phone: "+56 9 1234 5678", jobTitle: "Bodega" });
     expect(created.status).toBe(201);
@@ -417,5 +420,78 @@ test.describe.serial("Clientes · Fase 4: Solicitudes", () => {
     await reader.getByRole("button", { name: /Ver la solicitud de Luis Pérez/ }).first().click();
     for (const t of ["Aceptar solicitud", "Editar y aceptar", "Rechazar"]) await expect(reader.locator(".clients-panel").getByRole("button", { name: t, exact: true })).toHaveCount(0);
     await reader.close();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Fase 5: Clientes › Perfiles empresa (perfil Cliente). cliente1 es de la Empresa Demo Uno; el seed
+// trae ahí a Camila Soto (activa, sin solicitudes), que la Fase 4 no toca.
+// ---------------------------------------------------------------------------------------------
+test.describe.serial("Clientes · Fase 5: Perfiles empresa", () => {
+  test("API: el Cliente consulta y exporta solo los perfiles de su empresa", async () => {
+    const cliente = await coreApi("cliente1@nexus.local");
+    const list = (await cliente<{ data: { companyName: string; role: string }[] }>("GET", "/v1/profiles?limit=200")).body.data;
+    expect(list.length).toBeGreaterThan(0);
+    expect(list.every((p) => p.companyName === "Empresa Demo Uno SpA" && p.role === "cliente")).toBe(true);
+    // ?company_id de otra empresa no cambia nada: manda la empresa del Cliente.
+    const admin = await coreApi("admin@nexus.local");
+    const andes = (await admin<{ data: { id: number }[] }>("GET", `/v1/companies?q=${encodeURIComponent("Andes Outdoor")}`)).body.data[0].id;
+    const forced = (await cliente<{ data: { companyName: string }[] }>("GET", `/v1/profiles?company_id=${andes}&limit=200`)).body.data;
+    expect(forced.every((p) => p.companyName === "Empresa Demo Uno SpA")).toBe(true);
+    const esperanza = (await admin<{ data: { id: number }[] }>("GET", "/v1/profiles?q=Esperanza")).body.data[0].id;
+    expect((await cliente("GET", `/v1/profiles/${esperanza}`)).status).toBe(404);
+    // Sin permisos de escritura.
+    expect((await cliente("POST", "/v1/profiles", { name: "X", companyId: 1, email: "x@demouno.cl" })).status).toBe(403);
+    expect((await cliente("GET", "/v1/profiles/export")).status).toBe(200);
+  });
+
+  test("UI: Mis perfiles, solicitar desactivación con motivo, «Solicitud pendiente» y Mis solicitudes", async ({ browser }) => {
+    const page = await browser.newPage();
+    await login(page, "cliente1@nexus.local");
+    await page.goto("/clientes/perfiles-empresa");
+    await expect(page.getByRole("heading", { name: "Perfiles Empresa Demo Uno SpA" })).toBeVisible();
+    await page.getByRole("button", { name: "Ver detalle del perfil Camila Soto", exact: true }).click();
+    const panel = page.locator(".clients-panel");
+    await expect(panel.getByText("Ninguno", { exact: true })).toBeVisible(); // permisos
+    await panel.getByRole("button", { name: "Solicitar desactivación" }).click();
+    const modal = page.locator(".form-modal");
+    await modal.getByRole("button", { name: "Enviar solicitud" }).click();
+    await expect(modal.getByText("Indica el motivo de la solicitud.")).toBeVisible();
+    await modal.getByLabel("Motivo").fill("Cambio de área a otra empresa");
+    await modal.getByRole("button", { name: "Enviar solicitud" }).click();
+    await expect(page.getByText("Solicitud enviada; te avisaremos cuando el Administrador la revise.")).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Solicitud pendiente" })).toBeDisabled();
+    const row = page.getByRole("row", { name: /Camila Soto/ });
+    await expect(row.getByText("Solicitud pendiente")).toBeVisible();
+
+    // La misma solicitud dos veces: la base lo impide aunque se intente por la API.
+    const again = await (await coreApi("cliente1@nexus.local"))<{ error: string }>("POST", "/v1/profile-requests", { kind: "deactivation", targetUserId: Number(new URL(page.url()).searchParams.get("perfil")), reason: "Otra vez" });
+    expect(again.body.error).toBe("request_pending");
+
+    await page.getByRole("link", { name: "Mis solicitudes" }).click();
+    await expect(page.getByRole("button", { name: /Pendientes/ })).toBeVisible();
+    await page.getByRole("button", { name: "Ver la solicitud de Camila Soto" }).click();
+    await expect(page.locator(".clients-panel").getByText("Pendiente", { exact: true })).toBeVisible();
+    await expect(page.locator(".clients-panel").getByRole("button", { name: "Aceptar solicitud" })).toHaveCount(0);
+    await page.close();
+  });
+
+  test("UI: Solicitar nuevo perfil (correo obligatorio) y 390 px como modal", async ({ browser }) => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await login(page, "cliente1@nexus.local");
+    await page.goto("/clientes/perfiles-empresa");
+    await page.getByRole("button", { name: "Solicitar nuevo perfil" }).click();
+    const modal = page.locator(".form-modal");
+    await modal.getByLabel("Nombre completo *").fill(`E2E Nuevo ${Date.now()}`);
+    await modal.getByLabel("Motivo u observación *").fill("Nuevo encargado de despacho");
+    await modal.getByRole("button", { name: "Enviar solicitud" }).click();
+    await expect(modal.getByText(/El correo es obligatorio/)).toBeVisible();
+    await modal.getByLabel("Correo *").fill(`e2e.nuevo.${Date.now()}@demouno.cl`);
+    await modal.getByRole("button", { name: "Enviar solicitud" }).click();
+    await expect(page.getByText("Solicitud enviada; te avisaremos cuando el Administrador la revise.")).toBeVisible();
+    await page.getByRole("button", { name: "Ver detalle del perfil Camila Soto", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.close();
   });
 });

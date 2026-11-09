@@ -59,7 +59,7 @@ func (r *Profiles) ListProfiles(ctx context.Context, f ports.ProfileFilter) ([]p
 		where = append(where, fmt.Sprintf(`(u.name ILIKE '%%' || $%[1]d || '%%' OR u.email ILIKE '%%' || $%[1]d || '%%'
 			OR u.username ILIKE '%%' || $%[1]d || '%%' OR c.name ILIKE '%%' || $%[1]d || '%%')`, n))
 	}
-	if f.CompanyID > 0 {
+	if f.CompanyID != 0 { // -1: Cliente sin empresa activa (no ve nada)
 		add("EXISTS (SELECT 1 FROM user_companies uc WHERE uc.user_id = u.id AND uc.company_id = $%d)", f.CompanyID)
 	}
 	if f.Active != nil {

@@ -18,7 +18,8 @@ import (
 )
 
 // ProfileHandler - Clientes › Administración clientes › Perfiles (Tarea 07). Consultan el
-// Administrador y quien gestione perfiles; crear, editar, activar, desactivar, restablecer la
+// Administrador y quien gestione perfiles, y el Cliente solo los de su empresa (Perfiles empresa,
+// Fase 5: el servidor fija la empresa); crear, editar, activar, desactivar, restablecer la
 // contraseña e importar exige «Gestionar perfiles» (403 sin él). ?scope=client (por defecto); los
 // perfiles de WeStorage (scope=internal) llegan con Configuración › Usuarios WeStorage.
 type ProfileHandler struct{ svc *application.Profiles }
@@ -31,7 +32,7 @@ func (h *ProfileHandler) Register(mux *http.ServeMux, auth func(http.Handler) ht
 	view := func(f http.HandlerFunc) http.Handler {
 		return auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id, _ := tenant.From(r.Context())
-			if !id.CanViewClientAdmin() {
+			if !id.CanViewClientAdmin() && !id.HasRole(tenant.RoleCliente) {
 				httpx.Error(w, http.StatusForbidden, "forbidden", "Administración clientes es solo para el Administrador o quien tenga el permiso Gestionar perfiles.")
 				return
 			}
@@ -61,9 +62,23 @@ func scopeOf(r *http.Request) domain.ProfileScope {
 	return domain.ProfileScopeClient
 }
 
+// clientCompanyOf: el Cliente solo consulta su empresa (0 = no es Cliente). Sin empresa activa, -1
+// (no ve nada).
+func clientCompanyOf(r *http.Request) int64 {
+	id, _ := tenant.From(r.Context())
+	if !id.HasRole(tenant.RoleCliente) {
+		return 0
+	}
+	if len(id.Companies) == 0 {
+		return -1
+	}
+	return id.Companies[0]
+}
+
 func profileFilter(r *http.Request) (ports.ProfileFilter, error) {
 	q := r.URL.Query()
 	f := ports.ProfileFilter{Scope: scopeOf(r), Query: q.Get("q")}
+
 	if v := q.Get("company_id"); v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || id <= 0 {
@@ -102,6 +117,9 @@ func profileFilter(r *http.Request) (ports.ProfileFilter, error) {
 	}
 	f.Limit, _ = strconv.Atoi(q.Get("limit"))
 	f.Offset, _ = strconv.Atoi(q.Get("offset"))
+	if c := clientCompanyOf(r); c != 0 {
+		f.Scope, f.CompanyID = domain.ProfileScopeClient, c // la empresa del Cliente manda sobre ?company_id
+	}
 	return f, nil
 }
 
@@ -182,6 +200,10 @@ func (h *ProfileHandler) get(w http.ResponseWriter, r *http.Request) {
 	v, err := h.svc.Get(r.Context(), scopeOf(r), id)
 	if err != nil {
 		writeProfileErr(w, err)
+		return
+	}
+	if c := clientCompanyOf(r); c != 0 && v.CompanyID != c {
+		writeProfileErr(w, domain.ErrNotFound) // un perfil de otra empresa no existe para el Cliente
 		return
 	}
 	httpx.JSON(w, http.StatusOK, v)

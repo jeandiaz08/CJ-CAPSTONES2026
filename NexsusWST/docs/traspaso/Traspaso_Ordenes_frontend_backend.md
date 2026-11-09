@@ -108,6 +108,7 @@
 | M5 | Aviso en vivo de cambios del manifiesto | Mensaje WS `{"type":"manifest.changed", manifestId, orderId?, code?}` al escanear o cerrar | — | Un escaneo desde otro dispositivo se ve recién al recargar |
 | M6 | Perfil del actor al momento de la acción | `order_events`, `manifests` y `user_audit` guardan `actor_role` (o `role` en `details`) | — (ver 6.1) | `/v1/activity` y `/v1/orders/registry` muestran el perfil **actual** |
 | M7 | Configuración y catálogos en el registro de acciones | Eventos de cortes, horario, hora límite, reglas de ola (hoy se borran en físico), couriers, integraciones, productos, kits y empresas, con `{from, to}` en `details`; un nuevo `module` en `activity_log` | — | Esos cambios no dejan rastro de quién ni cuándo |
+| M8 | Filtrar por permiso los avisos internos del WebSocket (Tarea 07) | Que el aviso `kind: profile_request` (solicitud de perfil nueva) llegue solo a quien tiene el permiso `gestionar_perfiles`. Por ejemplo, un campo `permission` en el mensaje que `ws` (`orders-service/internal/adapters/inbound/http/handler.go`) compare con `id.Permissions` antes de reenviarlo | `frontend-web/src/hooks/useNotificationFeed.ts` (`requestNotice`) | El Core publica el aviso con `audience: internal`: le llega por WebSocket a todo el personal interno de esas empresas (Jefe, Administrador sin el permiso) y el front lo oculta |
 
 ### Baja
 

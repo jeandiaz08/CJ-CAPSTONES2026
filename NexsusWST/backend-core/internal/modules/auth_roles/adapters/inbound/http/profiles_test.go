@@ -205,9 +205,16 @@ func TestProfilesAccess(t *testing.T) {
 		if rec := serveProfiles(h, reader, req("GET", path, "")); rec.Code != http.StatusOK {
 			t.Errorf("el Administrador sin permiso consulta %s: %d %s", path, rec.Code, rec.Body.String())
 		}
-		if rec := serveProfiles(h, client, req("GET", path, "")); rec.Code != http.StatusForbidden {
-			t.Errorf("el Cliente no entra a Administración clientes (%s): %d", path, rec.Code)
+		// Fase 5: el Cliente consulta los perfiles de su empresa (Perfiles empresa).
+		if rec := serveProfiles(h, client, req("GET", path, "")); rec.Code != http.StatusOK {
+			t.Errorf("el Cliente consulta los perfiles de su empresa (%s): %d", path, rec.Code)
 		}
+	}
+	// Un perfil de otra empresa no existe para el Cliente.
+	other := client
+	other.Companies = []int64{3}
+	if rec := serveProfiles(h, other, req("GET", "/v1/profiles/5", "")); rec.Code != http.StatusNotFound {
+		t.Errorf("perfil de otra empresa: %d", rec.Code)
 	}
 	// Un perfil interno no existe para el alcance «client»; el alcance «internal» no está disponible aún.
 	if rec := serveProfiles(h, reader, req("GET", "/v1/profiles/1", "")); rec.Code != http.StatusNotFound {

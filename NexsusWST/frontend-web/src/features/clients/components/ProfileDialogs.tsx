@@ -14,7 +14,7 @@ export const countProfileFilters = (f: ProfileFilterValues) => [f.companyId, f.s
 
 export function ProfileFiltersModal({ values, companies, onApply, onClose }: {
   values: ProfileFilterValues;
-  companies: { id: number; name: string }[];
+  companies?: { id: number; name: string }[]; // sin empresas (Cliente), no se muestra el filtro
   onApply: (values: ProfileFilterValues) => void;
   onClose: () => void;
 }) {
@@ -33,13 +33,13 @@ export function ProfileFiltersModal({ values, companies, onApply, onClose }: {
       <button type="button" className="btn ghost" onClick={() => setForm(EMPTY_PROFILE_FILTERS)}>Limpiar</button>
       <button type="button" className="btn primary" onClick={apply}>Aplicar filtros</button>
     </>}>
-      <div className="modal-field">
+      {companies && <div className="modal-field">
         <label htmlFor={`${id}-company`}>Empresa</label>
         <select id={`${id}-company`} value={form.companyId} onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
           <option value="">Todas</option>
           {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-      </div>
+      </div>}
       <div className="modal-field">
         <label htmlFor={`${id}-status`}>Estado</label>
         <select id={`${id}-status`} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ProfileFilterValues["status"] })}>

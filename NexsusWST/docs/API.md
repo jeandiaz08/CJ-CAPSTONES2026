@@ -94,9 +94,9 @@ Empresa (respuesta): `{id, name, taxId, email, phone, waveCode, profilesCount, a
 - **422 por campo:** `{error:"validation_error", message, fields:[{field, message}]}` con `field` en `name | taxId | email | phone | waveCode | wmsCode | reason`.
 - **Registro:** cada cambio queda en `user_audit` (`target_company_id`) con `action` `company_created | company_updated | company_disabled | company_enabled` y `detail` con el antes y el después (`{campo: {from, to}}`) y el motivo. Aparece en `GET /api/orders/v1/activity?module=users` como entidad `company` («Empresa creada», «Empresa desactivada»…).
 
-### Perfiles de clientes (Tarea 07, RF-02, H-02) — consulta: Administrador o permiso **Gestionar perfiles** · cambios: permiso **Gestionar perfiles**
+### Perfiles de clientes (Tarea 07, RF-02, H-02) — consulta: Administrador, permiso **Gestionar perfiles** o Cliente (su empresa) · cambios: permiso **Gestionar perfiles**
 
-Clientes › Administración clientes › Perfiles. Todas las rutas aceptan `?scope=client` (por defecto). `scope=internal` (perfiles de WeStorage) responde 422 hasta Configuración › Usuarios WeStorage. Un perfil que no es del alcance responde 404.
+Clientes › Administración clientes › Perfiles. Todas las rutas aceptan `?scope=client` (por defecto). `scope=internal` (perfiles de WeStorage) responde 422 hasta Configuración › Usuarios WeStorage. Un perfil que no es del alcance responde 404. **El Cliente** (Perfiles empresa) puede usar `GET /v1/profiles`, `/export` y `/{id}`, siempre filtrados a su empresa en el servidor: se ignora `company_id`, y un perfil de otra empresa responde 404. Las escrituras le responden 403 (solicita con `/v1/profile-requests`).
 
 | Método | Ruta | Cuerpo / filtros | Descripción |
 | --- | --- | --- | --- |
