@@ -49,14 +49,16 @@ Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se co
 | Método | Ruta | Quién | Descripción |
 | --- | --- | --- | --- |
 | GET | `/v1/auth/me` | todos | Perfil: `id, email, name, role, permissions, companies, allCompanies, modules[{module, actions}]`. **Crea el perfil en el primer ingreso** de un usuario creado en la consola de Keycloak. |
-| GET | `/v1/roles` | todos | Roles base y permisos (`despacho`) |
+| GET | `/v1/roles` | todos | Roles base y permisos (`despacho`, `gestionar_perfiles`) |
 
-### Usuarios (H-02, CU-10) — solo Administrador
+### Usuarios (H-02, CU-10) — consulta: Administrador · cambios: permiso **Gestionar perfiles**
+
+Desde la Tarea 07 (Matriz de perfiles v1.2), los `GET` siguen abiertos al perfil Administrador (con o sin el permiso: «Lectura»), y **todas las escrituras** (`POST /v1/users`, `PATCH`, `disable`, `enable`, `password-email` y `password-reset`) exigen el **permiso `gestionar_perfiles`**, no el perfil. Sin él responden **403** `forbidden`: «Necesitas el permiso Gestionar perfiles para crear o modificar perfiles, empresas o solicitudes.». Se valida por permiso para que, a futuro, KAM y SAC reciban un permiso parecido limitado a perfiles con rol Cliente (`TODO(futuro)` en `tenant.CanManageProfiles`).
 
 | Método | Ruta | Cuerpo / filtros | Descripción |
 | --- | --- | --- | --- |
 | GET | `/v1/users` | `?q=&role=&active=true\|false&limit=&offset=` | Listado `{items, total}` |
-| POST | `/v1/users` | `{email, name, role, permissions[], companies[], allCompanies}` o, sin correo, `{username, name, role, …}` | Con correo: crea en Keycloak con su rol y le envía el **correo para definir la contraseña** (409 `email_taken`). Sin correo (H-02-T09, solo personal interno): crea el usuario con una **contraseña temporal** que viene una sola vez en `temporaryPassword` (409 `username_taken`). |
+| POST | `/v1/users` | `{email, name, role, permissions[], companies[], allCompanies}` o, sin correo, `{username, name, role, …}` | Con correo: crea en Keycloak con su rol y le envía el **correo para definir la contraseña** (409 `email_taken`). Sin correo (H-02-T09; personal interno o perfil Cliente): crea el usuario con una **contraseña temporal** que viene una sola vez en `temporaryPassword` (409 `username_taken`). |
 | GET | `/v1/users/{id}` | | Detalle |
 | PATCH | `/v1/users/{id}` | cualquiera de `{name, role, permissions, companies, allCompanies}` | Edita. Nadie cambia **su propio** rol, permisos ni empresas (403). |
 | POST | `/v1/users/{id}/disable` | `{reason}` | Deshabilita en Keycloak, cierra sus sesiones y bloquea su siguiente petición. Lo que tenía tomado en empaque vuelve a la bandeja. |
@@ -65,9 +67,9 @@ Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se co
 | POST | `/v1/users/{id}/password-reset` | | `{temporaryPassword}`: contraseña temporal nueva que el usuario cambia al entrar; cierra sus sesiones. Para quien no tiene correo (también sirve si perdió su correo). No aplica a uno mismo (422). |
 | GET | `/v1/users/{id}/history` | | Auditoría: quién cambió qué y cuándo |
 
-**Usuarios sin correo (H-02-T09).** Personal de bodega que no tiene correo: el usuario es de 3 a 40 caracteres `[a-z0-9._-]`, empieza con letra o número y no lleva `@`. El rol y las empresas los asigna el administrador como a cualquiera. El usuario (vista) trae `username`, `email` (vacío) y `hasEmail: false`; la interfaz muestra «Restablecer contraseña» en vez de «Reenviar correo». `temporaryPassword` solo viene en la respuesta de alta o de restablecimiento (con `Cache-Control: no-store`), no se guarda en Nexus ni en la auditoría. En el login, el campo «Correo o usuario» acepta ambos.
+**Usuarios sin correo (H-02-T09).** Personal de bodega o perfil Cliente que no tiene correo (el Cliente, desde la Tarea 07): el usuario es de 3 a 40 caracteres `[a-z0-9._-]`, empieza con letra o número y no lleva `@`. El rol y las empresas los asigna el administrador como a cualquiera. El usuario (vista) trae `username`, `email` (vacío) y `hasEmail: false`; la interfaz muestra «Restablecer contraseña» en vez de «Reenviar correo». `temporaryPassword` solo viene en la respuesta de alta o de restablecimiento (con `Cache-Control: no-store`), no se guarda en Nexus ni en la auditoría. En el login, el campo «Correo o usuario» acepta ambos.
 
-Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni el permiso `despacho`.
+Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni permisos internos (`despacho`, `gestionar_perfiles`).
 
 ### Productos y kits (H-04, RF-06) — Administrador, Jefe de Operaciones y Cliente (su empresa)
 

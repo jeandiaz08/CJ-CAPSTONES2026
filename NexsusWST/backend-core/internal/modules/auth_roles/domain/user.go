@@ -24,7 +24,8 @@ var (
 var (
 	Roles         = []string{"admin", "jefe_operaciones", "analista", "empaque", "cliente"}
 	InternalRoles = []string{"admin", "jefe_operaciones", "analista", "empaque"}
-	Permissions   = []string{"despacho"} // «Despacho» es un permiso, no un perfil
+	// «Despacho» y «Gestionar perfiles» son permisos, no perfiles (Matriz de perfiles v1.2).
+	Permissions = []string{"despacho", "gestionar_perfiles"}
 )
 
 type User struct {
@@ -46,7 +47,7 @@ type User struct {
 // Draft son los datos que el administrador puede fijar.
 type Draft struct {
 	Email        string
-	Username     string // usuario sin correo (H-02-T09): solo personal interno
+	Username     string // usuario sin correo (H-02-T09): personal interno o perfil Cliente (Tarea 07)
 	Name         string
 	Role         string
 	Permissions  []string
@@ -67,11 +68,9 @@ func (d *Draft) Normalize() (string, bool) {
 			return "correo inválido", false
 		}
 	case d.Username == "":
-		return "indica el correo o, para personal de bodega sin correo, un nombre de usuario", false
+		return "indica el correo o, para un usuario sin correo, un nombre de usuario", false
 	case !ValidUsername(d.Username):
 		return "nombre de usuario inválido: de 3 a 40 caracteres, solo minúsculas, números, punto, guion o guion bajo, y debe empezar con letra o número", false
-	case !slices.Contains(InternalRoles, d.Role):
-		return "un usuario sin correo debe ser personal interno de WeStorage (no cliente)", false
 	}
 	if d.Name == "" || len(d.Name) > 120 {
 		return "el nombre es obligatorio (máx. 120 caracteres)", false
@@ -95,7 +94,7 @@ func (d *Draft) Normalize() (string, bool) {
 			return "un usuario cliente no puede ver todas las empresas", false
 		}
 		if len(d.Permissions) > 0 {
-			return "un usuario cliente no puede tener el permiso Despacho", false
+			return "un usuario cliente no puede tener permisos internos (Despacho ni Gestionar perfiles)", false
 		}
 	}
 	if !d.AllCompanies && len(d.Companies) == 0 {

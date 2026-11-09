@@ -21,6 +21,15 @@ INSERT INTO users (email, name, role, permissions, all_companies)
 VALUES ('cliente2@nexus.local', 'Cliente Demo Dos', 'cliente', '{}', FALSE)
 ON CONFLICT DO NOTHING;
 
+-- Tarea 07: el Administrador demo tiene «Gestionar perfiles»; «Admin Lectura Demo»
+-- no lo tiene y sirve para probar la lectura (sin Nuevo, Editar, Activar/Desactivar
+-- ni Aceptar/Rechazar; el servidor responde 403).
+UPDATE users SET permissions = array_append(permissions, 'gestionar_perfiles')
+WHERE email = 'admin@nexus.local' AND NOT ('gestionar_perfiles' = ANY(permissions));
+INSERT INTO users (email, name, role, permissions, all_companies)
+VALUES ('admin.lectura@nexus.local', 'Admin Lectura Demo', 'admin', '{}', TRUE)
+ON CONFLICT DO NOTHING;
+
 INSERT INTO user_companies (user_id, company_id)
 SELECT u.id, c.id FROM users u JOIN companies c ON
   (u.email = 'cliente1@nexus.local' AND c.tax_id = '11.111.111-1') OR

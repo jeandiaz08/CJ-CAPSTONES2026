@@ -9,7 +9,8 @@ import { useAuth } from "@/state/auth";
 
 // La variable se resuelve al compilar: sin ella, esta lista no llega al build.
 const DEMO = process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === "true" ? [
-  ["admin@nexus.local", "Administrador"],
+  ["admin@nexus.local", "Administrador (permiso Gestionar perfiles)"],
+  ["admin.lectura@nexus.local", "Administrador sin Gestionar perfiles (lectura)"],
   ["jefe@nexus.local", "Jefe de Operaciones"],
   ["empaque@nexus.local", "Empaque (permiso Despacho)"],
   ["analista@nexus.local", "Analista"],

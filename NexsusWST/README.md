@@ -161,7 +161,8 @@ La sesión la maneja Auth.js: los tokens quedan en una cookie httpOnly cifrada y
 
 | Correo | Rol | Qué ve |
 |---|---|---|
-| `admin@nexus.local` | Administrador | Todo |
+| `admin@nexus.local` | Administrador (permiso Gestionar perfiles) | Todo |
+| `admin.lectura@nexus.local` | Administrador sin Gestionar perfiles | Todo; Clientes › Administración clientes en solo lectura |
 | `jefe@nexus.local` | Jefe de Operaciones (permiso Despacho) | Operación, olas, incidencias, reglas |
 | `empaque@nexus.local` | Empaque (permiso Despacho) | Empaque y retiro |
 | `analista@nexus.local` | Analista | Consulta |

@@ -27,18 +27,23 @@ func (h *Handler) Register(mux *http.ServeMux, authMW func(http.Handler) http.Ha
 	mux.Handle("PATCH /v1/me/notes/{id}", authMW(http.HandlerFunc(h.updateNote)))
 	mux.Handle("DELETE /v1/me/notes/{id}", authMW(http.HandlerFunc(h.deleteNote)))
 
-	// Facultad administrativa: solo el perfil Administrador (RF-02).
+	// Consulta: el perfil Administrador (RF-02; sin el permiso, en lectura).
 	admin := func(f http.HandlerFunc) http.Handler {
 		return authMW(tenant.RequireRole(tenant.RoleAdmin)(f))
 	}
+	// Escrituras: el permiso «Gestionar perfiles», no el perfil (Matriz v1.2,
+	// regla 11). /v1/users cubre perfiles internos y de clientes: alcance «todos».
+	manage := func(f http.HandlerFunc) http.Handler {
+		return authMW(tenant.RequireManageProfiles(tenant.ProfileScopeAll)(f))
+	}
 	mux.Handle("GET /v1/users", admin(h.list))
-	mux.Handle("POST /v1/users", admin(h.create))
+	mux.Handle("POST /v1/users", manage(h.create))
 	mux.Handle("GET /v1/users/{id}", admin(h.get))
-	mux.Handle("PATCH /v1/users/{id}", admin(h.update))
-	mux.Handle("POST /v1/users/{id}/disable", admin(h.disable))
-	mux.Handle("POST /v1/users/{id}/enable", admin(h.enable))
-	mux.Handle("POST /v1/users/{id}/password-email", admin(h.passwordEmail))
-	mux.Handle("POST /v1/users/{id}/password-reset", admin(h.passwordReset))
+	mux.Handle("PATCH /v1/users/{id}", manage(h.update))
+	mux.Handle("POST /v1/users/{id}/disable", manage(h.disable))
+	mux.Handle("POST /v1/users/{id}/enable", manage(h.enable))
+	mux.Handle("POST /v1/users/{id}/password-email", manage(h.passwordEmail))
+	mux.Handle("POST /v1/users/{id}/password-reset", manage(h.passwordReset))
 	mux.Handle("GET /v1/users/{id}/history", admin(h.history))
 	mux.Handle("GET /v1/roles", authMW(http.HandlerFunc(h.roles)))
 }
@@ -89,7 +94,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 
 type userBody struct {
 	Email        string   `json:"email"`
-	Username     string   `json:"username"` // sin correo (H-02-T09): solo personal interno
+	Username     string   `json:"username"` // sin correo (H-02-T09): personal interno o perfil Cliente
 	Name         string   `json:"name"`
 	Role         string   `json:"role"`
 	Permissions  []string `json:"permissions"`
