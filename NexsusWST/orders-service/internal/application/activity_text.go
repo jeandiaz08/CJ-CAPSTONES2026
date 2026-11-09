@@ -35,6 +35,13 @@ var activityActions = map[string]string{
 	"created": "Usuario creado", "updated": "Usuario editado", "enabled": "Usuario activado", "disabled": "Usuario desactivado",
 	"password_reset": "Contraseña temporal generada", "password_email_sent": "Correo de contraseña enviado",
 	"linked": "Vinculado con Keycloak", "relinked": "Revinculado con Keycloak", "provisioned": "Alta en el primer ingreso",
+	// empresas cliente (Tarea 07)
+	"company_created": "Empresa creada", "company_updated": "Empresa editada",
+	"company_enabled": "Empresa activada", "company_disabled": "Empresa desactivada",
+	"profiles_imported": "Carga masiva de perfiles",
+	// solicitudes de perfiles (Tarea 07)
+	"request_created": "Solicitud de perfil creada", "request_approved": "Solicitud de perfil aprobada",
+	"request_rejected": "Solicitud de perfil rechazada",
 }
 
 func actionLabel(a string) string {
@@ -86,6 +93,11 @@ func listText(v any) string {
 		return "—"
 	case float64:
 		return fmt.Sprint(int64(x))
+	case string:
+		if strings.TrimSpace(x) == "" {
+			return "—" // dato vacío (por ejemplo, una empresa sin teléfono)
+		}
+		return x
 	default:
 		return fmt.Sprint(x)
 	}
@@ -106,6 +118,9 @@ func detailLines(module string, d map[string]any) []string {
 		"username": "Usuario", "withoutEmail": "Sin correo", "temporary": "Contraseña temporal", "source": "Origen", "reason": "Motivo",
 		"waveId": "Ola", "manifestId": "Manifiesto", "authorizedBy": "Autorizó", "missingPackages": "Bultos faltantes",
 		"scannedPackages": "Bultos escaneados", "packagesTotal": "Bultos de la orden",
+		"taxId": "RUT", "email": "Correo", "phone": "Teléfono", "waveCode": "Ola", "wmsCode": "Código Invas",
+		"active": "Estado", "jobTitle": "Cargo", "companyName": "Empresa", "created": "Perfiles creados", "rows": "Filas leídas", "failed": "Filas con error",
+		"requestKind": "Tipo de solicitud", "edited": "Editada al aceptar",
 	}
 	if module == "dispatch" {
 		for k, v := range map[string]string{"pickerName": "Quien retira", "pickerId": "RUT", "vehiclePlate": "Patente", "notes": "Notas"} {
@@ -131,6 +146,15 @@ func detailLines(module string, d map[string]any) []string {
 			}
 			if k == "manifestId" {
 				return "#" + listText(x)
+			}
+			if k == "requestKind" {
+				return requestKindText(fmt.Sprint(x))
+			}
+			if k == "active" {
+				if b, ok := x.(bool); ok && b {
+					return "Activa"
+				}
+				return "Inactiva"
 			}
 			return listText(x)
 		}
@@ -226,4 +250,17 @@ func (a *Activity) Export(ctx context.Context, id tenant.Identity, f ports.Activ
 		rows = append(rows, spec.row(it, it.OccurredAt.In(loc).Format("2006-01-02 15:04")))
 	}
 	return xlsx.Write(w, spec.sheet, spec.header, rows)
+}
+
+// requestKindText - tipo de solicitud de perfil en español (Tarea 07).
+func requestKindText(k string) string {
+	switch k {
+	case "new_profile":
+		return "Nuevo perfil"
+	case "activation":
+		return "Activación"
+	case "deactivation":
+		return "Desactivación"
+	}
+	return k
 }

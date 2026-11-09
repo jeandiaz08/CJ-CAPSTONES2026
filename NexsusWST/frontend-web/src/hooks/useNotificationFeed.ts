@@ -2,13 +2,16 @@
 
 import { useSyncExternalStore } from "react";
 import { getOrder } from "@/services/orders";
+import { useAuth } from "@/state/auth";
+import type { AccessUser } from "@/state/menuAccess";
 import { useOrdersSocket, type OrderChanged } from "./useOrdersSocket";
 
 // Avisos de la campana: los que llegan por WebSocket mientras la app está abierta. Se guardan
 // solo en memoria (los últimos 20); recargar la página los borra.
 // TODO(api): GET /v1/notifications ya guarda los avisos; usarlo para no perderlos al recargar.
-export type NoticeKind = "incident" | "label_ready" | "delivered" | "despacho_incompleto";
-export type Notice = { key: string; kind: NoticeKind; title: string; body: string; orderId: number | null; at: string; read: boolean };
+export type NoticeKind = "incident" | "label_ready" | "delivered" | "despacho_incompleto" | "profile_request" | "profile_request_reviewed";
+// href: a dónde lleva el aviso (las solicitudes de perfiles abren su pantalla).
+export type Notice = { key: string; kind: NoticeKind; title: string; body: string; orderId: number | null; at: string; read: boolean; href?: string };
 
 const MAX_NOTICES = 20;
 let notices: Notice[] = [];
@@ -33,13 +36,30 @@ export function clearNotices() {
 }
 
 type NotificationMessage = OrderChanged & {
-  notification?: { id: number; kind: string; title: string; body: string; orderId: number | null; createdAt: string };
+  notification?: { id: number | string; kind: string; title: string; body: string; orderId?: number | null; requestId?: number; createdAt: string };
 };
 
-async function handle(message: NotificationMessage) {
+// Solicitudes de perfiles (Tarea 07): la nueva solicitud solo la ve quien tiene «Gestionar perfiles»;
+// la respuesta, solo el Cliente (el servidor ya no le envía al Cliente los avisos internos).
+function requestNotice(n: NonNullable<NotificationMessage["notification"]>, user: AccessUser | null) {
+  if (n.kind === "profile_request" && user?.permissions.includes("gestionar_perfiles")) {
+    return { kind: n.kind, href: `/clientes/administracion?tab=solicitudes&solicitud=${n.requestId}` } as const;
+  }
+  if (n.kind === "profile_request_reviewed" && user?.role === "cliente") {
+    return { kind: n.kind, href: `/clientes/perfiles-empresa?tab=solicitudes&solicitud=${n.requestId}` } as const;
+  }
+  return null;
+}
+
+async function handle(message: NotificationMessage, user: AccessUser | null) {
   const n = message.notification;
+  const request = message.type === "notification" && n ? requestNotice(n, user) : null;
+  if (n && request) {
+    push({ key: `notification:${n.id}`, kind: request.kind, title: n.title, body: n.body, orderId: null, at: n.createdAt, href: request.href });
+    return;
+  }
   if (message.type === "notification" && n && (n.kind === "incident" || n.kind === "label_ready" || n.kind === "despacho_incompleto")) {
-    push({ key: `notification:${n.id}`, kind: n.kind, title: n.title, body: n.body, orderId: n.orderId, at: n.createdAt });
+    push({ key: `notification:${n.id}`, kind: n.kind, title: n.title, body: n.body, orderId: n.orderId ?? null, at: n.createdAt });
     return;
   }
   // TODO(api): la entrega no genera un aviso propio; se arma con order.changed y se pide la referencia.
@@ -53,7 +73,9 @@ async function handle(message: NotificationMessage) {
 
 // Se monta una vez, en el layout de la app, para no perder avisos al cambiar de pantalla.
 export function useNotificationFeed() {
-  useOrdersSocket((message) => void handle(message as NotificationMessage));
+  const { session } = useAuth();
+  const user = session?.user ?? null;
+  useOrdersSocket((message) => void handle(message as NotificationMessage, user));
 }
 
 const subscribe = (listener: () => void) => {

@@ -1,5 +1,5 @@
-// Package application - casos de uso de Clientes.
-// Punto de partida para RF-04: agrega aquí Crear, Editar y Activar/Desactivar.
+// Package application - casos de uso de Clientes. La administración de empresas (RF-04:
+// crear, editar, activar y desactivar, exportar) está en admin.go (Tarea 07).
 package application
 
 import (

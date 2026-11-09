@@ -24,7 +24,8 @@ var (
 var (
 	Roles         = []string{"admin", "jefe_operaciones", "analista", "empaque", "cliente"}
 	InternalRoles = []string{"admin", "jefe_operaciones", "analista", "empaque"}
-	Permissions   = []string{"despacho"} // «Despacho» es un permiso, no un perfil
+	// «Despacho» y «Gestionar perfiles» son permisos, no perfiles (Matriz de perfiles v1.2).
+	Permissions = []string{"despacho", "gestionar_perfiles"}
 )
 
 type User struct {
@@ -71,6 +72,7 @@ func (d *Draft) Normalize() (string, bool) {
 	case !ValidUsername(d.Username):
 		return "nombre de usuario inválido: de 3 a 40 caracteres, solo minúsculas, números, punto, guion o guion bajo, y debe empezar con letra o número", false
 	case !slices.Contains(InternalRoles, d.Role):
+		// El perfil Cliente siempre tiene correo (decisión del 08-11-2026, Tarea 07).
 		return "un usuario sin correo debe ser personal interno de WeStorage (no cliente)", false
 	}
 	if d.Name == "" || len(d.Name) > 120 {
@@ -95,7 +97,7 @@ func (d *Draft) Normalize() (string, bool) {
 			return "un usuario cliente no puede ver todas las empresas", false
 		}
 		if len(d.Permissions) > 0 {
-			return "un usuario cliente no puede tener el permiso Despacho", false
+			return "un usuario cliente no puede tener permisos internos (Despacho ni Gestionar perfiles)", false
 		}
 	}
 	if !d.AllCompanies && len(d.Companies) == 0 {

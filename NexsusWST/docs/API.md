@@ -49,9 +49,11 @@ Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se co
 | Método | Ruta | Quién | Descripción |
 | --- | --- | --- | --- |
 | GET | `/v1/auth/me` | todos | Perfil: `id, email, name, role, permissions, companies, allCompanies, modules[{module, actions}]`. **Crea el perfil en el primer ingreso** de un usuario creado en la consola de Keycloak. |
-| GET | `/v1/roles` | todos | Roles base y permisos (`despacho`) |
+| GET | `/v1/roles` | todos | Roles base y permisos (`despacho`, `gestionar_perfiles`) |
 
-### Usuarios (H-02, CU-10) — solo Administrador
+### Usuarios (H-02, CU-10) — consulta: Administrador · cambios: permiso **Gestionar perfiles**
+
+Desde la Tarea 07 (Matriz de perfiles v1.2), los `GET` siguen abiertos al perfil Administrador (con o sin el permiso: «Lectura»), y **todas las escrituras** (`POST /v1/users`, `PATCH`, `disable`, `enable`, `password-email` y `password-reset`) exigen el **permiso `gestionar_perfiles`**, no el perfil. Sin él responden **403** `forbidden`: «Necesitas el permiso Gestionar perfiles para crear o modificar perfiles, empresas o solicitudes.». Se valida por permiso para que, a futuro, KAM y SAC reciban un permiso parecido limitado a perfiles con rol Cliente (`TODO(futuro)` en `tenant.CanManageProfiles`).
 
 | Método | Ruta | Cuerpo / filtros | Descripción |
 | --- | --- | --- | --- |
@@ -65,9 +67,70 @@ Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se co
 | POST | `/v1/users/{id}/password-reset` | | `{temporaryPassword}`: contraseña temporal nueva que el usuario cambia al entrar; cierra sus sesiones. Para quien no tiene correo (también sirve si perdió su correo). No aplica a uno mismo (422). |
 | GET | `/v1/users/{id}/history` | | Auditoría: quién cambió qué y cuándo |
 
-**Usuarios sin correo (H-02-T09).** Personal de bodega que no tiene correo: el usuario es de 3 a 40 caracteres `[a-z0-9._-]`, empieza con letra o número y no lleva `@`. El rol y las empresas los asigna el administrador como a cualquiera. El usuario (vista) trae `username`, `email` (vacío) y `hasEmail: false`; la interfaz muestra «Restablecer contraseña» en vez de «Reenviar correo». `temporaryPassword` solo viene en la respuesta de alta o de restablecimiento (con `Cache-Control: no-store`), no se guarda en Nexus ni en la auditoría. En el login, el campo «Correo o usuario» acepta ambos.
+**Usuarios sin correo (H-02-T09).** Solo personal de bodega (interno) que no tiene correo. El perfil Cliente siempre tiene correo (decisión del 08-11-2026): el usuario es de 3 a 40 caracteres `[a-z0-9._-]`, empieza con letra o número y no lleva `@`. El rol y las empresas los asigna el administrador como a cualquiera. El usuario (vista) trae `username`, `email` (vacío) y `hasEmail: false`; la interfaz muestra «Restablecer contraseña» en vez de «Reenviar correo». `temporaryPassword` solo viene en la respuesta de alta o de restablecimiento (con `Cache-Control: no-store`), no se guarda en Nexus ni en la auditoría. En el login, el campo «Correo o usuario» acepta ambos.
 
-Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni el permiso `despacho`.
+Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni permisos internos (`despacho`, `gestionar_perfiles`).
+
+### Empresas cliente (Tarea 07, RF-04, H-03) — consulta: Administrador o permiso **Gestionar perfiles** · cambios: permiso **Gestionar perfiles**
+
+Clientes › Administración clientes › Empresas. `GET /v1/clients` (abajo, en Ola por cliente) sigue siendo la lista corta para los formularios de órdenes.
+
+| Método | Ruta | Cuerpo / filtros | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/companies` | `?q=&status=active\|inactive&wave=general\|{código}&from=&to=&ids=1,2&limit=&offset=` | `{data, total, limit, offset}`. `q` busca por nombre o RUT (con o sin puntos). `from` y `to` (`AAAA-MM-DD`) son sobre la fecha de creación, en hora de Chile. `limit` de 1 a 200; por defecto 20. |
+| GET | `/v1/companies/export` | mismos filtros | Excel «Empresas»: Nombre empresa, RUT, Correo, Teléfono, Ola, N° perfiles, Estado, Fecha de creación (+ Código Invas para el Administrador). Máximo 10.000 filas (422 `too_many_rows`). |
+| GET | `/v1/companies/{id}` | | Detalle |
+| POST | `/v1/companies` | `{name, taxId, email, phone, waveCode, wmsCode}` | Crea (201). |
+| PATCH | `/v1/companies/{id}` | el mismo cuerpo, con todos los campos | Edita. Solo se registra lo que cambió. |
+| POST | `/v1/companies/{id}/disable` | `{reason}` (obligatorio, de 5 a 500 caracteres) | Desactiva. Sus usuarios dejan de operar en su siguiente petición (403 `company_disabled` para quien no tenga otra empresa activa); el historial se conserva (H-03, criterio 3). 409 `same_state` si ya estaba inactiva. |
+| POST | `/v1/companies/{id}/enable` | `{reason}` opcional | Activa. |
+
+Empresa (respuesta): `{id, name, taxId, email, phone, waveCode, profilesCount, active, createdAt, updatedAt}`, más `wmsCode` solo para el perfil Administrador.
+
+- **Lo que exige la base (Core 000011):** `name` obligatorio (máx. 120); `taxId` obligatorio y **único sin importar puntos, guion ni mayúsculas** (409 `tax_id_taken` con `fields:[{field:"taxId"}]`); `email` y `phone` opcionales con formato.
+- **RUT:** al crear, o al editarlo, se valida el dígito verificador (módulo 11) y se guarda como `76.123.456-0`. Si al editar no se cambia el RUT, no se vuelve a validar (empresas antiguas con otro formato).
+- **Ola (PV-19):** `waveCode: null` es «General (según reglas)»: sin ola fija, el motor usa las reglas. La interfaz obliga a elegir una opción, pero la base acepta NULL. Un código va en mayúsculas, `^[A-Z0-9_-]{1,20}$`.
+- **Código Invas (`wmsCode`):** opcional; solo lo ve y lo cambia el perfil Administrador (para otro perfil con el permiso se conserva el valor actual).
+- **422 por campo:** `{error:"validation_error", message, fields:[{field, message}]}` con `field` en `name | taxId | email | phone | waveCode | wmsCode | reason`.
+- **Registro:** cada cambio queda en `user_audit` (`target_company_id`) con `action` `company_created | company_updated | company_disabled | company_enabled` y `detail` con el antes y el después (`{campo: {from, to}}`) y el motivo. Aparece en `GET /api/orders/v1/activity?module=users` como entidad `company` («Empresa creada», «Empresa desactivada»…).
+
+### Perfiles de clientes (Tarea 07, RF-02, H-02) — consulta: Administrador, permiso **Gestionar perfiles** o Cliente (su empresa) · cambios: permiso **Gestionar perfiles**
+
+Clientes › Administración clientes › Perfiles. Todas las rutas aceptan `?scope=client` (por defecto). `scope=internal` (perfiles de WeStorage) responde 422 hasta Configuración › Usuarios WeStorage. Un perfil que no es del alcance responde 404. **El Cliente** (Perfiles empresa) puede usar `GET /v1/profiles`, `/export` y `/{id}`, siempre filtrados a su empresa en el servidor: se ignora `company_id`, y un perfil de otra empresa responde 404. Las escrituras le responden 403 (solicita con `/v1/profile-requests`).
+
+| Método | Ruta | Cuerpo / filtros | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/profiles` | `?q=&company_id=&status=active\|inactive&from=&to=&ids=&limit=&offset=` | `{data, total, limit, offset}`. `q` busca por nombre, correo, usuario o empresa. |
+| GET | `/v1/profiles/export` | mismos filtros | Excel «Perfiles» (máx. 10.000 filas). |
+| GET | `/v1/profiles/{id}` | | Detalle |
+| POST | `/v1/profiles` | `{name, companyId, email, phone, jobTitle}` | Crea el perfil con rol **Cliente fijo**, sin permisos, una empresa activa y **siempre con correo** (422 en `email` si falta; un campo `username` responde 400). Keycloak envía el enlace para definir la contraseña. 409 con `fields` si el correo ya existe. |
+| PATCH | `/v1/profiles/{id}` | `{name, companyId, phone, jobTitle}` | Edita. El correo y el usuario no se editan. Una sola acción `updated` con el antes y el después. |
+| POST | `/v1/profiles/{id}/disable` | `{reason}` obligatorio (5 a 500) | Keycloak lo deshabilita y cierra sus sesiones. 409 `same_state` si ya estaba inactivo. |
+| POST | `/v1/profiles/{id}/enable` | `{reason}` opcional | Activa. |
+| POST | `/v1/profiles/{id}/password` | | `{emailSent: true}`: Keycloak envía al correo del perfil el enlace para definir una contraseña nueva. 422 si está inactivo, sin cuenta en Keycloak o sin correo (datos antiguos). |
+| GET | `/v1/profiles/template` | | Plantilla `.xlsx`: hoja «Perfiles» (Nombre completo, RUT empresa, Correo, Teléfono, Cargo; los tres primeros obligatorios; la fila `EJEMPLO…` no se importa) y hoja «Instrucciones» con las empresas activas. |
+| POST | `/v1/profiles/import` | multipart `file` (.xlsx, máx. 5 MB, 500 filas) | `{rows, created:[{row, id, name, email}], errors:[{row, field?, message}]}`. Crea las filas válidas e informa las inválidas con su fila y motivo: sin nombre, sin correo, RUT de empresa inexistente o desactivada, correo inválido, repetido en el archivo o ya registrado. |
+
+Perfil (respuesta): `{id, name, email, hasEmail, phone, jobTitle, role, permissions, companyId, companyName, active, linked, createdAt, lastLoginAt}`.
+
+- **Registro:** `created`, `updated` (con `phone`, `jobTitle`, `companyName` en antes y después), `disabled` y `enabled` (con motivo), `password_reset` y `password_email_sent` quedan en `user_audit` del perfil. La carga masiva deja además, por empresa, `profiles_imported` `{created, rows, failed}`. Todo aparece en Registro de acciones › Usuarios.
+- **`/v1/users`** sigue existiendo para la administración general (consulta: Administrador; cambios: permiso).
+
+### Solicitudes de perfiles (Tarea 07, RF-02) — crea: Cliente · consulta: Cliente (su empresa) y Administración clientes · responde: permiso **Gestionar perfiles**
+
+| Método | Ruta | Cuerpo / filtros | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/profile-requests` | `?status=pending\|approved\|rejected&kind=new_profile\|activation\|deactivation&q=&company_id=&from=&to=&ids=&limit=&offset=` | `{data, total, counts:{pending, approved, rejected}, limit, offset}`. `counts` (KPIs) usa los mismos filtros sin el estado. El Cliente recibe solo las de su empresa (el servidor ignora otro `company_id`). Jefe y Empaque: 403. |
+| GET | `/v1/profile-requests/{id}` | | Detalle. Una de otra empresa responde 404 al Cliente. |
+| POST | `/v1/profile-requests` | `{kind, targetUserId?, name?, email?, phone?, jobTitle?, reason}` | Solo el Cliente, para su empresa (201). `new_profile`: `name` y `email` obligatorios (el Cliente siempre tiene correo; 409 si el correo ya tiene perfil). `activation` o `deactivation`: `targetUserId` de un perfil de su empresa (otro: 404) en el estado contrario (si no, 422). `reason` de 5 a 500. **409 `request_pending`** si ya hay una pendiente para el mismo perfil y tipo (índice único de la base). |
+| POST | `/v1/profile-requests/{id}/approve` | sin cuerpo, o `{name, email, phone, jobTitle}` («Editar y aceptar», solo `new_profile`) | Perfil nuevo: se crea como en `POST /v1/profiles` (rol Cliente, empresa de la solicitud; Keycloak envía el enlace). Activación o desactivación: se aplica con el motivo «Solicitud #N: …» (409 `same_state` si el perfil ya está así). 409 `request_reviewed` si ya fue respondida. |
+| POST | `/v1/profile-requests/{id}/reject` | `{reason}` obligatorio (5 a 500) | Rechaza. 409 `request_reviewed` si ya fue respondida. |
+
+Solicitud (respuesta): `{id, companyId, companyName, kind, kindLabel, targetUserId, profile:{name, email, phone, jobTitle}, reason, status, requestedBy:{id, name}, requestedAt, reviewedBy:{id, name}|null, reviewedAt, rejectionReason, createdUserId}`. En activación y desactivación, los datos del perfil se leen del perfil afectado.
+
+- **Registro:** `request_created`, `request_approved` (con `edited` si se editó) y `request_rejected` (con motivo) quedan en `user_audit` con `request_id` y, si hay, el perfil afectado. Salen en Registro de acciones › Usuarios («Solicitud de perfil creada/aprobada/rechazada»).
+- **Campana (WebSocket de Órdenes, mismo canal de Redis por empresa):** al crearla, `{type:"notification", audience:"internal", notification:{id, kind:"profile_request", title, body, requestId, companyId, createdAt}}`; la interfaz la muestra solo a quien tiene «Gestionar perfiles». Al responderla, `audience:"client"`, `kind:"profile_request_reviewed"`, para el Cliente. Sin persistencia (como el resto de la campana).
+- **Correo (SMTP de la app, `SMTP_*` en `.env`; Mailpit en desarrollo):** al crearla, a los usuarios activos con «Gestionar perfiles» y correo; al responderla, al Cliente que la pidió. Texto simple en español con empresa, tipo, nombre del perfil, motivo (y motivo del rechazo) y un enlace a la pantalla (`APP_PUBLIC_URL`). No bloquea: si falla, la acción igual se guarda y el error queda en el log. Sin `SMTP_HOST`, no se envía.
 
 ### Productos y kits (H-04, RF-06) — Administrador, Jefe de Operaciones y Cliente (su empresa)
 

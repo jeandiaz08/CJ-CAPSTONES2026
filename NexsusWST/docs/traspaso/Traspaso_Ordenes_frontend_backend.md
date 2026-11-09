@@ -25,7 +25,7 @@
     - De tus archivos, solo cambiaron las líneas autorizadas (sección 2.3).
 3. Tu rama `cristopher_dev`, en 7803d1f, se integró en `jean_dev` con el merge **6473d39**, sin conflictos. Desde entonces `cristopher_dev` no tiene commits nuevos, así que `git log jean_dev..origin/cristopher_dev` sale vacío.
 4. `jean_dev` va 17 commits (sin contar merges) por delante de `cristopher_dev`: de bf5d74e (Retiro, Fase 1) a este documento. `test` = `jean_dev` (último merge cfd6016 más el de este documento). `main` no se tocó.
-5. **Numeración de migraciones:** tú sigues desde **Órdenes 000010** y **Core 000011**. Jean no tiene más migraciones previstas.
+5. **Numeración de migraciones (actualizada el 08-11-2026):** Jean toma **Core 000011** y **Órdenes 000010** para el módulo Clientes (Tarea 07). Tú sigues desde **Core 000012** y **Órdenes 000011**.
 
 ---
 
@@ -57,7 +57,7 @@
 | Órdenes | 000007–000008 | `order_stock_lines`, `despacho_incompleto` (`order_events.details`) | Cristopher | — |
 | Órdenes | **000009** | `000009_activity_log` | Jean (24da8ce) | Vista `activity_log` y 2 índices. Solo lectura: no copia ni borra datos |
 
-**Regla:** la próxima migración de Órdenes es **000010** y la de Core es **000011**. Las dos son tuyas. Las tablas de versión son `schema_migrations_orders` y `schema_migrations_core`.
+**Regla (actualizada el 08-11-2026):** Core **000011** y Órdenes **000010** son de Jean (módulo Clientes, Tarea 07: empresas, perfiles, solicitudes y la vista `activity_log` con empresas y solicitudes). Tus próximas migraciones son **Core 000012** y **Órdenes 000011**. Las tablas de versión son `schema_migrations_orders` y `schema_migrations_core`.
 
 ### 2.3 Archivos tuyos que cambié (los únicos autorizados)
 
@@ -108,6 +108,7 @@
 | M5 | Aviso en vivo de cambios del manifiesto | Mensaje WS `{"type":"manifest.changed", manifestId, orderId?, code?}` al escanear o cerrar | — | Un escaneo desde otro dispositivo se ve recién al recargar |
 | M6 | Perfil del actor al momento de la acción | `order_events`, `manifests` y `user_audit` guardan `actor_role` (o `role` en `details`) | — (ver 6.1) | `/v1/activity` y `/v1/orders/registry` muestran el perfil **actual** |
 | M7 | Configuración y catálogos en el registro de acciones | Eventos de cortes, horario, hora límite, reglas de ola (hoy se borran en físico), couriers, integraciones, productos, kits y empresas, con `{from, to}` en `details`; un nuevo `module` en `activity_log` | — | Esos cambios no dejan rastro de quién ni cuándo |
+| M8 | Filtrar por permiso los avisos internos del WebSocket (Tarea 07) | Que el aviso `kind: profile_request` (solicitud de perfil nueva) llegue solo a quien tiene el permiso `gestionar_perfiles`. Por ejemplo, un campo `permission` en el mensaje que `ws` (`orders-service/internal/adapters/inbound/http/handler.go`) compare con `id.Permissions` antes de reenviarlo | `frontend-web/src/hooks/useNotificationFeed.ts` (`requestNotice`) | El Core publica el aviso con `audience: internal`: le llega por WebSocket a todo el personal interno de esas empresas (Jefe, Administrador sin el permiso) y el front lo oculta |
 
 ### Baja
 
@@ -184,8 +185,8 @@ Desde `NexsusWST/`, con Docker. En Windows sin `make`, usa el comando de cada ob
 
 | Paso | Comando | Qué esperar |
 |---|---|---|
-| Levantar y migrar | `make up` (corre `migrate-core`, `migrate-orders` y `seed-dev`) | `schema_migrations_orders` en **9** y `schema_migrations_core` en **10**, ambos con `dirty = false` |
-| Ver versiones | `make psql`, luego `select version, dirty from schema_migrations_orders; select version, dirty from schema_migrations_core;` | `9 f` y `10 f` |
+| Levantar y migrar | `make up` (corre `migrate-core`, `migrate-orders` y `seed-dev`) | `schema_migrations_orders` en **10** y `schema_migrations_core` en **11** (desde la Tarea 07 de Jean), ambos con `dirty = false` |
+| Ver versiones | `make psql`, luego `select version, dirty from schema_migrations_orders; select version, dirty from schema_migrations_core;` | `10 f` y `11 f` |
 | Recargar datos ficticios | `make seed-dev` | Empresas, perfiles y productos de `infrastructure/dev-seed/seed_dev.sql` |
 | Tema de Keycloak | `make theme`, después `docker compose restart keycloak` | `infrastructure/keycloak/theme/dist_keycloak/nexuswst-keycloak-theme.jar` regenerado |
 | Go | `make test-orders` y `make test-core` | Todo `ok`. Las pruebas de postgres (registro y actividad) necesitan `TEST_DATABASE_URL`; sin ella se saltan (`t.Skip`) |

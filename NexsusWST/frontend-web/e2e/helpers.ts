@@ -23,18 +23,36 @@ export async function login(page: Page, email: string) {
   await expect(page.locator(".sidebar")).toBeVisible({ timeout: 90_000 });
 }
 
+// Correos de prueba en Mailpit (solo desarrollo). Devuelve los asuntos de los correos a esa dirección.
+export const MAILPIT = process.env.E2E_MAILPIT ?? "http://127.0.0.1:8025";
+export async function mailSubjects(to: string): Promise<string[]> {
+  const res = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${to}"`)}`);
+  const body = (await res.json()) as { messages?: { Subject: string }[] };
+  return (body.messages ?? []).map((m) => m.Subject);
+}
+
+// API del Core con Bearer (direct grant de desarrollo), igual que ordersApi.
+export async function coreApi(email: string) {
+  return serviceApi("core", email);
+}
+
 // API de Órdenes con Bearer (direct grant de desarrollo), para preparar y comprobar datos.
 export async function ordersApi(email: string) {
+  return serviceApi("orders", email);
+}
+
+async function serviceApi(service: "core" | "orders", email: string) {
   const res = await fetch(`${BASE}/auth/realms/nexuswst/protocol/openid-connect/token`, {
     method: "POST",
     body: new URLSearchParams({ grant_type: "password", client_id: "nexus-web", username: email, password: password(email) }),
   });
   const { access_token: token } = await res.json();
   return async <T = unknown>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> => {
-    const r = await fetch(`${BASE}/api/orders${path}`, {
+    const form = body instanceof FormData; // multipart (importaciones): el boundary lo pone fetch
+    const r = await fetch(`${BASE}/api/${service}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined,
+      headers: { Authorization: `Bearer ${token}`, ...(form ? {} : { "Content-Type": "application/json" }) },
+      body: form ? body : body ? JSON.stringify(body) : undefined,
     });
     return { status: r.status, body: (await r.json().catch(() => ({}))) as T };
   };

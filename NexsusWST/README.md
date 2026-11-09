@@ -161,12 +161,23 @@ La sesión la maneja Auth.js: los tokens quedan en una cookie httpOnly cifrada y
 
 | Correo | Rol | Qué ve |
 |---|---|---|
-| `admin@nexus.local` | Administrador | Todo |
+| `admin@nexus.local` | Administrador (permiso Gestionar perfiles) | Todo |
+| `admin.lectura@nexus.local` | Administrador sin Gestionar perfiles | Todo; Clientes › Administración clientes en solo lectura |
 | `jefe@nexus.local` | Jefe de Operaciones (permiso Despacho) | Operación, olas, incidencias, reglas |
 | `empaque@nexus.local` | Empaque (permiso Despacho) | Empaque y retiro |
 | `analista@nexus.local` | Analista | Consulta |
 | `cliente1@nexus.local` | Cliente (solo Empresa Demo Uno) | Sus órdenes y productos |
 | `cliente2@nexus.local` | Cliente (solo Empresa Demo Dos) | Sus órdenes (sirve para probar el aislamiento) |
+
+**Realm importado antes del 07-11-2026.** Keycloak importa `nexuswst-realm.json` solo al crear el realm. Si el tuyo es anterior, su perfil de usuario todavía exige correo y no se pueden crear usuarios internos sin correo (SCRUM-231): Keycloak responde `error-user-attribute-required`. Para aplicar el perfil de usuario del repo sin recrear Keycloak (desde la raíz, en Git Bash):
+
+```bash
+python -c "import json;r=json.load(open('infrastructure/keycloak/import/nexuswst-realm.json',encoding='utf-8'));open('user-profile.json','w',encoding='utf-8').write(r['components']['org.keycloak.userprofile.UserProfileProvider'][0]['config']['kc.user.profile.config'][0])"
+docker compose cp user-profile.json keycloak:/tmp/user-profile.json && rm user-profile.json
+docker compose exec keycloak sh -c '/opt/keycloak/bin/kcadm.sh config credentials --server "http://localhost:8080${KC_HTTP_RELATIVE_PATH}" --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" && /opt/keycloak/bin/kcadm.sh update users/profile -r nexuswst -f /tmp/user-profile.json'
+```
+
+El correo deja de ser obligatorio en Keycloak; la regla «el perfil Cliente siempre tiene correo» la aplica el Core.
 
 El perfil de Nexus (rol, permisos, empresas) se vincula solo la primera vez que cada usuario ingresa. El servicio `seed-dev` crea estos perfiles al levantar; para recargarlos: `make seed-dev` o `docker compose run --rm seed-dev`.
 
@@ -256,7 +267,12 @@ Las páginas sin implementar muestran **qué requisito cubren y en qué archivos
 Desde `frontend-web/`:
 
 - `npm test`: pruebas de comportamiento (`tests/`, vitest + happy-dom, con los servicios simulados).
-- `npm run test:e2e`: pruebas de punta a punta (`e2e/`, Playwright con el Chrome instalado). Requieren el stack de desarrollo levantado y el seed de demostración recargado, porque modifican datos. Otro navegador: `E2E_CHANNEL=msedge`.
+- `npm run test:e2e`: pruebas de punta a punta (`e2e/`, Playwright con el Chrome instalado). Requieren el stack de desarrollo levantado. Antes de cada corrida, `e2e/global-setup.ts` recarga los datos: corre `seed-dev` y luego el seed de demostración (`respaldo/seed/seed_demo.sql`, solo local), así las pruebas no dependen de lo que dejó la corrida anterior. Si ese archivo no existe, avisa y sigue; `E2E_SKIP_SEED=1` omite la recarga. Otro navegador: `E2E_CHANNEL=msedge`.
+
+### Pruebas de Go y el *healthcheck* de desarrollo
+
+- `make test-core` y `make test-orders` corren `go test ./...` en un contenedor aparte, sin tocar el servicio en ejecución. Las pruebas de PostgreSQL necesitan `TEST_DATABASE_URL`; sin ella se saltan.
+- En desarrollo, Air recompila al guardar y deja el binario en `./tmp/api`. Si se guardan dos archivos casi a la vez, dos compilaciones seguidas pueden dejar `./tmp` sin el binario aunque el servidor siga corriendo. Antes el *healthcheck* ejecutaba ese binario, así que el servicio quedaba `unhealthy` y Traefik dejaba de enviarle tráfico (el front respondía en `/api/core`). Desde el 08-11-2026, en `docker-compose.override.yml`, el *healthcheck* de `core` y `orders` consulta `/health` por HTTP. Si alguna vez pasa algo parecido: `docker compose restart core`.
 
 ### Crear una migración nueva
 

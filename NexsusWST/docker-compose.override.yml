@@ -60,8 +60,10 @@ services:
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
     healthcheck:
-      # En dev el binario lo genera Air en ./tmp
-      test: ["CMD", "/app/tmp/api", "-healthcheck"]
+      # En dev se consulta /health por HTTP y no el binario de Air (./tmp/api): dos
+      # recompilaciones seguidas pueden dejar ./tmp sin el archivo aunque el servidor siga
+      # corriendo, y Traefik sacaba el servicio por «unhealthy».
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       start_period: 90s
 
   orders:
@@ -74,7 +76,8 @@ services:
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
     healthcheck:
-      test: ["CMD", "/app/tmp/api", "-healthcheck"]
+      # Igual que core: /health por HTTP, no el binario de Air.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health"]
       start_period: 90s
 
   keycloak:

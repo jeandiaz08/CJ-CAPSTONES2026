@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bell, CircleAlert, PackageCheck, PackageX, Truck } from "lucide-react";
+import Link from "next/link";
+import { Bell, CircleAlert, PackageCheck, PackageX, Truck, UserCheck, UserPlus } from "lucide-react";
 import { markAllRead, useNotices, type NoticeKind } from "@/hooks/useNotificationFeed";
 
-const ICONS: Record<NoticeKind, typeof Bell> = { incident: CircleAlert, label_ready: PackageCheck, delivered: Truck, despacho_incompleto: PackageX };
+const ICONS: Record<NoticeKind, typeof Bell> = { incident: CircleAlert, label_ready: PackageCheck, delivered: Truck, despacho_incompleto: PackageX, profile_request: UserPlus, profile_request_reviewed: UserCheck };
 const time = (iso: string) => new Date(iso).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
 
 // Campana: contador de avisos sin leer y lista de los últimos 20. Al abrirla se marcan leídos.
@@ -37,7 +38,7 @@ export function NotificationBell() {
         <div className="notification-popover" role="region" aria-label="Avisos">
           <h2>Avisos</h2>
           {notices.length === 0 ? (
-            <p className="muted">Sin avisos por ahora. Aquí aparecen las incidencias, las etiquetas disponibles y las entregas.</p>
+            <p className="muted">Sin avisos por ahora. Aquí aparecen las incidencias, las etiquetas disponibles, las entregas y las solicitudes de perfiles.</p>
           ) : (
             <ul>
               {notices.map((n) => {
@@ -45,7 +46,9 @@ export function NotificationBell() {
                 return (
                   <li key={n.key} className={`notice-${n.kind}`}>
                     <Icon size={18} aria-hidden="true" />
-                    <div><strong>{n.title}</strong><span>{n.body}</span></div>
+                    {n.href
+                      ? <Link href={n.href} className="notice-link" onClick={() => setOpen(false)}><strong>{n.title}</strong><span>{n.body}</span></Link>
+                      : <div><strong>{n.title}</strong><span>{n.body}</span></div>}
                     <time dateTime={n.at}>{time(n.at)}</time>
                   </li>
                 );

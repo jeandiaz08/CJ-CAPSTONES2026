@@ -1,9 +1,10 @@
-// Pruebas de punta a punta (npm run test:e2e) contra el stack de desarrollo levantado y con
-// el seed de demostración recargado: modifican datos (manifiestos, incidencias).
+// Pruebas de punta a punta (npm run test:e2e) contra el stack de desarrollo levantado. Modifican
+// datos (manifiestos, incidencias, empresas): global-setup recarga el seed antes de cada corrida.
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  globalSetup: "./e2e/global-setup.ts", // recarga el seed de demostración antes de cada corrida
   timeout: 180_000,
   workers: 1,
   reporter: "list",

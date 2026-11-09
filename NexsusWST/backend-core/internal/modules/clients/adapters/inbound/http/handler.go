@@ -19,6 +19,7 @@ func NewHandler(svc *application.Service) *Handler { return &Handler{svc: svc} }
 func (h *Handler) Register(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	mux.Handle("GET /v1/clients", auth(http.HandlerFunc(h.list)))
 	mux.Handle("PATCH /v1/clients/{id}/wave", auth(tenant.RequireRole(tenant.RoleAdmin, tenant.RoleJefeOps)(http.HandlerFunc(h.setWave))))
+	h.registerAdmin(mux, auth) // Administración clientes › Empresas (Tarea 07)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
