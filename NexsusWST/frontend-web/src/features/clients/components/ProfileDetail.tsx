@@ -16,7 +16,7 @@ export function ProfileDetail({ profile, canManage, inModal = false, onEdit, onT
 }) {
   const facts: [string, string][] = [
     ["Nombre completo", profile.name],
-    profile.hasEmail ? ["Correo", profile.email] : ["Usuario", profile.username ?? "—"],
+    ["Correo", profile.email || "—"],
     ["Teléfono", profile.phone || "—"],
     ["Cargo", profile.jobTitle || "—"],
     ["Rol", profile.role === "cliente" ? "Cliente" : profile.role],
@@ -43,8 +43,8 @@ export function ProfileDetail({ profile, canManage, inModal = false, onEdit, onT
             : <button type="button" className="btn success" onClick={onToggle}>Activar</button>}
           <div>
             <button type="button" className="btn ghost" onClick={onEdit}>Editar</button>
-            <button type="button" className="btn ghost" disabled={!profile.active || !profile.linked}
-              title={!profile.active ? "Activa el perfil antes de restablecer su contraseña" : !profile.linked ? "El perfil aún no tiene cuenta de acceso" : undefined}
+            <button type="button" className="btn ghost" disabled={!profile.active || !profile.linked || !profile.hasEmail}
+              title={!profile.active ? "Activa el perfil antes de restablecer su contraseña" : !profile.linked ? "El perfil aún no tiene cuenta de acceso" : !profile.hasEmail ? "El perfil no tiene correo" : undefined}
               onClick={onPassword}>Restablecer contraseña</button>
           </div>
         </div>

@@ -20,13 +20,13 @@ func TestDraftEmailOrUsername(t *testing.T) {
 		{"sin correo con usuario", func(d *Draft) { d.Username = " Bodega.Juan " }, true, "bodega.juan", ""},
 		{"ni correo ni usuario", func(d *Draft) {}, false, "", "nombre de usuario"},
 		{"ambos", func(d *Draft) { d.Email = "a@b.cl"; d.Username = "juan" }, false, "", "no ambos"},
-		// Tarea 07: el perfil Cliente también puede crearse sin correo.
+		// El perfil Cliente siempre tiene correo (decisión del 08-11-2026).
 		{"cliente sin correo", func(d *Draft) {
 			d.Username = "juan"
 			d.Role = "cliente"
 			d.AllCompanies = false
 			d.Companies = []int64{1}
-		}, true, "juan", ""},
+		}, false, "", "personal interno"},
 		{"usuario con arroba", func(d *Draft) { d.Username = "juan@bodega" }, false, "", "nombre de usuario inválido"},
 		{"usuario corto", func(d *Draft) { d.Username = "jp" }, false, "", "nombre de usuario inválido"},
 		{"usuario empieza con punto", func(d *Draft) { d.Username = ".juan" }, false, "", "nombre de usuario inválido"},

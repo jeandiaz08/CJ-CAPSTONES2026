@@ -1,7 +1,6 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Copy } from "lucide-react";
 import { FileDrop } from "@/components/FileDrop";
 import { FiltersModal } from "@/components/FiltersModal";
 import { FormModal } from "@/components/FormModal";
@@ -65,28 +64,6 @@ export function ProfileFiltersModal({ values, companies, onApply, onClose }: {
   );
 }
 
-// Contraseña temporal: se muestra una sola vez (no se guarda en NexusWST).
-export function TemporaryPasswordDialog({ name, login, password, onClose }: { name: string; login: string; password: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(password);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
-  return (
-    <FormModal title="Contraseña temporal" onClose={onClose} closeLabel="Listo">
-      <p>Entrégale a <strong>{name}</strong> (usuario <strong>{login}</strong>) esta contraseña. Deberá cambiarla al ingresar.</p>
-      <p className="temp-password"><code>{password}</code>
-        <button type="button" className="text-button" onClick={copy}><Copy size={16} aria-hidden="true" />{copied ? "Copiada" : "Copiar"}</button>
-      </p>
-      <p className="confirm-warning">Se muestra una sola vez: al cerrar ya no se puede volver a ver.</p>
-    </FormModal>
-  );
-}
-
 // «Importar perfiles»: crea las filas válidas e informa las inválidas con su fila y motivo.
 export function ImportProfilesDialog({ scope, onClose, onImported }: { scope: ProfileScope; onClose: () => void; onImported: () => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -111,7 +88,6 @@ export function ImportProfilesDialog({ scope, onClose, onImported }: { scope: Pr
     }
   };
   if (result) {
-    const temps = result.created.filter((c) => c.temporaryPassword);
     return (
       <FormModal title="Resultado de la importación" onClose={onClose} closeLabel="Cerrar" wide>
         <div className="import-result">
@@ -124,24 +100,13 @@ export function ImportProfilesDialog({ scope, onClose, onImported }: { scope: Pr
               </table>
             </div>
           )}
-          {temps.length > 0 && (
-            <>
-              <p className="confirm-warning">Contraseñas temporales de los perfiles sin correo: se muestran una sola vez.</p>
-              <div className="import-errors">
-                <table>
-                  <thead><tr><th>Fila</th><th>Usuario</th><th>Contraseña temporal</th></tr></thead>
-                  <tbody>{temps.map((c) => <tr key={c.id}><td>{c.row}</td><td>{c.login}</td><td><code>{c.temporaryPassword}</code></td></tr>)}</tbody>
-                </table>
-              </div>
-            </>
-          )}
         </div>
       </FormModal>
     );
   }
   return (
     <FormModal title="Importar perfiles" onClose={onClose} onSubmit={submit} submitLabel="Importar" busy={busy} error={error}>
-      <p className="form-hint">Usa la plantilla de perfiles. Las filas válidas se crean y las inválidas se informan con su fila y motivo.</p>
+      <p className="form-hint">Usa la plantilla de perfiles (el correo es obligatorio). Las filas válidas se crean y las inválidas se informan con su fila y motivo.</p>
       <FileDrop label="Archivo de perfiles (.xlsx)" accept={[".xlsx"]} maxBytes={5 << 20} value={file} onChange={setFile} />
     </FormModal>
   );

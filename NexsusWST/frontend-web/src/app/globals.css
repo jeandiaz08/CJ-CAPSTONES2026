@@ -571,4 +571,4 @@ body{line-height:1.5}h1,h2,h3{line-height:1.2}h1{font-size:28px}button,input,sel
 .clients-toolbar::after{display:none}.clients-toolbar>.btn.order-primary:last-child{order:0;width:auto;flex:0 0 auto;margin:0}
 .detail-actions .btn.success{background:var(--resolve);border:2px solid var(--resolve);color:var(--card)}.company-detail .detail-actions>a.btn{justify-content:center;text-decoration:none}
 .clients-list table{min-width:1000px}.clients-list td{white-space:nowrap}
-.clients-view .section-title{font-size:20px;font-weight:600;line-height:1.2;margin:24px 0 16px}.checkbox-row{display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px}.temp-password{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.temp-password code{font-size:18px;padding:8px 12px;background:var(--surface);border-radius:8px;user-select:all}
+.clients-view .section-title{font-size:20px;font-weight:600;line-height:1.2;margin:24px 0 16px}

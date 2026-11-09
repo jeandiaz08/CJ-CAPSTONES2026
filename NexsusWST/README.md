@@ -169,6 +169,16 @@ La sesión la maneja Auth.js: los tokens quedan en una cookie httpOnly cifrada y
 | `cliente1@nexus.local` | Cliente (solo Empresa Demo Uno) | Sus órdenes y productos |
 | `cliente2@nexus.local` | Cliente (solo Empresa Demo Dos) | Sus órdenes (sirve para probar el aislamiento) |
 
+**Realm importado antes del 07-11-2026.** Keycloak importa `nexuswst-realm.json` solo al crear el realm. Si el tuyo es anterior, su perfil de usuario todavía exige correo y no se pueden crear usuarios internos sin correo (SCRUM-231): Keycloak responde `error-user-attribute-required`. Para aplicar el perfil de usuario del repo sin recrear Keycloak (desde la raíz, en Git Bash):
+
+```bash
+python -c "import json;r=json.load(open('infrastructure/keycloak/import/nexuswst-realm.json',encoding='utf-8'));open('user-profile.json','w',encoding='utf-8').write(r['components']['org.keycloak.userprofile.UserProfileProvider'][0]['config']['kc.user.profile.config'][0])"
+docker compose cp user-profile.json keycloak:/tmp/user-profile.json && rm user-profile.json
+docker compose exec keycloak sh -c '/opt/keycloak/bin/kcadm.sh config credentials --server "http://localhost:8080${KC_HTTP_RELATIVE_PATH}" --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" && /opt/keycloak/bin/kcadm.sh update users/profile -r nexuswst -f /tmp/user-profile.json'
+```
+
+El correo deja de ser obligatorio en Keycloak; la regla «el perfil Cliente siempre tiene correo» la aplica el Core.
+
 El perfil de Nexus (rol, permisos, empresas) se vincula solo la primera vez que cada usuario ingresa. El servicio `seed-dev` crea estos perfiles al levantar; para recargarlos: `make seed-dev` o `docker compose run --rm seed-dev`.
 
 **Recorrido de prueba completo:**

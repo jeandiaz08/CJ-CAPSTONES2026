@@ -19,12 +19,11 @@ import { dateLabel } from "@/features/orders/components/OrderDetail";
 import { useOrderResource } from "@/features/orders/hooks/useOrderResources";
 import { canManageProfiles } from "../access";
 import { usePagedList } from "../hooks/usePagedList";
-import { ImportProfilesDialog, ProfileFiltersModal, TemporaryPasswordDialog, countProfileFilters, type ProfileFilterValues } from "./ProfileDialogs";
+import { ImportProfilesDialog, ProfileFiltersModal, countProfileFilters, type ProfileFilterValues } from "./ProfileDialogs";
 import { ProfileDetail } from "./ProfileDetail";
 import { ProfileFormModal } from "./ProfileFormModal";
 
 const PAGE_SIZES = [20, 50, 100];
-type Temp = { name: string; login: string; password: string };
 
 // Administración clientes › Perfiles («Todos los perfiles», Tarea 07, Fase 3). Recibe el alcance
 // (client | internal) para reutilizarse en Configuración › Usuarios WeStorage. Búsqueda, filtros,
@@ -46,7 +45,6 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
   const [toggling, setToggling] = useState<Profile | null>(null);
   const [resetting, setResetting] = useState<Profile | null>(null);
   const [importing, setImporting] = useState(false);
-  const [temp, setTemp] = useState<Temp | null>(null);
   const [mobile, setMobile] = useState(false);
   const [revision, setRevision] = useState(0);
   const canManage = canManageProfiles(session?.user, scope);
@@ -122,10 +120,9 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
   };
   const confirmReset = async () => {
     if (!resetting) return;
-    const res = await resetProfilePassword(scope, resetting.id);
+    await resetProfilePassword(scope, resetting.id);
     setResetting(null);
-    if (res.temporaryPassword) setTemp({ name: resetting.name, login: resetting.username ?? "", password: res.temporaryPassword });
-    else showToast(`Enviamos a ${resetting.email} el enlace para definir una contraseña nueva.`);
+    showToast(`Enviamos a ${resetting.email} el enlace para definir una contraseña nueva.`);
   };
 
   const activeFilters = countProfileFilters(filters);
@@ -177,7 +174,7 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
                         <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Seleccionar perfil ${p.name}`} checked={checks.has(p.id)} onChange={() => toggle(p.id)} /></td>
                         <td><button className="order-number" aria-label={`Ver detalle del perfil ${p.name}`} onClick={() => select(p.id)}>{p.name}</button></td>
                         <td>{p.companyName || "—"}</td>
-                        <td title={p.email}>{p.email || (p.username ? `Usuario: ${p.username}` : "—")}</td>
+                        <td title={p.email}>{p.email || "—"}</td>
                         <td>{p.phone || "—"}</td>
                         <td><Badge tone={p.active ? "ok" : "neutral"} label={p.active ? "Activo" : "Inactivo"} /></td>
                         <td>{dateLabel(p.createdAt)}</td>
@@ -205,8 +202,7 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
           onSaved={(saved) => {
             setEditing(null);
             if (editing === "new") {
-              showToast(saved.hasEmail ? `Perfil ${saved.name} creado. Le enviamos el enlace para definir su contraseña.` : `Perfil ${saved.name} creado.`);
-              if (saved.temporaryPassword) setTemp({ name: saved.name, login: saved.username ?? "", password: saved.temporaryPassword });
+              showToast(`Perfil ${saved.name} creado. Le enviamos el enlace para definir su contraseña.`);
               select(saved.id);
             } else showToast(`Perfil ${saved.name} actualizado.`);
             refresh();
@@ -223,12 +219,9 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
       )}
       {resetting && (
         <ConfirmDialog title={`Restablecer contraseña de ${resetting.name}`} confirmLabel="Restablecer" onConfirm={confirmReset} onClose={() => setResetting(null)}>
-          <p>{resetting.hasEmail
-            ? `Le enviaremos a ${resetting.email} un enlace para definir una contraseña nueva.`
-            : "Se generará una contraseña temporal que verás una sola vez; sus sesiones abiertas se cerrarán."}</p>
+          <p>Le enviaremos a {resetting.email} un enlace para definir una contraseña nueva.</p>
         </ConfirmDialog>
       )}
-      {temp && <TemporaryPasswordDialog name={temp.name} login={temp.login} password={temp.password} onClose={() => setTemp(null)} />}
       {importing && <ImportProfilesDialog scope={scope} onClose={() => setImporting(false)} onImported={refresh} />}
     </>
   );

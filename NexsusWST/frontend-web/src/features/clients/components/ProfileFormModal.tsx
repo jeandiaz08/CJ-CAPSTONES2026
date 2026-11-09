@@ -5,14 +5,13 @@ import { FormModal } from "@/components/FormModal";
 import { ApiError, apiErrorMessage } from "@/services/api";
 import { createProfile, updateProfile, type Profile, type ProfileInput, type ProfileScope } from "@/services/clients";
 
-type Field = "name" | "companyId" | "email" | "username" | "phone" | "jobTitle";
+type Field = "name" | "companyId" | "email" | "phone" | "jobTitle";
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const USERNAME = /^[a-z0-9][a-z0-9._-]{2,39}$/;
 export type CompanyChoice = { id: number; name: string; active: boolean };
 
-// «Nuevo perfil» y «Editar perfil». Lo obligatorio es lo que exige la base: nombre, empresa y correo
-// o usuario. El rol queda Cliente fijo, sin permisos internos. Al editar, el correo y el usuario no
-// cambian (son el acceso a Keycloak). `initial` completa el formulario (por ejemplo, «Editar y
+// «Nuevo perfil» y «Editar perfil». Obligatorios: nombre, empresa y correo (el perfil Cliente siempre
+// tiene correo: recibe ahí el enlace para definir su contraseña). El rol queda Cliente fijo, sin
+// permisos internos. Al editar, el correo no cambia (es el acceso a Keycloak). `initial` completa el formulario (por ejemplo, «Editar y
 // aceptar» una solicitud) y `onSaved` recibe el perfil creado o editado.
 export function ProfileFormModal({ scope, profile, initial, companies, title, submitLabel, onClose, onSaved }: {
   scope: ProfileScope;
@@ -31,8 +30,6 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
     jobTitle: profile?.jobTitle ?? initial?.jobTitle ?? "",
     phone: profile?.phone ?? initial?.phone ?? "",
     email: initial?.email ?? "",
-    withoutEmail: !!initial && !initial.email,
-    username: initial?.username ?? "",
   });
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [busy, setBusy] = useState(false);
@@ -46,10 +43,7 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
     if (!form.name.trim()) e.name = "El nombre es obligatorio.";
     if (!form.companyId) e.companyId = "Elige la empresa.";
     if (!profile) {
-      if (form.withoutEmail) {
-        if (!form.username.trim()) e.username = "Sin correo, el nombre de usuario es obligatorio.";
-        else if (!USERNAME.test(form.username.trim().toLowerCase())) e.username = "De 3 a 40 caracteres: minúsculas, números, punto, guion o guion bajo; empieza con letra o número.";
-      } else if (!form.email.trim()) e.email = "Indica el correo o marca «Usuario sin correo».";
+      if (!form.email.trim()) e.email = "El correo es obligatorio: el perfil recibe ahí el enlace para definir su contraseña.";
       else if (!EMAIL.test(form.email.trim())) e.email = "Correo inválido.";
     }
     if (form.phone.trim() && (form.phone.trim().length < 6 || form.phone.trim().length > 30)) e.phone = "Teléfono inválido (entre 6 y 30 caracteres).";
@@ -66,7 +60,7 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
     try {
       const saved = profile
         ? await updateProfile(scope, profile.id, base)
-        : await createProfile(scope, { ...base, ...(form.withoutEmail ? { username: form.username.trim().toLowerCase() } : { email: form.email.trim() }) });
+        : await createProfile(scope, { ...base, email: form.email.trim() });
       await onSaved(saved);
     } catch (err) {
       if (err instanceof ApiError && err.fields.length) setErrors(Object.fromEntries(err.fields.map((f) => [f.field, f.message])));
@@ -99,19 +93,9 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
       {field("jobTitle", "Cargo", <input {...aria("jobTitle")} maxLength={80} value={form.jobTitle} onChange={(e) => set({ jobTitle: e.target.value })} />)}
       {field("phone", "Teléfono", <input {...aria("phone")} type="tel" maxLength={30} placeholder="+56 9 1234 5678" value={form.phone} onChange={(e) => set({ phone: e.target.value })} />)}
       {profile ? (
-        <p className="form-hint">{profile.hasEmail ? `Correo: ${profile.email}` : `Usuario: ${profile.username}`} · no se edita (es el acceso a NexusWST).</p>
-      ) : (
-        <>
-          <label className="checkbox-row">
-            <input type="checkbox" checked={form.withoutEmail} onChange={(e) => set({ withoutEmail: e.target.checked })} /> Usuario sin correo
-          </label>
-          {form.withoutEmail
-            ? field("username", "Nombre de usuario *", <input {...aria("username")} maxLength={40} autoComplete="off" value={form.username} onChange={(e) => set({ username: e.target.value })} />,
-              "La contraseña temporal se mostrará una sola vez al crear el perfil.")
-            : field("email", "Correo *", <input {...aria("email")} type="email" maxLength={254} value={form.email} onChange={(e) => set({ email: e.target.value })} />,
-              "Recibirá un enlace para definir su contraseña.")}
-        </>
-      )}
+        <p className="form-hint">Correo: {profile.email || "—"} · no se edita (es el acceso a NexusWST).</p>
+      ) : field("email", "Correo *", <input {...aria("email")} type="email" maxLength={254} value={form.email} onChange={(e) => set({ email: e.target.value })} />,
+        "Recibirá un enlace para definir su contraseña.")}
       <p className="form-hint">Rol: <strong>Cliente</strong> (sin permisos internos).</p>
     </FormModal>
   );

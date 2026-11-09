@@ -58,7 +58,7 @@ Desde la Tarea 07 (Matriz de perfiles v1.2), los `GET` siguen abiertos al perfil
 | Método | Ruta | Cuerpo / filtros | Descripción |
 | --- | --- | --- | --- |
 | GET | `/v1/users` | `?q=&role=&active=true\|false&limit=&offset=` | Listado `{items, total}` |
-| POST | `/v1/users` | `{email, name, role, permissions[], companies[], allCompanies}` o, sin correo, `{username, name, role, …}` | Con correo: crea en Keycloak con su rol y le envía el **correo para definir la contraseña** (409 `email_taken`). Sin correo (H-02-T09; personal interno o perfil Cliente): crea el usuario con una **contraseña temporal** que viene una sola vez en `temporaryPassword` (409 `username_taken`). |
+| POST | `/v1/users` | `{email, name, role, permissions[], companies[], allCompanies}` o, sin correo, `{username, name, role, …}` | Con correo: crea en Keycloak con su rol y le envía el **correo para definir la contraseña** (409 `email_taken`). Sin correo (H-02-T09, solo personal interno): crea el usuario con una **contraseña temporal** que viene una sola vez en `temporaryPassword` (409 `username_taken`). |
 | GET | `/v1/users/{id}` | | Detalle |
 | PATCH | `/v1/users/{id}` | cualquiera de `{name, role, permissions, companies, allCompanies}` | Edita. Nadie cambia **su propio** rol, permisos ni empresas (403). |
 | POST | `/v1/users/{id}/disable` | `{reason}` | Deshabilita en Keycloak, cierra sus sesiones y bloquea su siguiente petición. Lo que tenía tomado en empaque vuelve a la bandeja. |
@@ -67,7 +67,7 @@ Desde la Tarea 07 (Matriz de perfiles v1.2), los `GET` siguen abiertos al perfil
 | POST | `/v1/users/{id}/password-reset` | | `{temporaryPassword}`: contraseña temporal nueva que el usuario cambia al entrar; cierra sus sesiones. Para quien no tiene correo (también sirve si perdió su correo). No aplica a uno mismo (422). |
 | GET | `/v1/users/{id}/history` | | Auditoría: quién cambió qué y cuándo |
 
-**Usuarios sin correo (H-02-T09).** Personal de bodega o perfil Cliente que no tiene correo (el Cliente, desde la Tarea 07): el usuario es de 3 a 40 caracteres `[a-z0-9._-]`, empieza con letra o número y no lleva `@`. El rol y las empresas los asigna el administrador como a cualquiera. El usuario (vista) trae `username`, `email` (vacío) y `hasEmail: false`; la interfaz muestra «Restablecer contraseña» en vez de «Reenviar correo». `temporaryPassword` solo viene en la respuesta de alta o de restablecimiento (con `Cache-Control: no-store`), no se guarda en Nexus ni en la auditoría. En el login, el campo «Correo o usuario» acepta ambos.
+**Usuarios sin correo (H-02-T09).** Solo personal de bodega (interno) que no tiene correo. El perfil Cliente siempre tiene correo (decisión del 08-11-2026): el usuario es de 3 a 40 caracteres `[a-z0-9._-]`, empieza con letra o número y no lleva `@`. El rol y las empresas los asigna el administrador como a cualquiera. El usuario (vista) trae `username`, `email` (vacío) y `hasEmail: false`; la interfaz muestra «Restablecer contraseña» en vez de «Reenviar correo». `temporaryPassword` solo viene en la respuesta de alta o de restablecimiento (con `Cache-Control: no-store`), no se guarda en Nexus ni en la auditoría. En el login, el campo «Correo o usuario» acepta ambos.
 
 Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni permisos internos (`despacho`, `gestionar_perfiles`).
 
@@ -103,15 +103,15 @@ Clientes › Administración clientes › Perfiles. Todas las rutas aceptan `?sc
 | GET | `/v1/profiles` | `?q=&company_id=&status=active\|inactive&from=&to=&ids=&limit=&offset=` | `{data, total, limit, offset}`. `q` busca por nombre, correo, usuario o empresa. |
 | GET | `/v1/profiles/export` | mismos filtros | Excel «Perfiles» (máx. 10.000 filas). |
 | GET | `/v1/profiles/{id}` | | Detalle |
-| POST | `/v1/profiles` | `{name, companyId, email}` o, sin correo, `{name, companyId, username}`; más `phone`, `jobTitle` | Crea el perfil con rol **Cliente fijo**, sin permisos y una empresa activa. Con correo, Keycloak envía el enlace para definir la contraseña. Sin correo, `temporaryPassword` viene una sola vez (`Cache-Control: no-store`). 409 con `fields` si el correo o el usuario ya existen. |
+| POST | `/v1/profiles` | `{name, companyId, email, phone, jobTitle}` | Crea el perfil con rol **Cliente fijo**, sin permisos, una empresa activa y **siempre con correo** (422 en `email` si falta; un campo `username` responde 400). Keycloak envía el enlace para definir la contraseña. 409 con `fields` si el correo ya existe. |
 | PATCH | `/v1/profiles/{id}` | `{name, companyId, phone, jobTitle}` | Edita. El correo y el usuario no se editan. Una sola acción `updated` con el antes y el después. |
 | POST | `/v1/profiles/{id}/disable` | `{reason}` obligatorio (5 a 500) | Keycloak lo deshabilita y cierra sus sesiones. 409 `same_state` si ya estaba inactivo. |
 | POST | `/v1/profiles/{id}/enable` | `{reason}` opcional | Activa. |
-| POST | `/v1/profiles/{id}/password` | | Con correo: `{emailSent: true}` (Keycloak envía el enlace). Sin correo: `{temporaryPassword}` una sola vez, y cierra sus sesiones. 422 si está inactivo o sin cuenta en Keycloak. |
-| GET | `/v1/profiles/template` | | Plantilla `.xlsx`: hoja «Perfiles» (Nombre completo, RUT empresa, Correo, Usuario si no tiene correo, Teléfono, Cargo; la fila `EJEMPLO…` no se importa) y hoja «Instrucciones» con las empresas activas. |
-| POST | `/v1/profiles/import` | multipart `file` (.xlsx, máx. 5 MB, 500 filas) | `{rows, created:[{row, id, name, login, temporaryPassword?}], errors:[{row, field?, message}]}`. Crea las filas válidas e informa las inválidas con su fila y motivo: sin nombre, RUT de empresa inexistente o desactivada, correo inválido, repetido en el archivo o ya registrado. |
+| POST | `/v1/profiles/{id}/password` | | `{emailSent: true}`: Keycloak envía al correo del perfil el enlace para definir una contraseña nueva. 422 si está inactivo, sin cuenta en Keycloak o sin correo (datos antiguos). |
+| GET | `/v1/profiles/template` | | Plantilla `.xlsx`: hoja «Perfiles» (Nombre completo, RUT empresa, Correo, Teléfono, Cargo; los tres primeros obligatorios; la fila `EJEMPLO…` no se importa) y hoja «Instrucciones» con las empresas activas. |
+| POST | `/v1/profiles/import` | multipart `file` (.xlsx, máx. 5 MB, 500 filas) | `{rows, created:[{row, id, name, email}], errors:[{row, field?, message}]}`. Crea las filas válidas e informa las inválidas con su fila y motivo: sin nombre, sin correo, RUT de empresa inexistente o desactivada, correo inválido, repetido en el archivo o ya registrado. |
 
-Perfil (respuesta): `{id, name, email, username?, hasEmail, phone, jobTitle, role, permissions, companyId, companyName, active, linked, createdAt, lastLoginAt}`.
+Perfil (respuesta): `{id, name, email, hasEmail, phone, jobTitle, role, permissions, companyId, companyName, active, linked, createdAt, lastLoginAt}`.
 
 - **Registro:** `created`, `updated` (con `phone`, `jobTitle`, `companyName` en antes y después), `disabled` y `enabled` (con motivo), `password_reset` y `password_email_sent` quedan en `user_audit` del perfil. La carga masiva deja además, por empresa, `profiles_imported` `{created, rows, failed}`. Todo aparece en Registro de acciones › Usuarios.
 - **`/v1/users`** sigue existiendo para la administración general (consulta: Administrador; cambios: permiso).

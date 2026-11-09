@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -243,10 +244,17 @@ func TestProfilesCreateAndEdit(t *testing.T) {
 		!strings.Contains(rec.Body.String(), `"field":"email"`) {
 		t.Fatalf("correo repetido: %d %s", rec.Code, rec.Body.String())
 	}
-	// Sin correo: usuario y contraseña temporal una vez, sin caché.
-	rec = serveProfiles(h, manager, req("POST", "/v1/profiles", `{"name":"Pablo","companyId":1,"username":"pablo.bodega"}`))
-	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "temporaryPassword") || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("crear sin correo: %d %s", rec.Code, rec.Body.String())
+	// El perfil Cliente siempre tiene correo: sin correo es 422 en el campo, y «username» ya no se acepta.
+	rec = serveProfiles(h, manager, req("POST", "/v1/profiles", `{"name":"Pablo","companyId":1}`))
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"field":"email"`) {
+		t.Fatalf("cliente sin correo: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := serveProfiles(h, manager, req("POST", "/v1/profiles", `{"name":"Pablo","companyId":1,"username":"pablo.bodega"}`)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("username no se acepta: %d", rec.Code)
+	}
+	// Restablecer contraseña: siempre por enlace al correo.
+	if rec := serveProfiles(h, manager, req("POST", "/v1/profiles/5/password", ``)); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"emailSent":true`) {
+		t.Fatalf("restablecer: %d %s", rec.Code, rec.Body.String())
 	}
 	// Editar: una sola acción en el registro.
 	m.audits = nil
@@ -271,14 +279,15 @@ func TestProfilesCreateAndEdit(t *testing.T) {
 func TestProfilesImport(t *testing.T) {
 	m, h := newProfilesFixture()
 	var file bytes.Buffer
-	_ = xlsx.Write(&file, "Perfiles", []string{"Nombre completo", "RUT empresa", "Correo", "Usuario (si no tiene correo)", "Teléfono", "Cargo"}, [][]any{
-		{"EJEMPLO Juan", "11.111.111-1", "ej@x.cl", "", "", ""},        // ejemplo: no se importa
-		{"Ana Soto", "11.111.111-1", "ana@andes.cl", "", "", "Ventas"}, // fila 3: válida
-		{"", "11.111.111-1", "b@x.cl", "", "", ""},                     // fila 4: sin nombre
-		{"Carlos", "99.999.999-9", "c@x.cl", "", "", ""},               // fila 5: empresa inexistente
-		{"Dora", "22.222.222-2", "d@x.cl", "", "", ""},                 // fila 6: empresa desactivada
-		{"Eva", "111111111", "", "eva.bodega", "", ""},                 // fila 7: válida, sin correo
-		{"Ana Dos", "11.111.111-1", "ana@andes.cl", "", "", ""},        // fila 8: repetida en el archivo
+	_ = xlsx.Write(&file, "Perfiles", []string{"Nombre completo", "RUT empresa", "Correo", "Teléfono", "Cargo"}, [][]any{
+		{"EJEMPLO Juan", "11.111.111-1", "ej@x.cl", "", ""},        // ejemplo: no se importa
+		{"Ana Soto", "11.111.111-1", "ana@andes.cl", "", "Ventas"}, // fila 3: válida
+		{"", "11.111.111-1", "b@x.cl", "", ""},                     // fila 4: sin nombre
+		{"Carlos", "99.999.999-9", "c@x.cl", "", ""},               // fila 5: empresa inexistente
+		{"Dora", "22.222.222-2", "d@x.cl", "", ""},                 // fila 6: empresa desactivada
+		{"Eva", "111111111", "eva@andes.cl", "", ""},               // fila 7: válida (RUT sin puntos)
+		{"Ana Dos", "11.111.111-1", "ana@andes.cl", "", ""},        // fila 8: repetida en el archivo
+		{"Fede", "11.111.111-1", "", "", ""},                       // fila 9: sin correo
 	})
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -290,18 +299,18 @@ func TestProfilesImport(t *testing.T) {
 	rec := serveProfiles(h, manager, r)
 	var res application.ImportResult
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)
-	if rec.Code != http.StatusOK || res.Rows != 6 || len(res.Created) != 2 || len(res.Errors) != 4 {
+	if rec.Code != http.StatusOK || res.Rows != 7 || len(res.Created) != 2 || len(res.Errors) != 5 {
 		t.Fatalf("importación: %d %s", rec.Code, rec.Body.String())
 	}
 	rows := []int{}
 	for _, e := range res.Errors {
 		rows = append(rows, e.Row)
 	}
-	if want := []int{4, 5, 6, 8}; len(rows) != 4 || rows[0] != want[0] || rows[1] != want[1] || rows[2] != want[2] || rows[3] != want[3] {
+	if fmt.Sprint(rows) != "[4 5 6 8 9]" {
 		t.Fatalf("filas con error %v: %+v", rows, res.Errors)
 	}
-	if res.Created[1].TemporaryPassword == "" || res.Created[0].TemporaryPassword != "" {
-		t.Fatalf("contraseña temporal solo sin correo: %+v", res.Created)
+	if res.Errors[4].Field != "email" {
+		t.Fatalf("fila sin correo: %+v", res.Errors[4])
 	}
 	if m.audits[len(m.audits)-1] != "profiles_imported" {
 		t.Fatalf("la carga masiva queda en el registro: %v", m.audits)

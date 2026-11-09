@@ -122,8 +122,8 @@ func (s *Profiles) companyErrors(ctx context.Context, id int64) domain.Validatio
 	return nil
 }
 
-// Create da de alta un perfil Cliente (rol fijo, sin permisos, una empresa). Con correo, Keycloak
-// envía el enlace para definir la contraseña; sin correo, la contraseña temporal viene una sola vez.
+// Create da de alta un perfil Cliente (rol fijo, sin permisos, una empresa y siempre con correo):
+// Keycloak le envía el enlace para definir la contraseña.
 func (s *Profiles) Create(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, d domain.ProfileDraft) (ProfileView, error) {
 	if err := checkScope(scope); err != nil {
 		return ProfileView{}, err
@@ -133,7 +133,7 @@ func (s *Profiles) Create(ctx context.Context, actor tenant.Identity, scope doma
 	if len(errs) > 0 {
 		return ProfileView{}, errs
 	}
-	u, err := s.svc.Create(ctx, actor, domain.Draft{Email: d.Email, Username: d.Username, Name: d.Name, Role: "cliente",
+	u, err := s.svc.Create(ctx, actor, domain.Draft{Email: d.Email, Name: d.Name, Role: "cliente",
 		Permissions: []string{}, Companies: []int64{d.CompanyID}})
 	if err != nil {
 		return ProfileView{}, loginError(err)
@@ -148,34 +148,30 @@ func (s *Profiles) Create(ctx context.Context, actor tenant.Identity, scope doma
 	if err != nil {
 		return ProfileView{}, err
 	}
-	v := profileView(p)
-	v.TemporaryPassword = u.TemporaryPassword
-	return v, nil
+	return profileView(p), nil
 }
 
-// loginError lleva al campo los errores de correo o usuario repetido.
+// loginError lleva al campo el error de correo repetido.
 func loginError(err error) error {
 	switch {
 	case errors.Is(err, domain.ErrEmailTaken):
 		return conflictErr{domain.ValidationErrors{{Field: "email", Message: "Ese correo ya tiene un perfil."}}}
-	case errors.Is(err, domain.ErrUsernameTaken):
-		return conflictErr{domain.ValidationErrors{{Field: "username", Message: "Ese nombre de usuario ya existe."}}}
 	}
 	return err
 }
 
-// conflictErr: correo o usuario repetido (409 con el error en el campo).
+// conflictErr: correo repetido (409 con el error en el campo).
 type conflictErr struct{ domain.ValidationErrors }
 
 func (c conflictErr) Unwrap() error { return c.ValidationErrors }
 
-// IsConflict indica si el error es un 409 por correo o usuario repetido.
+// IsConflict indica si el error es un 409 por correo repetido.
 func IsConflict(err error) bool {
 	var c conflictErr
 	return errors.As(err, &c)
 }
 
-// Update edita nombre, empresa, teléfono y cargo (el correo y el usuario no cambian). Deja una sola
+// Update edita nombre, empresa, teléfono y cargo (el correo no cambia). Deja una sola
 // acción en el registro con el antes y el después.
 func (s *Profiles) Update(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64, d domain.ProfileDraft) (ProfileView, error) {
 	cur, err := s.get(ctx, scope, id)
@@ -256,22 +252,17 @@ func (s *Profiles) SetActive(ctx context.Context, actor tenant.Identity, scope d
 // ErrSameState: el perfil ya está en ese estado.
 var ErrSameState = errors.New("el perfil ya está en ese estado; recarga la página")
 
-// PasswordResult: con correo se envía el enlace (Keycloak); sin correo, contraseña temporal (una vez).
-type PasswordResult struct {
-	EmailSent         bool   `json:"emailSent"`
-	TemporaryPassword string `json:"temporaryPassword,omitempty"`
-}
-
-func (s *Profiles) ResetPassword(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64) (PasswordResult, error) {
+// ResetPassword: al Cliente siempre se le envía por correo el enlace para definir una contraseña
+// nueva (Keycloak). Un perfil sin correo (datos antiguos) no se puede restablecer aquí.
+func (s *Profiles) ResetPassword(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64) error {
 	cur, err := s.get(ctx, scope, id)
 	if err != nil {
-		return PasswordResult{}, err
+		return err
 	}
-	if cur.HasEmail() {
-		return PasswordResult{EmailSent: true}, s.svc.ResendSetPassword(ctx, actor, id)
+	if !cur.HasEmail() {
+		return ValidationError{"el perfil no tiene correo; edítalo para regularizarlo antes de restablecer la contraseña"}
 	}
-	temp, err := s.svc.ResetPassword(ctx, actor, id)
-	return PasswordResult{TemporaryPassword: temp}, err
+	return s.svc.ResendSetPassword(ctx, actor, id)
 }
 
 // ---------------------------------------------------------------------------
@@ -303,14 +294,14 @@ func (s *Profiles) Export(ctx context.Context, f ports.ProfileFilter, w io.Write
 		if p.LastLoginAt != nil {
 			last = p.LastLoginAt.In(chile).Format("02-01-2006 15:04")
 		}
-		rows = append(rows, []any{p.Name, p.CompanyName, p.Email, p.Username, p.Phone, p.JobTitle, "Cliente", stateText(p.Active),
+		rows = append(rows, []any{p.Name, p.CompanyName, p.Email, p.Phone, p.JobTitle, "Cliente", stateText(p.Active),
 			p.CreatedAt.In(chile).Format("02-01-2006 15:04"), last})
 	}
-	return xlsx.Write(w, profileSheet, []string{"Nombre perfil", "Nombre empresa", "Correo", "Usuario", "Teléfono", "Cargo", "Rol", "Estado",
+	return xlsx.Write(w, profileSheet, []string{"Nombre perfil", "Nombre empresa", "Correo", "Teléfono", "Cargo", "Rol", "Estado",
 		"Fecha de creación", "Último acceso"}, rows)
 }
 
-var importHeader = []string{"Nombre completo", "RUT empresa", "Correo", "Usuario (si no tiene correo)", "Teléfono", "Cargo"}
+var importHeader = []string{"Nombre completo", "RUT empresa", "Correo", "Teléfono", "Cargo"}
 
 // Template: hoja «Perfiles» con el encabezado y una fila de ejemplo (no se importa), y hoja
 // «Instrucciones» con las reglas y las empresas activas.
@@ -319,12 +310,11 @@ func (s *Profiles) Template(ctx context.Context, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	rows := [][]any{{importExample + " Juan Pérez", "76.123.456-0", "juan.perez@empresa.cl", "", "+56 9 1234 5678", "Encargado de bodega"}}
+	rows := [][]any{{importExample + " Juan Pérez", "76.123.456-0", "juan.perez@empresa.cl", "+56 9 1234 5678", "Encargado de bodega"}}
 	info := [][]any{
 		{"Una fila por perfil. El rol es siempre Cliente, sin permisos internos.", ""},
-		{"Obligatorios: Nombre completo y RUT empresa (de una empresa activa).", ""},
-		{"Correo o Usuario: uno de los dos. Con correo, el perfil recibe el enlace para definir su contraseña.", ""},
-		{"Sin correo: el usuario va en minúsculas (3 a 40 caracteres) y la contraseña temporal se muestra una sola vez al importar.", ""},
+		{"Obligatorios: Nombre completo, RUT empresa (de una empresa activa) y Correo.", ""},
+		{"Cada perfil recibe en su correo el enlace para definir su contraseña.", ""},
 		{"Las filas cuyo nombre empieza con «EJEMPLO» no se importan.", ""},
 		{fmt.Sprintf("Máximo %d filas por archivo. Las filas válidas se crean; las inválidas se informan con su fila y motivo.", MaxImportRows), ""},
 		{"", ""},
@@ -334,7 +324,7 @@ func (s *Profiles) Template(ctx context.Context, w io.Writer) error {
 		info = append(info, []any{c[0], c[1]})
 	}
 	return xlsx.WriteWorkbook(w, []xlsx.Sheet{
-		{Name: profileSheet, Header: importHeader, Rows: rows, Widths: []int{28, 16, 30, 26, 18, 24}},
+		{Name: profileSheet, Header: importHeader, Rows: rows, Widths: []int{28, 16, 30, 18, 24}},
 		{Name: instructionTab, Header: []string{"Instrucciones", ""}, Rows: info, Widths: []int{90, 16}},
 	})
 }
@@ -346,11 +336,10 @@ type ImportRowError struct {
 }
 
 type ImportedProfile struct {
-	Row               int    `json:"row"`
-	ID                int64  `json:"id"`
-	Name              string `json:"name"`
-	Login             string `json:"login"` // correo o usuario
-	TemporaryPassword string `json:"temporaryPassword,omitempty"`
+	Row   int    `json:"row"`
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 type ImportResult struct {
@@ -400,8 +389,7 @@ func (s *Profiles) Import(ctx context.Context, actor tenant.Identity, scope doma
 		fail := func(field, msg string) {
 			res.Errors = append(res.Errors, ImportRowError{Row: row, Field: field, Message: msg})
 		}
-		d := domain.ProfileDraft{Name: name, Email: cell(r, importHeader[2]), Username: cell(r, importHeader[3]),
-			Phone: cell(r, importHeader[4]), JobTitle: cell(r, importHeader[5])}
+		d := domain.ProfileDraft{Name: name, Email: cell(r, importHeader[2]), Phone: cell(r, importHeader[3]), JobTitle: cell(r, importHeader[4])}
 		rut := cell(r, importHeader[1])
 		if rut == "" {
 			fail("companyId", "Falta el RUT de la empresa.")
@@ -423,12 +411,11 @@ func (s *Profiles) Import(ctx context.Context, actor tenant.Identity, scope doma
 			fail(errs[0].Field, errs[0].Message)
 			continue
 		}
-		login := d.Email + d.Username
-		if prev, dup := seen[login]; dup {
-			fail("email", fmt.Sprintf("Correo o usuario repetido en el archivo (fila %d).", prev))
+		if prev, dup := seen[d.Email]; dup {
+			fail("email", fmt.Sprintf("Correo repetido en el archivo (fila %d).", prev))
 			continue
 		}
-		seen[login] = row
+		seen[d.Email] = row
 		v, err := s.Create(ctx, actor, scope, d)
 		if err != nil {
 			var ve domain.ValidationErrors
@@ -445,7 +432,7 @@ func (s *Profiles) Import(ctx context.Context, actor tenant.Identity, scope doma
 			}
 			continue
 		}
-		res.Created = append(res.Created, ImportedProfile{Row: row, ID: v.ID, Name: v.Name, Login: login, TemporaryPassword: v.TemporaryPassword})
+		res.Created = append(res.Created, ImportedProfile{Row: row, ID: v.ID, Name: v.Name, Email: v.Email})
 		perCompany[cid]++
 	}
 	for cid, n := range perCompany {

@@ -69,7 +69,6 @@ export type Profile = {
   id: number;
   name: string;
   email: string;
-  username?: string;
   hasEmail: boolean;
   phone: string;
   jobTitle: string;
@@ -81,7 +80,6 @@ export type Profile = {
   linked: boolean;
   createdAt: string;
   lastLoginAt: string | null;
-  temporaryPassword?: string; // solo al crear sin correo
 };
 
 export type ProfileFilters = {
@@ -95,11 +93,11 @@ export type ProfileFilters = {
   offset?: number;
 };
 
-export type ProfileInput = { name: string; companyId: number; phone: string; jobTitle: string; email?: string; username?: string };
+export type ProfileInput = { name: string; companyId: number; phone: string; jobTitle: string; email: string };
 
 export type ImportResult = {
   rows: number;
-  created: { row: number; id: number; name: string; login: string; temporaryPassword?: string }[];
+  created: { row: number; id: number; name: string; email: string }[];
   errors: { row: number; field?: string; message: string }[];
 };
 
@@ -110,14 +108,14 @@ export const listProfiles = (scope: ProfileScope, f: ProfileFilters) =>
 export const getProfile = (scope: ProfileScope, id: number) => api<Profile>("core", withScope(scope, `/v1/profiles/${id}`));
 export const createProfile = (scope: ProfileScope, body: ProfileInput) =>
   api<Profile>("core", withScope(scope, "/v1/profiles"), { method: "POST", body: JSON.stringify(body) });
-export const updateProfile = (scope: ProfileScope, id: number, body: Omit<ProfileInput, "email" | "username">) =>
+export const updateProfile = (scope: ProfileScope, id: number, body: Omit<ProfileInput, "email">) =>
   api<Profile>("core", withScope(scope, `/v1/profiles/${id}`), { method: "PATCH", body: JSON.stringify(body) });
 export const disableProfile = (scope: ProfileScope, id: number, reason: string) =>
   api<Profile>("core", withScope(scope, `/v1/profiles/${id}/disable`), { method: "POST", body: JSON.stringify({ reason }) });
 export const enableProfile = (scope: ProfileScope, id: number, reason: string) =>
   api<Profile>("core", withScope(scope, `/v1/profiles/${id}/enable`), { method: "POST", body: JSON.stringify({ reason }) });
 export const resetProfilePassword = (scope: ProfileScope, id: number) =>
-  api<{ emailSent: boolean; temporaryPassword?: string }>("core", withScope(scope, `/v1/profiles/${id}/password`), { method: "POST" });
+  api<{ emailSent: boolean }>("core", withScope(scope, `/v1/profiles/${id}/password`), { method: "POST" });
 export const exportProfiles = (scope: ProfileScope, f: Omit<ProfileFilters, "limit" | "offset">) =>
   downloadFile(withScope(scope, `/v1/profiles/export${query(f)}`), "perfiles.xlsx", "core");
 export const downloadProfilesTemplate = (scope: ProfileScope) =>

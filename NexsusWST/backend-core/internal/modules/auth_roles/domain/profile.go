@@ -18,12 +18,13 @@ const (
 	ProfileScopeInternal ProfileScope = "internal"
 )
 
-// ProfileDraft son los datos del formulario «Nuevo perfil» y de la importación.
+// ProfileDraft son los datos del formulario «Nuevo perfil» y de la importación. El perfil Cliente
+// siempre tiene correo (decisión del 08-11-2026): Keycloak le envía el enlace para definir la
+// contraseña. El usuario sin correo es solo para personal interno (SCRUM-231).
 type ProfileDraft struct {
 	Name      string
 	CompanyID int64
-	Email     string // con correo, Keycloak envía el enlace para definir la contraseña
-	Username  string // «usuario sin correo»
+	Email     string
 	Phone     string
 	JobTitle  string
 }
@@ -44,14 +45,13 @@ func (v ValidationErrors) Error() string {
 	return strings.Join(msgs, " · ")
 }
 
-// Normalize valida lo que exige la base (nombre obligatorio, correo o usuario, formato de usuario,
-// largos de teléfono y cargo) y la empresa. withLogin: false al editar (correo y usuario no cambian).
+// Normalize valida nombre, empresa, correo (obligatorio para el Cliente) y largos de teléfono y
+// cargo. withLogin: false al editar (el correo no cambia).
 func (d *ProfileDraft) Normalize(withLogin bool) ValidationErrors {
 	var errs ValidationErrors
 	add := func(field, msg string) { errs = append(errs, FieldError{Field: field, Message: msg}) }
 	d.Name = strings.Join(strings.Fields(d.Name), " ")
 	d.Email = strings.ToLower(strings.TrimSpace(d.Email))
-	d.Username = strings.ToLower(strings.TrimSpace(d.Username))
 	d.Phone = strings.TrimSpace(d.Phone)
 	d.JobTitle = strings.Join(strings.Fields(d.JobTitle), " ")
 
@@ -62,17 +62,10 @@ func (d *ProfileDraft) Normalize(withLogin bool) ValidationErrors {
 		add("companyId", "Elige la empresa.")
 	}
 	if withLogin {
-		switch {
-		case d.Email != "" && d.Username != "":
-			add("email", "Indica correo o nombre de usuario, no ambos.")
-		case d.Email != "":
-			if a, err := mail.ParseAddress(d.Email); err != nil || a.Address != d.Email {
-				add("email", "Correo inválido.")
-			}
-		case d.Username == "":
-			add("username", "Sin correo, el nombre de usuario es obligatorio.")
-		case !ValidUsername(d.Username):
-			add("username", "Nombre de usuario inválido: de 3 a 40 caracteres, solo minúsculas, números, punto, guion o guion bajo; empieza con letra o número.")
+		if d.Email == "" {
+			add("email", "El correo es obligatorio: el perfil recibe ahí el enlace para definir su contraseña.")
+		} else if a, err := mail.ParseAddress(d.Email); err != nil || a.Address != d.Email {
+			add("email", "Correo inválido.")
 		}
 	}
 	if d.Phone != "" && (len(d.Phone) < 6 || len(d.Phone) > 30) {

@@ -47,7 +47,7 @@ type User struct {
 // Draft son los datos que el administrador puede fijar.
 type Draft struct {
 	Email        string
-	Username     string // usuario sin correo (H-02-T09): personal interno o perfil Cliente (Tarea 07)
+	Username     string // usuario sin correo (H-02-T09): solo personal interno
 	Name         string
 	Role         string
 	Permissions  []string
@@ -68,9 +68,12 @@ func (d *Draft) Normalize() (string, bool) {
 			return "correo inválido", false
 		}
 	case d.Username == "":
-		return "indica el correo o, para un usuario sin correo, un nombre de usuario", false
+		return "indica el correo o, para personal de bodega sin correo, un nombre de usuario", false
 	case !ValidUsername(d.Username):
 		return "nombre de usuario inválido: de 3 a 40 caracteres, solo minúsculas, números, punto, guion o guion bajo, y debe empezar con letra o número", false
+	case !slices.Contains(InternalRoles, d.Role):
+		// El perfil Cliente siempre tiene correo (decisión del 08-11-2026, Tarea 07).
+		return "un usuario sin correo debe ser personal interno de WeStorage (no cliente)", false
 	}
 	if d.Name == "" || len(d.Name) > 120 {
 		return "el nombre es obligatorio (máx. 120 caracteres)", false

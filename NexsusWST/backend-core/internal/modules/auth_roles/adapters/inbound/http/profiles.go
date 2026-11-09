@@ -171,7 +171,6 @@ func (h *ProfileHandler) importFile(w http.ResponseWriter, r *http.Request) {
 		writeProfileErr(w, err)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store") // puede traer contraseñas temporales
 	httpx.JSON(w, http.StatusOK, res)
 }
 
@@ -192,13 +191,12 @@ type profileBody struct {
 	Name      string `json:"name"`
 	CompanyID int64  `json:"companyId"`
 	Email     string `json:"email"`
-	Username  string `json:"username"`
 	Phone     string `json:"phone"`
 	JobTitle  string `json:"jobTitle"`
 }
 
 func (b profileBody) draft() domain.ProfileDraft {
-	return domain.ProfileDraft{Name: b.Name, CompanyID: b.CompanyID, Email: b.Email, Username: b.Username, Phone: b.Phone, JobTitle: b.JobTitle}
+	return domain.ProfileDraft{Name: b.Name, CompanyID: b.CompanyID, Email: b.Email, Phone: b.Phone, JobTitle: b.JobTitle}
 }
 
 func (h *ProfileHandler) create(w http.ResponseWriter, r *http.Request) {
@@ -212,9 +210,6 @@ func (h *ProfileHandler) create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeProfileErr(w, err)
 		return
-	}
-	if v.TemporaryPassword != "" {
-		w.Header().Set("Cache-Control", "no-store")
 	}
 	httpx.JSON(w, http.StatusCreated, v)
 }
@@ -231,7 +226,7 @@ func (h *ProfileHandler) update(w http.ResponseWriter, r *http.Request) {
 		JobTitle  string `json:"jobTitle"`
 	}
 	if err := httpx.Decode(r, &b); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido (el correo y el usuario no se editan)")
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido (el correo no se edita)")
 		return
 	}
 	actor, _ := tenant.From(r.Context())
@@ -273,13 +268,11 @@ func (h *ProfileHandler) password(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, _ := tenant.From(r.Context())
-	res, err := h.svc.ResetPassword(r.Context(), actor, scopeOf(r), id)
-	if err != nil {
+	if err := h.svc.ResetPassword(r.Context(), actor, scopeOf(r), id); err != nil {
 		writeProfileErr(w, err)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	httpx.JSON(w, http.StatusOK, res)
+	httpx.JSON(w, http.StatusOK, map[string]bool{"emailSent": true})
 }
 
 func writeProfileErr(w http.ResponseWriter, err error) {

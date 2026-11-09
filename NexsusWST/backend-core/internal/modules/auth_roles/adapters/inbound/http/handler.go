@@ -94,7 +94,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 
 type userBody struct {
 	Email        string   `json:"email"`
-	Username     string   `json:"username"` // sin correo (H-02-T09): personal interno o perfil Cliente
+	Username     string   `json:"username"` // sin correo (H-02-T09): solo personal interno
 	Name         string   `json:"name"`
 	Role         string   `json:"role"`
 	Permissions  []string `json:"permissions"`

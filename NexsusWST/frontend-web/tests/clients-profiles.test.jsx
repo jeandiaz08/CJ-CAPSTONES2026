@@ -17,10 +17,10 @@ vi.mock('@/services/api', () => {
       if (!init?.method && path.startsWith('/v1/profiles?')) return { data: h.profiles, total: h.profiles.length, limit: 20, offset: 0 };
       if (path.startsWith('/v1/profiles/import')) return h.importResult;
       if (init?.method === 'POST' && path.startsWith('/v1/profiles?scope')) {
-        return { ...profile(20), name: body.name, email: body.email ?? '', username: body.username, hasEmail: !!body.email, temporaryPassword: body.username ? 'Temp-1234-abcd' : undefined };
+        return { ...profile(20), name: body.name, email: body.email, hasEmail: true };
       }
       const pw = path.match(/^\/v1\/profiles\/(\d+)\/password/);
-      if (pw) return h.profiles.find((p) => p.id === Number(pw[1])).hasEmail ? { emailSent: true } : { emailSent: false, temporaryPassword: 'Nueva-5678' };
+      if (pw) return { emailSent: true };
       return { data: [] };
     },
   };
@@ -48,7 +48,7 @@ describe('Administración clientes › Perfiles', () => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
     h.calls.length = 0; h.downloads.length = 0;
-    h.profiles = [profile(5, { name: 'Esperanza Gómez', lastLoginAt: '2026-11-01T12:00:00Z' }), profile(6, { name: 'Pablo Carpio', email: '', username: 'pablo.carpio', hasEmail: false, active: false })];
+    h.profiles = [profile(5, { name: 'Esperanza Gómez', lastLoginAt: '2026-11-01T12:00:00Z' }), profile(6, { name: 'Pablo Carpio', email: 'pablo.carpio@andes.cl', active: false })];
     h.session = user('admin', ['gestionar_perfiles']);
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   });
@@ -59,7 +59,7 @@ describe('Administración clientes › Perfiles', () => {
     expect(host.querySelector('.section-title').textContent).toBe('Todos los perfiles');
     expect([...host.querySelectorAll('.clients-list th')].map((t) => t.textContent)).toEqual(['', 'Nombre perfil', 'Nombre empresa', 'Correo', 'Teléfono', 'Estado', 'Fecha de creación']);
     const rows = [...host.querySelectorAll('.clients-list tbody tr')].map((r) => [...r.querySelectorAll('td')].slice(1, 6).map((c) => c.textContent));
-    expect(rows).toEqual([['Esperanza Gómez', 'Andes', 'p5@andes.cl', '+56 9 1111 2222', 'Activo'], ['Pablo Carpio', 'Andes', 'Usuario: pablo.carpio', '+56 9 1111 2222', 'Inactivo']]);
+    expect(rows).toEqual([['Esperanza Gómez', 'Andes', 'p5@andes.cl', '+56 9 1111 2222', 'Activo'], ['Pablo Carpio', 'Andes', 'pablo.carpio@andes.cl', '+56 9 1111 2222', 'Inactivo']]);
     expect(h.calls.some(([, p]) => p.startsWith('/v1/profiles?') && p.includes('scope=client'))).toBe(true);
     expect(host.querySelector('.orders-search input').placeholder).toBe('Buscar nombre del perfil o empresa');
   });
@@ -93,35 +93,34 @@ describe('Administración clientes › Perfiles', () => {
     expect(items.some((t) => t.startsWith('Exportar'))).toBe(true);
   });
 
-  it('Nuevo perfil sin correo: usuario obligatorio, rol Cliente fijo y contraseña temporal una sola vez', async () => {
+  it('Nuevo perfil: correo obligatorio, sin «Usuario sin correo» y rol Cliente fijo', async () => {
     await mount('tab=perfiles');
     await click(button(host, 'Nuevo perfil'));
-    let modal = document.querySelector('.form-modal');
+    const modal = document.querySelector('.form-modal');
     expect(modal.textContent).toContain('Rol: Cliente');
+    expect(modal.textContent).not.toContain('Usuario sin correo');
+    expect(modal.querySelector('input[type=checkbox]')).toBeNull();
     await click(button(modal, 'Crear perfil'));
-    expect([...modal.querySelectorAll('.modal-field-error')].map((e) => e.textContent)).toEqual(['El nombre es obligatorio.', 'Elige la empresa.', 'Indica el correo o marca «Usuario sin correo».']);
+    expect([...modal.querySelectorAll('.modal-field-error')].map((e) => e.textContent)).toEqual(['El nombre es obligatorio.', 'Elige la empresa.', 'El correo es obligatorio: el perfil recibe ahí el enlace para definir su contraseña.']);
     const [name] = modal.querySelectorAll('input');
-    await setValue(name, 'Pablo Nuevo');
+    await setValue(name, 'Luis Nuevo');
     const select = modal.querySelector('select');
     expect([...select.options].map((o) => o.textContent)).toEqual(['Elige la empresa', 'Andes']); // solo empresas activas
     await setValue(select, '1');
-    await click(modal.querySelector('input[type=checkbox]'));
+    await setValue(modal.querySelector('input[type=email]'), 'luis@andes.cl');
     await click(button(modal, 'Crear perfil'));
-    expect(modal.textContent).toContain('Sin correo, el nombre de usuario es obligatorio.');
-    await setValue(modal.querySelector('input[autocomplete=off]'), 'Pablo.Nuevo');
-    await click(button(modal, 'Crear perfil'));
-    expect(h.calls.find(([m, p]) => m === 'POST' && p === '/v1/profiles?scope=client')[2]).toEqual({ name: 'Pablo Nuevo', companyId: 1, phone: '', jobTitle: '', username: 'pablo.nuevo' });
-    modal = document.querySelector('.form-modal');
-    expect(modal.textContent).toContain('Temp-1234-abcd');
-    expect(modal.textContent).toContain('Se muestra una sola vez');
+    expect(h.calls.find(([m, p]) => m === 'POST' && p === '/v1/profiles?scope=client')[2]).toEqual({ name: 'Luis Nuevo', companyId: 1, phone: '', jobTitle: '', email: 'luis@andes.cl' });
+    expect(document.querySelector('.form-modal')).toBeNull();
   });
 
-  it('Restablecer contraseña: con correo se envía el enlace; sin correo, contraseña temporal', async () => {
-    h.profiles[1].active = true;
-    await mount('tab=perfiles&perfil=6');
+  it('Restablecer contraseña: siempre por enlace al correo', async () => {
+    await mount('tab=perfiles&perfil=5');
     await click(button(host.querySelector('.clients-panel'), 'Restablecer contraseña'));
-    await click(button(document.querySelector('.form-modal'), 'Restablecer'));
-    expect(document.querySelector('.form-modal').textContent).toContain('Nueva-5678');
+    const modal = document.querySelector('.form-modal');
+    expect(modal.textContent).toContain('Le enviaremos a p5@andes.cl un enlace');
+    await click(button(modal, 'Restablecer'));
+    expect(h.calls.some(([m, p]) => m === 'POST' && p === '/v1/profiles/5/password?scope=client')).toBe(true);
+    expect(document.querySelector('.form-modal')).toBeNull();
   });
 
   it('Importar perfiles: informa las filas inválidas con su fila y motivo', async () => {
