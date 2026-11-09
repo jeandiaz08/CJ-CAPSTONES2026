@@ -76,6 +76,21 @@ func TestActivityTexts(t *testing.T) {
 	if want := []string{"Permisos: — → despacho", "Perfil: Empaque → Jefe de Operaciones"}; len(u.DetailLines) != 2 || u.DetailLines[0] != want[0] || u.DetailLines[1] != want[1] {
 		t.Fatalf("usuarios %v", u.DetailLines)
 	}
+	// Tarea 07: empresas cliente en Registro de acciones › Usuarios (antes, después y motivo).
+	c := ActivityItem{Module: "users", Action: "company_disabled", Details: safeDetails(map[string]any{
+		"active": map[string]any{"from": true, "to": false}, "reason": "Término de contrato", "secret": "x"})}
+	presentActivity(&c, "")
+	if want := []string{"Estado: Activa → Inactiva", "Motivo: Término de contrato"}; c.ActionLabel != "Empresa desactivada" ||
+		len(c.DetailLines) != 2 || c.DetailLines[0] != want[0] || c.DetailLines[1] != want[1] {
+		t.Fatalf("empresa %q %v", c.ActionLabel, c.DetailLines)
+	}
+	e := ActivityItem{Module: "users", Action: "company_updated", Details: safeDetails(map[string]any{
+		"waveCode": map[string]any{"from": "General (según reglas)", "to": "AM"}, "taxId": map[string]any{"from": "1", "to": "2"}})}
+	presentActivity(&e, "")
+	if want := []string{"RUT: 1 → 2", "Ola: General (según reglas) → AM"}; e.ActionLabel != "Empresa editada" || len(e.DetailLines) != 2 ||
+		e.DetailLines[0] != want[0] || e.DetailLines[1] != want[1] {
+		t.Fatalf("empresa editada %v", e.DetailLines)
+	}
 	o := ActivityItem{Module: "orders", Action: "validate", Details: map[string]any{"fromStatus": "validating", "toStatus": "validated"}}
 	presentActivity(&o, "")
 	if o.StatusChange != "En validación → Validada" || o.ActionLabel != "Validada" {

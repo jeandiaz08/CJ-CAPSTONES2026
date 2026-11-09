@@ -35,6 +35,9 @@ var activityActions = map[string]string{
 	"created": "Usuario creado", "updated": "Usuario editado", "enabled": "Usuario activado", "disabled": "Usuario desactivado",
 	"password_reset": "Contraseña temporal generada", "password_email_sent": "Correo de contraseña enviado",
 	"linked": "Vinculado con Keycloak", "relinked": "Revinculado con Keycloak", "provisioned": "Alta en el primer ingreso",
+	// empresas cliente (Tarea 07)
+	"company_created": "Empresa creada", "company_updated": "Empresa editada",
+	"company_enabled": "Empresa activada", "company_disabled": "Empresa desactivada",
 }
 
 func actionLabel(a string) string {
@@ -106,6 +109,8 @@ func detailLines(module string, d map[string]any) []string {
 		"username": "Usuario", "withoutEmail": "Sin correo", "temporary": "Contraseña temporal", "source": "Origen", "reason": "Motivo",
 		"waveId": "Ola", "manifestId": "Manifiesto", "authorizedBy": "Autorizó", "missingPackages": "Bultos faltantes",
 		"scannedPackages": "Bultos escaneados", "packagesTotal": "Bultos de la orden",
+		"taxId": "RUT", "email": "Correo", "phone": "Teléfono", "waveCode": "Ola", "wmsCode": "Código Invas",
+		"active": "Estado", "jobTitle": "Cargo", "companyName": "Empresa",
 	}
 	if module == "dispatch" {
 		for k, v := range map[string]string{"pickerName": "Quien retira", "pickerId": "RUT", "vehiclePlate": "Patente", "notes": "Notas"} {
@@ -131,6 +136,12 @@ func detailLines(module string, d map[string]any) []string {
 			}
 			if k == "manifestId" {
 				return "#" + listText(x)
+			}
+			if k == "active" {
+				if b, ok := x.(bool); ok && b {
+					return "Activa"
+				}
+				return "Inactiva"
 			}
 			return listText(x)
 		}

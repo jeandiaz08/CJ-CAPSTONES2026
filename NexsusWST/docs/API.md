@@ -71,6 +71,29 @@ Desde la Tarea 07 (Matriz de perfiles v1.2), los `GET` siguen abiertos al perfil
 
 Reglas: un `cliente` necesita al menos una empresa y no puede tener `allCompanies` ni permisos internos (`despacho`, `gestionar_perfiles`).
 
+### Empresas cliente (Tarea 07, RF-04, H-03) — consulta: Administrador o permiso **Gestionar perfiles** · cambios: permiso **Gestionar perfiles**
+
+Clientes › Administración clientes › Empresas. `GET /v1/clients` (abajo, en Ola por cliente) sigue siendo la lista corta para los formularios de órdenes.
+
+| Método | Ruta | Cuerpo / filtros | Descripción |
+| --- | --- | --- | --- |
+| GET | `/v1/companies` | `?q=&status=active\|inactive&wave=general\|{código}&from=&to=&ids=1,2&limit=&offset=` | `{data, total, limit, offset}`. `q` busca por nombre o RUT (con o sin puntos). `from` y `to` (`AAAA-MM-DD`) son sobre la fecha de creación, en hora de Chile. `limit` de 1 a 200; por defecto 20. |
+| GET | `/v1/companies/export` | mismos filtros | Excel «Empresas»: Nombre empresa, RUT, Correo, Teléfono, Ola, N° perfiles, Estado, Fecha de creación (+ Código Invas para el Administrador). Máximo 10.000 filas (422 `too_many_rows`). |
+| GET | `/v1/companies/{id}` | | Detalle |
+| POST | `/v1/companies` | `{name, taxId, email, phone, waveCode, wmsCode}` | Crea (201). |
+| PATCH | `/v1/companies/{id}` | el mismo cuerpo, con todos los campos | Edita. Solo se registra lo que cambió. |
+| POST | `/v1/companies/{id}/disable` | `{reason}` (obligatorio, de 5 a 500 caracteres) | Desactiva. Sus usuarios dejan de operar en su siguiente petición (403 `company_disabled` para quien no tenga otra empresa activa); el historial se conserva (H-03, criterio 3). 409 `same_state` si ya estaba inactiva. |
+| POST | `/v1/companies/{id}/enable` | `{reason}` opcional | Activa. |
+
+Empresa (respuesta): `{id, name, taxId, email, phone, waveCode, profilesCount, active, createdAt, updatedAt}`, más `wmsCode` solo para el perfil Administrador.
+
+- **Lo que exige la base (Core 000011):** `name` obligatorio (máx. 120); `taxId` obligatorio y **único sin importar puntos, guion ni mayúsculas** (409 `tax_id_taken` con `fields:[{field:"taxId"}]`); `email` y `phone` opcionales con formato.
+- **RUT:** al crear, o al editarlo, se valida el dígito verificador (módulo 11) y se guarda como `76.123.456-0`. Si al editar no se cambia el RUT, no se vuelve a validar (empresas antiguas con otro formato).
+- **Ola (PV-19):** `waveCode: null` es «General (según reglas)»: sin ola fija, el motor usa las reglas. La interfaz obliga a elegir una opción, pero la base acepta NULL. Un código va en mayúsculas, `^[A-Z0-9_-]{1,20}$`.
+- **Código Invas (`wmsCode`):** opcional; solo lo ve y lo cambia el perfil Administrador (para otro perfil con el permiso se conserva el valor actual).
+- **422 por campo:** `{error:"validation_error", message, fields:[{field, message}]}` con `field` en `name | taxId | email | phone | waveCode | wmsCode | reason`.
+- **Registro:** cada cambio queda en `user_audit` (`target_company_id`) con `action` `company_created | company_updated | company_disabled | company_enabled` y `detail` con el antes y el después (`{campo: {from, to}}`) y el motivo. Aparece en `GET /api/orders/v1/activity?module=users` como entidad `company` («Empresa creada», «Empresa desactivada»…).
+
 ### Productos y kits (H-04, RF-06) — Administrador, Jefe de Operaciones y Cliente (su empresa)
 
 | Método | Ruta | Cuerpo / filtros | Descripción |

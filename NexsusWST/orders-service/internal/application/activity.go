@@ -34,6 +34,9 @@ var activityFields = map[string]bool{
 	// usuarios (user_audit del Core)
 	"name": true, "role": true, "permissions": true, "companies": true, "allCompanies": true,
 	"username": true, "withoutEmail": true, "temporary": true, "source": true, "targetRole": true,
+	// empresas cliente y solicitudes de perfiles (Tarea 07, Core 000011)
+	"taxId": true, "email": true, "phone": true, "waveCode": true, "wmsCode": true, "active": true,
+	"jobTitle": true, "companyName": true, "requestId": true, "requestKind": true,
 }
 
 // Dentro de un campo permitido, un cambio viene como {from, to} (por ejemplo, el perfil).

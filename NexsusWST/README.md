@@ -257,7 +257,12 @@ Las páginas sin implementar muestran **qué requisito cubren y en qué archivos
 Desde `frontend-web/`:
 
 - `npm test`: pruebas de comportamiento (`tests/`, vitest + happy-dom, con los servicios simulados).
-- `npm run test:e2e`: pruebas de punta a punta (`e2e/`, Playwright con el Chrome instalado). Requieren el stack de desarrollo levantado y el seed de demostración recargado, porque modifican datos. Otro navegador: `E2E_CHANNEL=msedge`.
+- `npm run test:e2e`: pruebas de punta a punta (`e2e/`, Playwright con el Chrome instalado). Requieren el stack de desarrollo levantado. Antes de cada corrida, `e2e/global-setup.ts` recarga los datos: corre `seed-dev` y luego el seed de demostración (`respaldo/seed/seed_demo.sql`, solo local), así las pruebas no dependen de lo que dejó la corrida anterior. Si ese archivo no existe, avisa y sigue; `E2E_SKIP_SEED=1` omite la recarga. Otro navegador: `E2E_CHANNEL=msedge`.
+
+### Pruebas de Go y el *healthcheck* de desarrollo
+
+- `make test-core` y `make test-orders` corren `go test ./...` en un contenedor aparte, sin tocar el servicio en ejecución. Las pruebas de PostgreSQL necesitan `TEST_DATABASE_URL`; sin ella se saltan.
+- En desarrollo, Air recompila al guardar y deja el binario en `./tmp/api`. Si se guardan dos archivos casi a la vez, dos compilaciones seguidas pueden dejar `./tmp` sin el binario aunque el servidor siga corriendo. Antes el *healthcheck* ejecutaba ese binario, así que el servicio quedaba `unhealthy` y Traefik dejaba de enviarle tráfico (el front respondía en `/api/core`). Desde el 08-11-2026, en `docker-compose.override.yml`, el *healthcheck* de `core` y `orders` consulta `/health` por HTTP. Si alguna vez pasa algo parecido: `docker compose restart core`.
 
 ### Crear una migración nueva
 

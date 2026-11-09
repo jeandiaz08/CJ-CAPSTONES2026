@@ -34,7 +34,7 @@ func TestWavePreferenceReadsCoreViews(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(tx.QueryRow(ctx, `INSERT INTO companies (name, wave_code) VALUES ('Prueba PV-19', 'AM') RETURNING id`).Scan(&companyID))
+	must(tx.QueryRow(ctx, `INSERT INTO companies (name, tax_id, wave_code) VALUES ('Prueba PV-19', 'PV19-TEST', 'AM') RETURNING id`).Scan(&companyID))
 	_, err = tx.Exec(ctx, `INSERT INTO products (company_id, sku, description, wave_code) VALUES
 		($1,'PV19-A','A','FRIO'), ($1,'PV19-B','B','FRIO'), ($1,'PV19-C','C',NULL), ($1,'PV19-D','D','NOCHE')`, companyID)
 	must(err)

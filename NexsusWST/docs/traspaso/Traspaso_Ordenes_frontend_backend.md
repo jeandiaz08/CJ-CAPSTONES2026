@@ -184,8 +184,8 @@ Desde `NexsusWST/`, con Docker. En Windows sin `make`, usa el comando de cada ob
 
 | Paso | Comando | Qué esperar |
 |---|---|---|
-| Levantar y migrar | `make up` (corre `migrate-core`, `migrate-orders` y `seed-dev`) | `schema_migrations_orders` en **9** y `schema_migrations_core` en **10**, ambos con `dirty = false` |
-| Ver versiones | `make psql`, luego `select version, dirty from schema_migrations_orders; select version, dirty from schema_migrations_core;` | `9 f` y `10 f` |
+| Levantar y migrar | `make up` (corre `migrate-core`, `migrate-orders` y `seed-dev`) | `schema_migrations_orders` en **10** y `schema_migrations_core` en **11** (desde la Tarea 07 de Jean), ambos con `dirty = false` |
+| Ver versiones | `make psql`, luego `select version, dirty from schema_migrations_orders; select version, dirty from schema_migrations_core;` | `10 f` y `11 f` |
 | Recargar datos ficticios | `make seed-dev` | Empresas, perfiles y productos de `infrastructure/dev-seed/seed_dev.sql` |
 | Tema de Keycloak | `make theme`, después `docker compose restart keycloak` | `infrastructure/keycloak/theme/dist_keycloak/nexuswst-keycloak-theme.jar` regenerado |
 | Go | `make test-orders` y `make test-core` | Todo `ok`. Las pruebas de postgres (registro y actividad) necesitan `TEST_DATABASE_URL`; sin ella se saltan (`t.Skip`) |

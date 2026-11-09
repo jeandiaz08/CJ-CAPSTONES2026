@@ -73,8 +73,8 @@ export function saveBlob(blob: Blob, filename: string) {
 }
 
 // Pide un archivo con la sesión. Conserva el mensaje del servidor si falla (por ejemplo, el tope de filas).
-async function fetchWithSession(path: string) {
-  const response = await fetch(`/bff/orders${path}`, { cache: "no-store" });
+async function fetchWithSession(path: string, service: Service = "orders") {
+  const response = await fetch(`/bff/${service}${path}`, { cache: "no-store" });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     if (response.status === 401) window.dispatchEvent(new CustomEvent("nexus:unauthorized", { detail: { code: body.error } }));
@@ -83,8 +83,8 @@ async function fetchWithSession(path: string) {
   return response;
 }
 
-export async function downloadFile(path: string, fallbackName: string) {
-  const response = await fetchWithSession(path);
+export async function downloadFile(path: string, fallbackName: string, service: Service = "orders") {
+  const response = await fetchWithSession(path, service);
   const name = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/)?.[1];
   saveBlob(await response.blob(), name ?? fallbackName);
 }

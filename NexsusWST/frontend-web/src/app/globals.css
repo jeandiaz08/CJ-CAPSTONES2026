@@ -567,3 +567,7 @@ body{line-height:1.5}h1,h2,h3{line-height:1.2}h1{font-size:28px}button,input,sel
 .activity-detail-row td{white-space:normal;overflow:visible;background:var(--card);cursor:default}
 .activity-detail-row dl{display:grid;gap:6px;margin:0;max-width:900px}.activity-detail-row dl>div{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px}.activity-detail-row dt{color:var(--muted);font-size:12px}.activity-detail-row dd{margin:0;overflow-wrap:anywhere;line-height:1.5}
 @media(max-width:767px){.activity-chips{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:4px}.activity-chips .packing-chip{flex:0 0 auto}.activity-detail-row dl>div{grid-template-columns:minmax(0,1fr);gap:2px}.orders-toolbar>.btn.activity-export:last-child{margin:0}}
+/* Clientes · Administración clientes (Tarea 07) */
+.clients-toolbar::after{display:none}.clients-toolbar>.btn.order-primary:last-child{order:0;width:auto;flex:0 0 auto;margin:0}
+.detail-actions .btn.success{background:var(--resolve);border:2px solid var(--resolve);color:var(--card)}.company-detail .detail-actions>a.btn{justify-content:center;text-decoration:none}
+.clients-list table{min-width:1000px}.clients-list td{white-space:nowrap}
