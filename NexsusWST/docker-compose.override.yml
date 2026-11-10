@@ -50,6 +50,12 @@ services:
   core:
     build:
       target: dev
+    # depends_on solo ordena «docker compose up». Si Docker o el equipo se reinician, los
+    # contenedores vuelven solos y a la vez: el servicio partía antes que PostgreSQL, salía con
+    # error y Air no lo relanza (quedaba «unhealthy» hasta reiniciarlo a mano). Por eso se
+    # espera a PostgreSQL y Redis antes de lanzar Air. En producción no hace falta: el binario
+    # sale con error y «restart: unless-stopped» lo reintenta.
+    command: ["sh", "-c", "until nc -z postgres 5432 2>/dev/null && nc -z redis 6379 2>/dev/null; do sleep 1; done; sleep 2; exec air -c .air.toml"]
     depends_on:
       seed-dev:
         condition: service_completed_successfully
@@ -69,6 +75,8 @@ services:
   orders:
     build:
       target: dev
+    # Igual que core: espera a PostgreSQL y Redis antes de lanzar Air.
+    command: ["sh", "-c", "until nc -z postgres 5432 2>/dev/null && nc -z redis 6379 2>/dev/null; do sleep 1; done; sleep 2; exec air -c .air.toml"]
     environment:
       APP_ENV: development
     volumes:
