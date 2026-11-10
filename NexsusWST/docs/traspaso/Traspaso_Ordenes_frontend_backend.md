@@ -27,6 +27,8 @@
 4. `jean_dev` va 17 commits (sin contar merges) por delante de `cristopher_dev`: de bf5d74e (Retiro, Fase 1) a este documento. `test` = `jean_dev` (último merge cfd6016 más el de este documento). `main` no se tocó.
 5. **Numeración de migraciones (actualizada el 10-11-2026):** Jean toma **Core 000011** y **Órdenes 000010** (Clientes, Tarea 07), **Core 000012** (solicitudes internas de Usuarios WeStorage, Tarea 08) y **Core 000013** y **Órdenes 000011** (Productos, Tarea 09: auditoría de productos y apartado «Productos» del registro). Tú sigues desde **Core 000014** y **Órdenes 000012**.
 6. **Productos (Tarea 09, 10-11-2026):** en `products/adapters/inbound/http/handler.go` se quitaron las rutas `PATCH /v1/products/{id}/wave` y `PUT /v1/products/{id}/components` (nada las usaba: front, e2e, scripts ni seed). La ola y la composición se editan con `PATCH /v1/products/{id}` (`catalog.go`), que deja la acción en el Registro › Productos. `GET /v1/products`, `/{id}` y `POST /v1/products` los atiende ahora `CatalogHandler`. **Limpieza pendiente (tuya):** en `handler.go` quedan sin uso `list`, `get`, `create`, `setWave` y `setComponents`; no se borraron.
+7. **Integraciones (Tarea 10, 10-11-2026):** pantalla `/integraciones` hecha **solo en el frontend** sobre tu `/v1/integrations` (listar, crear, rotar secreto, activar y desactivar); no se tocó ningún archivo del backend. **No se trabajó nada del API Mock de Ismael** (correo del 10-11, en `respaldo/api_mock_ismael/`, fuera de git): el mock funciona por consulta y tu backend por webhook, y esa decisión es tuya. El detalle, los datos que faltan (I1 a I7) y la lista única de proveedores están en `respaldo/notas/backend_pendientes.md`, sección «Integraciones (API Mock de Ismael, 10-11-2026)»; el resumen está en M9.
+8. **Infraestructura compartida (10-11-2026):** en `docker-compose.override.yml` (solo desarrollo), `core` y `orders` ahora esperan a PostgreSQL y Redis antes de lanzar Air (`command` con un bucle `nc`). Motivo: tras reiniciar Docker los contenedores vuelven a la vez sin respetar `depends_on`, el servicio salía con error y Air no lo relanza, así que quedaba «unhealthy» hasta reiniciarlo a mano. `depends_on` con `service_healthy` hacia `postgres` y `redis` ya existía en `docker-compose.yml` y no cambió. `docker-compose.prod.yml` no cambió: en producción el binario sale con error y `restart: unless-stopped` lo reintenta.
 
 ---
 
@@ -110,6 +112,7 @@
 | M6 | Perfil del actor al momento de la acción | `order_events`, `manifests` y `user_audit` guardan `actor_role` (o `role` en `details`) | — (ver 6.1) | `/v1/activity` y `/v1/orders/registry` muestran el perfil **actual** |
 | M7 | Configuración y catálogos en el registro de acciones | Eventos de cortes, horario, hora límite, reglas de ola (hoy se borran en físico), couriers, integraciones, productos, kits y empresas, con `{from, to}` en `details`; un nuevo `module` en `activity_log` | — | Esos cambios no dejan rastro de quién ni cuándo |
 | M8 | Filtrar por permiso los avisos internos del WebSocket (Tarea 07) | Que el aviso `kind: profile_request` (solicitud de perfil nueva) llegue solo a quien tiene el permiso `gestionar_perfiles`. Por ejemplo, un campo `permission` en el mensaje que `ws` (`orders-service/internal/adapters/inbound/http/handler.go`) compare con `id.Permissions` antes de reenviarlo | `frontend-web/src/hooks/useNotificationFeed.ts` (`requestNotice`) | El Core publica el aviso con `audience: internal`: le llega por WebSocket a todo el personal interno de esas empresas (Jefe, Administrador sin el permiso) y el front lo oculta |
+| M9 | Datos de integraciones para la pantalla (Tarea 10) | En `GET /v1/integrations`: `lastEventAt` y `errors24h` por conexión (salen de `webhook_inbox`); `GET /v1/integrations/{id}/events`; lista de proveedores soportados; acciones de integraciones en `activity_log` sin el secreto; y decidir el modelo por consulta del API Mock de Ismael (Shopify, Mercado Libre) | `TODO(api)` en `frontend-web/src/features/integrations/` (`providers.ts`, `ProvidersTab.tsx`, `ConnectionsTab.tsx`, `ConnectionDetail.tsx`) y `services/integrations.ts` | La pantalla muestra «Sincronizado: —», no muestra «Último evento» ni «Errores 24 h», y «Últimos eventos» dice «Aún no disponible.». Shopify queda «Próximamente» |
 
 ### Baja
 
@@ -134,7 +137,6 @@
 | `GET /v1/orders/{id}/tracking` | El front usa `tracking` dentro de `GET /v1/orders/{id}` (`handler.go:505`) |
 | `summary` de `GET /v1/dispatch/manifests/{id}` | El front calcula el resumen en `features/dispatch/components/ManifestModal.tsx`. Se puede cambiar para usar el del servidor |
 | `POST /v1/waves/run-rules` | Sin botón en la UI |
-| `GET/POST /v1/integrations…` (rotate-secret, enable, disable) | No hay pantalla de integraciones en Órdenes |
 | `GET /v1/orders?view=registro` | El front usa `GET /v1/orders/registry`; `view=registro` queda por compatibilidad |
 | Core `GET/POST /v1/me/notes`, `PATCH/DELETE /v1/me/notes/{id}` | Recordatorios del Home; el Home todavía no los muestra |
 
@@ -161,6 +163,7 @@
 | Registro órdenes (`/ordenes/registro`) | Tabla con filtros en la URL, detalle con «Historial de eventos», Excel acciones (seleccionadas, por filtros, masivo). Cliente: solo su empresa | `GET /v1/orders/registry`, `/registry/export`; `GET /v1/orders/{id}` (historial) |
 | Registro de acciones (`/ordenes/registro?tab=acciones`) | Solo Admin y Jefe. Chips Órdenes · Empaque · Retiro y entrega · Usuarios; filtros (por defecto 7 días), fila expandible, enlaces a la orden o al manifiesto, Exportar registro | `GET /v1/activity`, `/v1/activity/export` |
 | Campana y seguimiento (todas las pantallas) | Avisos en vivo (incidencia, etiqueta disponible, despacho incompleto, entrega), últimos 20 en memoria; sección «Seguimiento» del detalle | `POST /v1/ws-ticket`, `GET /ws?ticket=`; `GET /v1/orders/{id}` (`tracking`) |
+| Integraciones (`/integraciones`) | Solo Administrador. Pestaña «Integraciones»: tarjetas por proveedor (Canales, Couriers, Invas) con el resumen de conexiones. Pestaña «Clientes»: búsqueda y filtros en la URL, tabla, panel con URL del webhook y secreto enmascarado, «Conectar cliente», «Rotar secreto» (se muestra una sola vez), Activar y Desactivar | `GET/POST /v1/integrations`, `POST /v1/integrations/{id}/rotate-secret`, `/enable`, `/disable`; Core `GET /v1/clients`, `GET /v1/catalogs/couriers` |
 
 **Común:**
 - Todo pasa por el BFF de Next (`/bff/orders/...`, `/bff/core/...`) con la sesión de Auth.js.

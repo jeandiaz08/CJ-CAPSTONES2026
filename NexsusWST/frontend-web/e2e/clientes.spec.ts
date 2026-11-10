@@ -47,8 +47,9 @@ test.describe("Clientes · Fase 1: menú y rutas", () => {
     await expect(sidebar(page).getByRole("link", { name: "Integraciones" })).toBeVisible();
     await page.goto("/integraciones?empresa=1");
     await expect(page.getByRole("heading", { name: "Integraciones" })).toBeVisible();
-    await expect(page.getByText("Empresa Demo Uno SpA")).toBeVisible();
-    await expect(page.getByText("Próximamente.")).toBeVisible();
+    // Tarea 10: abre la pestaña Clientes de Integraciones filtrada por la empresa.
+    await expect(page.getByRole("link", { name: "Clientes", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("button", { name: "Filtros (1)" })).toBeVisible();
 
     // Perfiles empresa es solo del Cliente: la URL vuelve al Home.
     await page.goto("/clientes/perfiles-empresa");
