@@ -2,22 +2,24 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Filter, FilterX } from "lucide-react";
+import { CirclePlus, Filter, FilterX } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { Badge } from "@/components/StatusBadge";
 import { showToast } from "@/components/Toast";
 import { useDebounce } from "@/hooks/useDebounce";
-import { listCompanies } from "@/services/core";
-import { listIntegrations, setIntegrationActive, type Integration } from "@/services/integrations";
+import { getCatalog, listCompanies } from "@/services/core";
+import { listIntegrations, rotateIntegrationSecret, setIntegrationActive, type Integration, type IntegrationWithSecret } from "@/services/integrations";
 import { dateLabel } from "@/features/orders/components/OrderDetail";
 import { useOrderResource } from "@/features/orders/hooks/useOrderResources";
 import { usePagedList } from "@/features/clients/hooks/usePagedList";
 import { KIND_LABELS, providerName } from "../providers";
-import { actorName, ConnectionDetail } from "./ConnectionDetail";
+import { ConnectFormModal, SecretDialog } from "./ConnectDialogs";
+import { actorName, ConnectionDetail, webhookUrl } from "./ConnectionDetail";
 import { ConnectionFiltersModal, countConnectionFilters, type ConnectionFilterValues } from "./ConnectionFiltersModal";
 
 const FILTER_PARAMS = { company: "empresa", kind: "tipo", provider: "proveedor", status: "estado" } as const;
+const loadCouriers = () => getCatalog("couriers");
 const loadConnections = () => listIntegrations().then((r) => ({ data: r.data, total: r.data.length }));
 
 // Pestaña «Clientes»: las conexiones de cada empresa. Búsqueda, filtros y conexión abierta
@@ -33,6 +35,11 @@ export function ConnectionsTab() {
   const lastQuery = useRef(urlQuery);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [toggling, setToggling] = useState<Integration | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [rotating, setRotating] = useState<Integration | null>(null);
+  // Secreto recién creado o rotado: solo aquí, en memoria, hasta cerrar el diálogo. Nunca se
+  // guarda en estado global ni en localStorage, ni se escribe en la consola.
+  const [revealed, setRevealed] = useState<{ title: string; name: string; secret: string; url: string } | null>(null);
   const [mobile, setMobile] = useState(false);
 
   const filters = useMemo<ConnectionFilterValues>(() => {
@@ -48,6 +55,7 @@ export function ConnectionsTab() {
 
   const { rows, loading, error, reload } = usePagedList(loadConnections, "integrations");
   const companies = useOrderResource(listCompanies, "companies");
+  const couriers = useOrderResource(loadCouriers, "couriers");
   const companyList = useMemo(() => companies.data?.data ?? [], [companies.data]);
   const companyName = (id: number) => companyList.find((c) => c.id === id)?.name ?? `Empresa ${id}`;
 
@@ -97,10 +105,20 @@ export function ConnectionsTab() {
     reload();
   };
 
+  const reveal = (heading: string, i: IntegrationWithSecret) =>
+    setRevealed({ title: heading, name: title(i), secret: i.secret, url: webhookUrl(i.webhookPath) });
+  const confirmRotate = async () => {
+    if (!rotating) return;
+    const rotated = await rotateIntegrationSecret(rotating.id);
+    setRotating(null);
+    reveal("Secreto nuevo", rotated);
+    reload();
+  };
+
   const activeFilters = countConnectionFilters(filters);
   const title = (i: Integration) => `${companyName(i.companyId)} · ${providerName(i.provider, i.kind)}`;
   const detail = connection
-    ? <ConnectionDetail connection={connection} companyName={companyName(connection.companyId)} inModal={mobile} onToggle={() => setToggling(connection)} />
+    ? <ConnectionDetail connection={connection} companyName={companyName(connection.companyId)} inModal={mobile} onToggle={() => setToggling(connection)} onRotate={() => setRotating(connection)} />
     : selected && loading ? <div className="detail-skeleton" aria-label="Cargando conexión" />
     : selected ? <p className="detail-empty">Esta conexión no existe.</p>
     : <p className="detail-empty">Selecciona una conexión para ver su detalle</p>;
@@ -114,6 +132,7 @@ export function ConnectionsTab() {
         </label>
         <button className="btn ghost" onClick={() => setFiltersOpen(true)}><Filter size={18} />Filtros{activeFilters ? ` (${activeFilters})` : ""}</button>
         <button className="btn ghost" onClick={clearAll}><FilterX size={18} />Limpiar filtros</button>
+        <button className="btn order-primary" onClick={() => setConnecting(true)}><CirclePlus size={18} />Conectar cliente</button>
       </div>
       <div className="orders-workspace">
         <section className="orders-list clients-list connections-list" aria-label="Conexiones">
@@ -147,6 +166,23 @@ export function ConnectionsTab() {
         <Modal title={connection ? `Detalle de conexión ${title(connection)}` : "Detalle de conexión"} onClose={() => select(null)} panelClassName="registry-modal">{detail}</Modal>
       )}
       {filtersOpen && <ConnectionFiltersModal values={filters} companies={companyList} onApply={applyFilters} onClose={() => setFiltersOpen(false)} />}
+      {connecting && (
+        <ConnectFormModal companies={companyList.filter((c) => c.active)} couriers={couriers.data?.data ?? []}
+          initial={{ company: filters.company, kind: filters.kind, provider: filters.provider }}
+          onClose={() => setConnecting(false)}
+          onCreated={(created) => {
+            setConnecting(false);
+            reveal("Conexión creada", created);
+            select(created.id);
+            reload();
+          }} />
+      )}
+      {rotating && (
+        <ConfirmDialog title={`Rotar secreto de ${title(rotating)}`} confirmLabel="Rotar secreto" destructive onConfirm={confirmRotate} onClose={() => setRotating(null)}>
+          <p>El secreto actual deja de funcionar de inmediato: los avisos firmados con él se rechazarán hasta que el cliente configure el nuevo. El secreto nuevo se muestra una sola vez.</p>
+        </ConfirmDialog>
+      )}
+      {revealed && <SecretDialog {...revealed} onClose={() => setRevealed(null)} />}
       {toggling && (
         <ConfirmDialog
           title={`${toggling.active ? "Desactivar" : "Activar"} conexión ${title(toggling)}`}

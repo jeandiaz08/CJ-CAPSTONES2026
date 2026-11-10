@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Copy } from "lucide-react";
+import { Copy, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/StatusBadge";
 import type { Integration } from "@/services/integrations";
 import { dateLabel } from "@/features/orders/components/OrderDetail";
@@ -16,11 +16,12 @@ export const webhookUrl = (path: string) => (typeof window === "undefined" ? pat
 
 // Panel de una conexión. El secreto nunca llega del backend en la lista: siempre va enmascarado.
 // Activar o Desactivar: solo el que corresponde al estado.
-export function ConnectionDetail({ connection, companyName, inModal = false, onToggle }: {
+export function ConnectionDetail({ connection, companyName, inModal = false, onToggle, onRotate }: {
   connection: Integration;
   companyName: string;
   inModal?: boolean;
   onToggle: () => void;
+  onRotate: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const url = webhookUrl(connection.webhookPath);
@@ -57,8 +58,10 @@ export function ConnectionDetail({ connection, companyName, inModal = false, onT
         </section>
         <section>
           <h3>Secreto</h3>
-          <p className="secret-row"><code aria-label="Secreto oculto">••••••••••••</code></p>
-          <small className="muted">Solo se muestra una vez, al crear la conexión o al rotarlo.</small>
+          <p className="secret-row"><code aria-label="Secreto oculto">••••••••••••</code>
+            <button type="button" className="text-button" onClick={onRotate}><RefreshCw size={16} aria-hidden="true" />Rotar</button>
+          </p>
+          <small className="muted">Al rotar, el secreto nuevo se muestra una sola vez.</small>
         </section>
         <section>
           <h3>Últimos eventos</h3>

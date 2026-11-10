@@ -21,3 +21,13 @@ export type Integration = {
 export const listIntegrations = () => api<{ data: Integration[] }>("orders", "/v1/integrations");
 export const setIntegrationActive = (id: number, active: boolean) =>
   api<void>("orders", `/v1/integrations/${id}/${active ? "enable" : "disable"}`, { method: "POST" });
+
+// El secreto llega UNA sola vez, en la respuesta de crear o de rotar. No se guarda en estado
+// global, en localStorage ni en logs: vive solo en el diálogo que lo muestra.
+export type IntegrationWithSecret = Integration & { secret: string };
+export type NewIntegration = { companyId: number; kind: IntegrationKind; provider: string; defaultCourier?: string };
+
+export const createIntegration = (body: NewIntegration) =>
+  api<IntegrationWithSecret>("orders", "/v1/integrations", { method: "POST", body: JSON.stringify(body) });
+export const rotateIntegrationSecret = (id: number) =>
+  api<IntegrationWithSecret>("orders", `/v1/integrations/${id}/rotate-secret`, { method: "POST" });

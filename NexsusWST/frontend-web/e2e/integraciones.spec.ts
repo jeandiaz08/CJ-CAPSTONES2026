@@ -95,3 +95,96 @@ test.describe("Integraciones · Fase 1", () => {
     await page.waitForURL((url) => url.pathname === "/");
   });
 });
+
+test.describe("Integraciones · Fase 2", () => {
+  // Aviso de seguimiento para una orden que no existe: el backend lo acepta (200) si el secreto
+  // es válido y lo deja en la bandeja con error, sin crear ni cambiar ninguna orden.
+  const sendHook = (url: string, token: string) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Nexus-Token": token },
+      body: JSON.stringify({ eventId: `E2E-${Date.now()}-${Math.random()}`, status: "e2e", orderRef: "E2E-NO-EXISTE" }),
+    }).then((r) => r.status);
+
+  test("Conectar cliente y Rotar secreto: el secreto se muestra una sola vez y es el que vale", async ({ page }) => {
+    const admin = await ordersApi("admin@nexus.local");
+    await login(page, "admin@nexus.local");
+    await page.goto("/integraciones?tab=clientes");
+    await expect(page.locator(".connections-list tbody tr").first()).toBeVisible();
+
+    // Conectar: valida y solo ofrece los proveedores del backend (sin Shopify).
+    await page.getByRole("button", { name: "Conectar cliente" }).click();
+    const form = page.locator(".form-modal");
+    await form.getByRole("button", { name: "Conectar", exact: true }).click();
+    await expect(form).toContainText("Elige la empresa.");
+    await expect(form.getByLabel("Proveedor *").locator("option")).toHaveText(["Selecciona un proveedor", "Mercado Libre", "API Nexus"]);
+    await form.getByLabel("Empresa *").selectOption({ label: "Empresa Demo Uno SpA" });
+    await form.getByLabel("Tipo *").selectOption("courier");
+    await expect(form.getByLabel(/Courier por defecto/)).toHaveCount(0);
+    await form.getByLabel("Proveedor *").selectOption({ label: "Courier genérico" });
+    await form.getByRole("button", { name: "Conectar", exact: true }).click();
+
+    // Se muestra una sola vez: secreto y URL completa del webhook.
+    const dialog = page.locator(".form-modal");
+    await expect(dialog.getByRole("heading", { name: "Conexión creada" })).toBeVisible();
+    await expect(dialog).toContainText("se muestra una sola vez");
+    const url = (await dialog.locator(".secret-row code").nth(0).textContent())!;
+    const secret = (await dialog.locator(".secret-row code").nth(1).textContent())!;
+    expect(url).toMatch(new RegExp(`^${BASE}/webhooks/generic/\\d+$`));
+    expect(secret).toMatch(/^[0-9a-f]{64}$/);
+    const id = Number(url.split("/").pop());
+    await dialog.getByRole("button", { name: "Listo" }).click();
+
+    // Al cerrar ya no está en la página ni en el almacenamiento del navegador; el panel lo enmascara.
+    await expect(page.getByText(secret)).toHaveCount(0);
+    expect(await page.evaluate((s) => JSON.stringify([{ ...localStorage }, { ...sessionStorage }]).includes(s), secret)).toBe(false);
+    const panel = page.locator(".clients-panel");
+    await expect(panel.getByRole("heading", { level: 2 })).toHaveText("Empresa Demo Uno SpA · Courier genérico");
+    await expect(panel.getByLabel("Secreto oculto")).toHaveText(/^•+$/);
+    await page.reload();
+    await expect(panel.getByLabel("Secreto oculto")).toHaveText(/^•+$/);
+    await expect(page.getByText(secret)).toHaveCount(0);
+    // La API tampoco lo vuelve a entregar.
+    const listed = (await admin<{ data: Integration[] }>("GET", "/v1/integrations")).body.data.find((i) => i.id === id)!;
+    expect(listed.secret).toBeUndefined();
+
+    // El secreto mostrado es el que acepta el webhook.
+    expect(await sendHook(url, secret)).toBe(200);
+    expect(await sendHook(url, "otro-secreto")).toBe(401);
+
+    // Rotar: con confirmación; el anterior deja de servir y el nuevo se muestra una sola vez.
+    await panel.getByRole("button", { name: "Rotar" }).click();
+    await expect(page.locator(".form-modal")).toContainText("deja de funcionar de inmediato");
+    await page.locator(".form-modal").getByRole("button", { name: "Rotar secreto" }).click();
+    await expect(dialog.getByRole("heading", { name: "Secreto nuevo" })).toBeVisible();
+    const rotated = (await dialog.locator(".secret-row code").nth(1).textContent())!;
+    expect(rotated).toMatch(/^[0-9a-f]{64}$/);
+    expect(rotated).not.toBe(secret);
+    await dialog.getByRole("button", { name: "Listo" }).click();
+    await expect(page.getByText(rotated)).toHaveCount(0);
+    expect(await sendHook(url, secret)).toBe(401);
+    expect(await sendHook(url, rotated)).toBe(200);
+
+    // Desactivada rechaza los avisos aunque el secreto sea correcto.
+    await panel.getByRole("button", { name: "Desactivar", exact: true }).click();
+    await page.locator(".form-modal").getByRole("button", { name: "Desactivar", exact: true }).click();
+    await expect(panel.locator(".badge")).toHaveText("Inactiva");
+    expect(await sendHook(url, rotated)).toBe(401);
+  });
+
+  test("Conectar: el error del servidor queda en el formulario", async ({ page }) => {
+    await login(page, "admin@nexus.local");
+    await page.route("**/bff/orders/v1/integrations", (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "forbidden", message: "Sin permiso." }) })
+        : route.continue());
+    await page.goto("/integraciones?tab=clientes&empresa=1&tipo=channel&proveedor=generic");
+    await page.getByRole("button", { name: "Conectar cliente" }).click();
+    const form = page.locator(".form-modal");
+    await expect(form.getByLabel("Empresa *")).toHaveValue("1");
+    await expect(form.getByLabel("Proveedor *")).toHaveValue("generic");
+    await form.getByRole("button", { name: "Conectar", exact: true }).click();
+    await expect(form.getByRole("alert")).toContainText("Sin permiso para realizar esta acción.");
+    await expect(form.getByRole("heading", { name: "Conectar cliente" })).toBeVisible();
+  });
+});

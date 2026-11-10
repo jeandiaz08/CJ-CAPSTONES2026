@@ -588,3 +588,5 @@ body{line-height:1.5}h1,h2,h3{line-height:1.2}h1{font-size:28px}button,input,sel
 .connections-list table{min-width:600px;table-layout:auto}.connections-list th:nth-child(n){width:auto}.integrations-view .orders-toolbar>.btn.ghost:last-child{order:0;margin:0;width:auto;flex:0 0 auto}.connections-list td:last-child{white-space:normal}
 .secret-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0}.secret-row code{overflow-wrap:anywhere;min-width:0;user-select:all}
 .connection-detail .detail-actions>.btn{justify-content:center}
+.secret-label{font-size:13px;font-weight:500}.form-modal .secret-row code{font-size:13px;padding:8px 10px;background:var(--surface);border-radius:8px;flex:1}
+.integrations-view .clients-toolbar>.btn.order-primary:last-child{margin-left:auto}

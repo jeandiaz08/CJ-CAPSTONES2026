@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { act } from 'react';
 import { PROVIDERS, supportedProviders } from '@/features/integrations/providers';
 
-// Tarea 10 · Fase 1: Integraciones (tarjetas por proveedor y conexiones por empresa).
-const h = vi.hoisted(() => ({ calls: [], integrations: [], fail: null }));
+// Tarea 10: Integraciones (tarjetas por proveedor, conexiones por empresa, conectar y rotar).
+const h = vi.hoisted(() => ({ calls: [], integrations: [], fail: null, failCreate: null }));
 vi.mock('@/state/auth', () => ({ ROLE_LABELS: {}, useAuth: () => ({ session: { user: { id: 1, role: 'admin', permissions: [], name: 'X' } }, companyId: null, logout: () => {} }) }));
 vi.mock('@/components/NotificationBell', () => ({ NotificationBell: () => null }));
 vi.mock('@/services/api', () => {
@@ -14,8 +14,18 @@ vi.mock('@/services/api', () => {
     api: async (service, path, init) => {
       h.calls.push([init?.method ?? 'GET', path, init?.body ? JSON.parse(init.body) : undefined]);
       if (h.fail) throw h.fail;
-      if (path === '/v1/integrations') return { data: h.integrations };
-      if (path === '/v1/clients') return { data: [{ id: 1, name: 'Andes Outdoor SpA' }, { id: 2, name: 'Casa Bella Ltda' }] };
+      if (path === '/v1/integrations' && !init?.method) return { data: h.integrations };
+      if (path === '/v1/clients') return { data: [{ id: 1, name: 'Andes Outdoor SpA', active: true }, { id: 2, name: 'Casa Bella Ltda', active: true }, { id: 3, name: 'Montaña Sur', active: false }] };
+      if (path === '/v1/catalogs/couriers') return { data: [{ code: 'starken', name: 'Starken' }, { code: 'recibelo', name: 'Recíbelo' }] };
+      if (init?.method === 'POST' && path === '/v1/integrations') {
+        if (h.failCreate) throw h.failCreate;
+        const body = JSON.parse(init.body);
+        const created = conn(50, { ...body, channel: body.provider, defaultCourier: body.defaultCourier ?? '' });
+        h.integrations = [...h.integrations, created];
+        return { ...created, secret: 'SECRETO-NUEVO-50' };
+      }
+      const rot = path.match(/^\/v1\/integrations\/(\d+)\/rotate-secret$/);
+      if (rot) return { ...h.integrations.find((i) => i.id === Number(rot[1])), secret: 'SECRETO-ROTADO-' + rot[1] };
       const m = path.match(/^\/v1\/integrations\/(\d+)\/(enable|disable)$/);
       if (m) { h.integrations = h.integrations.map((i) => (i.id === Number(m[1]) ? { ...i, active: m[2] === 'enable' } : i)); return undefined; }
       return { data: [] };
@@ -54,7 +64,7 @@ describe('Integraciones', () => {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-    h.calls.length = 0; h.fail = null;
+    h.calls.length = 0; h.fail = null; h.failCreate = null;
     h.integrations = [
       conn(1), conn(2, { companyId: 2 }), conn(3, { companyId: 2, active: false }),
       conn(4, { provider: 'generic', channel: 'generic', defaultCourier: 'starken' }),
@@ -109,7 +119,7 @@ describe('Integraciones', () => {
     expect(rows[0][4]).not.toContain('user:');
     expect(rows[2].slice(0, 4)).toEqual(['Casa Bella Ltda', 'Canal', 'Mercado Libre', 'Inactiva']);
     expect(rows[5].slice(1, 3)).toEqual(['Courier', 'Courier genérico']);
-    expect(button(host, 'Conectar cliente')).toBeUndefined(); // llega en la Fase 2
+    expect(button(host, 'Conectar cliente')).toBeTruthy();
   });
 
   it('clientes: ?empresa= sin pestaña abre Clientes filtrada; ?proveedor=, tipo, estado y búsqueda', async () => {
@@ -186,5 +196,74 @@ describe('Integraciones', () => {
     await mount('tab=clientes');
     expect(host.querySelector('.connections-list [role="alert"]').textContent).toContain('Sin permiso');
     expect(host.querySelectorAll('.connections-list tbody tr').length).toBe(0);
+  });
+
+  const modalButton = (text) => [...document.querySelectorAll('.form-modal button')].find((b) => b.textContent.trim() === text);
+  const storageDump = () => JSON.stringify([Object.entries(globalThis.localStorage ?? {}), Object.entries(globalThis.sessionStorage ?? {})]);
+
+  it('Conectar cliente: valida, solo proveedores del backend y muestra secreto y URL una sola vez', async () => {
+    const copied = [];
+    Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => { copied.push(t); } } });
+    await mount('tab=clientes');
+    await click(button(host, 'Conectar cliente'));
+    const fields = () => [...document.querySelectorAll('.form-modal select')];
+    expect([...fields()[0].options].map((o) => o.textContent)).toEqual(['Selecciona una empresa', 'Andes Outdoor SpA', 'Casa Bella Ltda']); // sin la inactiva
+    expect([...fields()[2].options].map((o) => o.textContent)).toEqual(['Selecciona un proveedor', 'Mercado Libre', 'API Nexus']); // sin Shopify
+    await click(modalButton('Conectar'));
+    expect(document.querySelector('.form-modal').textContent).toContain('Elige la empresa.');
+    expect(document.querySelector('.form-modal').textContent).toContain('Elige el proveedor.');
+    expect(h.calls.some(([m]) => m === 'POST')).toBe(false);
+
+    await setValue(fields()[1], 'courier');
+    expect([...fields()[2].options].map((o) => o.textContent)).toEqual(['Selecciona un proveedor', 'Chilexpress', 'BlueExpress', 'Starken', 'Courier genérico']);
+    expect(fields().length).toBe(3); // un courier no lleva «Courier por defecto»
+    await setValue(fields()[1], 'channel');
+    await setValue(fields()[0], '2'); await setValue(fields()[2], 'generic'); await setValue(fields()[3], 'starken');
+    await click(modalButton('Conectar'));
+    expect(h.calls.find(([m, p]) => m === 'POST' && p === '/v1/integrations')[2]).toEqual({ companyId: 2, kind: 'channel', provider: 'generic', defaultCourier: 'starken' });
+
+    const dialog = document.querySelector('.form-modal');
+    expect(dialog.textContent).toContain('Conexión creada');
+    expect(dialog.textContent).toContain('Casa Bella Ltda · API Nexus');
+    expect([...dialog.querySelectorAll('.secret-row code')].map((c) => c.textContent)).toEqual([window.location.origin + '/webhooks/generic/50', 'SECRETO-NUEVO-50']);
+    expect(dialog.textContent).toContain('se muestra una sola vez');
+    await click(dialog.querySelector('button[aria-label="Copiar secreto"]'));
+    await click(dialog.querySelector('button[aria-label="Copiar url del webhook"]'));
+    expect(copied).toEqual(['SECRETO-NUEVO-50', window.location.origin + '/webhooks/generic/50']);
+    expect(globalThis.__nav.calls.at(-1)[1]).toContain('conexion=50'); // queda abierta en el panel
+
+    // Al cerrar, el secreto desaparece de la pantalla y no quedó guardado en ninguna parte.
+    await click(modalButton('Listo'));
+    expect(document.body.textContent).not.toContain('SECRETO-NUEVO-50');
+    expect(storageDump()).not.toContain('SECRETO-NUEVO-50');
+    expect(host.querySelectorAll('.connections-list tbody tr').length).toBe(7);
+  });
+
+  it('Conectar cliente: toma empresa, tipo y proveedor de los filtros; el error del servidor queda en el formulario', async () => {
+    h.failCreate = new Error('El courier recibelo no existe o está inactivo.');
+    await mount('tab=clientes&empresa=1&tipo=courier&proveedor=starken');
+    await click(button(host, 'Conectar cliente'));
+    expect([...document.querySelectorAll('.form-modal select')].map((x) => x.value)).toEqual(['1', 'courier', 'starken']);
+    await click(modalButton('Conectar'));
+    expect(document.querySelector('.form-modal-error').textContent).toContain('no existe o está inactivo');
+    expect(document.querySelector('.form-modal').textContent).toContain('Conectar cliente'); // sigue abierto
+  });
+
+  it('Rotar secreto: con confirmación; el secreto nuevo se muestra una sola vez', async () => {
+    await mount('tab=clientes&conexion=1');
+    const panel = host.querySelector('.clients-panel');
+    await click(button(panel, 'Rotar'));
+    expect(h.calls.some(([m]) => m === 'POST')).toBe(false);
+    expect(document.querySelector('.form-modal').textContent).toContain('Rotar secreto de Andes Outdoor SpA · Mercado Libre');
+    expect(document.querySelector('.form-modal').textContent).toContain('deja de funcionar de inmediato');
+    await click(modalButton('Rotar secreto'));
+    expect(h.calls.filter(([m]) => m === 'POST')).toEqual([['POST', '/v1/integrations/1/rotate-secret', undefined]]);
+    const dialog = document.querySelector('.form-modal');
+    expect(dialog.textContent).toContain('Secreto nuevo');
+    expect([...dialog.querySelectorAll('.secret-row code')].map((c) => c.textContent)).toEqual([window.location.origin + '/webhooks/mercadolibre/1', 'SECRETO-ROTADO-1']);
+    await click(modalButton('Listo'));
+    expect(document.body.textContent).not.toContain('SECRETO-ROTADO-1');
+    expect(storageDump()).not.toContain('SECRETO-ROTADO-1');
+    expect(host.querySelector('.clients-panel code[aria-label="Secreto oculto"]').textContent).toMatch(/^•+$/);
   });
 });
