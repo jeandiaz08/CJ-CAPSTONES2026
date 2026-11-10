@@ -44,4 +44,7 @@ type ProfileRepository interface {
 	AuditCompany(ctx context.Context, actorID, companyID int64, action string, detail map[string]any) error
 	// CountManagers: Administradores activos con «Gestionar perfiles», sin contar a exceptID (Tarea 08).
 	CountManagers(ctx context.Context, exceptID int64) (int, error)
+	// WithManagerLock ejecuta fn de a uno (candado de PostgreSQL): editar o desactivar perfiles
+	// internos, para que la regla «siempre queda un gestor» no falle con cambios simultáneos.
+	WithManagerLock(ctx context.Context, fn func(context.Context) error) error
 }

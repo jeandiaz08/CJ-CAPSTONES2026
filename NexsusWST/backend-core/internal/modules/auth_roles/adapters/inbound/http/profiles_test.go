@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +29,8 @@ type memUsers struct {
 	users      map[int64]*ports.Profile
 	audits     []string
 	nextID     int64
-	failUpdate bool // simula una falla del Core a mitad de una edición
+	failUpdate bool       // simula una falla del Core a mitad de una edición
+	lock       sync.Mutex // candado de gestores (pg_advisory_xact_lock en PostgreSQL)
 }
 
 func (m *memUsers) GetByID(_ context.Context, id int64) (domain.User, error) {
@@ -156,6 +158,12 @@ func (m memProfiles) CountManagers(_ context.Context, except int64) (int, error)
 		}
 	}
 	return n, nil
+}
+
+func (m memProfiles) WithManagerLock(ctx context.Context, fn func(context.Context) error) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return fn(ctx)
 }
 
 func (m memProfiles) AuditCompany(_ context.Context, _, _ int64, action string, _ map[string]any) error {

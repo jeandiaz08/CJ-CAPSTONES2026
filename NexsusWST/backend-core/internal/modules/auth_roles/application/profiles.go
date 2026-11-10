@@ -228,6 +228,25 @@ func sortedCopy(v []string) []string {
 // El nombre y el rol se cambian primero en Keycloak; si algo falla después, se deshace. Deja una
 // sola acción en el registro con el antes y el después.
 func (s *Profiles) Update(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64, d domain.ProfileDraft) (ProfileView, error) {
+	return s.locked(ctx, scope, func(ctx context.Context) (ProfileView, error) { return s.update(ctx, actor, scope, id, d) })
+}
+
+// locked: en el alcance interno, la operación (lectura, regla del último gestor, Keycloak y Core)
+// corre con el candado de gestores tomado, de a una.
+func (s *Profiles) locked(ctx context.Context, scope domain.ProfileScope, fn func(context.Context) (ProfileView, error)) (ProfileView, error) {
+	if scope != domain.ProfileScopeInternal {
+		return fn(ctx)
+	}
+	var v ProfileView
+	err := s.repo.WithManagerLock(ctx, func(ctx context.Context) error {
+		var err error
+		v, err = fn(ctx)
+		return err
+	})
+	return v, err
+}
+
+func (s *Profiles) update(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64, d domain.ProfileDraft) (ProfileView, error) {
 	cur, err := s.get(ctx, scope, id)
 	if err != nil {
 		return ProfileView{}, err
@@ -320,8 +339,14 @@ func (s *Profiles) Update(ctx context.Context, actor tenant.Identity, scope doma
 
 // SetActive activa o desactiva el perfil (Keycloak lo bloquea y cierra sus sesiones al
 // desactivarlo). Desactivar exige motivo. Nadie se desactiva a sí mismo, y no se desactiva al
-// último Administrador activo con «Gestionar perfiles».
+// último Administrador activo con «Gestionar perfiles» (con el candado de gestores tomado).
 func (s *Profiles) SetActive(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64, active bool, reason string) (ProfileView, error) {
+	return s.locked(ctx, scope, func(ctx context.Context) (ProfileView, error) {
+		return s.setActive(ctx, actor, scope, id, active, reason)
+	})
+}
+
+func (s *Profiles) setActive(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64, active bool, reason string) (ProfileView, error) {
 	cur, err := s.get(ctx, scope, id)
 	if err != nil {
 		return ProfileView{}, err

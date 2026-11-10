@@ -8,8 +8,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nexuswst/backend-core/internal/modules/auth_roles/application"
 	"github.com/nexuswst/backend-core/internal/modules/auth_roles/domain"
@@ -167,6 +170,41 @@ func TestInternalProfilesProtections(t *testing.T) {
 		Permissions: []string{tenant.PermManageProfiles}, AllCompanies: true, Active: true}}
 	if rec := serveProfiles(h, other, req("POST", "/v1/profiles/1/disable"+internalQS, `{"reason":"Ya no trabaja aquí"}`)); rec.Code != http.StatusOK {
 		t.Fatalf("desactivar con otro gestor: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// slowIdP demora la desactivación en Keycloak: sin candado, dos desactivaciones simultáneas
+// contarían los gestores antes de que la otra escriba y pasarían las dos.
+type slowIdP struct{ memIdP }
+
+func (slowIdP) SetEnabled(context.Context, string, bool) error {
+	time.Sleep(30 * time.Millisecond)
+	return nil
+}
+
+func TestInternalLastManagerUnderConcurrency(t *testing.T) {
+	m, h := internalFixture(t, slowIdP{})
+	m.users[7] = &ports.Profile{User: domain.User{ID: 7, KeycloakID: "kc-7", Email: "otro@westorage.cl", Name: "Otro Admin", Role: "admin",
+		Permissions: []string{tenant.PermManageProfiles}, AllCompanies: true, Active: true}}
+	other := manager
+	m.users[1].KeycloakID = "kc-1" // los dos pasan por Keycloak (lento)
+	other.UserID = 99              // un tercer gestor, fuera de los datos
+	codes := make([]int, 2)
+	var wg sync.WaitGroup
+	for i, id := range []int{1, 7} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes[i] = serveProfiles(h, other, req("POST", fmt.Sprintf("/v1/profiles/%d/disable%s", id, internalQS), `{"reason":"Cambio simultáneo"}`)).Code
+		}()
+	}
+	wg.Wait()
+	slices.Sort(codes)
+	if fmt.Sprint(codes) != "[200 409]" {
+		t.Fatalf("dos desactivaciones simultáneas de los dos últimos gestores: %v, quería una 200 y una 409", codes)
+	}
+	if m.users[1].Active == m.users[7].Active {
+		t.Fatalf("debe quedar exactamente un gestor activo: %v %v", m.users[1].Active, m.users[7].Active)
 	}
 }
 
