@@ -25,7 +25,7 @@
     - De tus archivos, solo cambiaron las líneas autorizadas (sección 2.3).
 3. Tu rama `cristopher_dev`, en 7803d1f, se integró en `jean_dev` con el merge **6473d39**, sin conflictos. Desde entonces `cristopher_dev` no tiene commits nuevos, así que `git log jean_dev..origin/cristopher_dev` sale vacío.
 4. `jean_dev` va 17 commits (sin contar merges) por delante de `cristopher_dev`: de bf5d74e (Retiro, Fase 1) a este documento. `test` = `jean_dev` (último merge cfd6016 más el de este documento). `main` no se tocó.
-5. **Numeración de migraciones (actualizada el 10-11-2026):** Jean toma **Core 000011** y **Órdenes 000010** (Clientes, Tarea 07) y **Core 000012** (solicitudes internas de Usuarios WeStorage, Tarea 08). Tú sigues desde **Core 000013** y **Órdenes 000011**.
+5. **Numeración de migraciones (actualizada el 10-11-2026):** Jean toma **Core 000011** y **Órdenes 000010** (Clientes, Tarea 07), **Core 000012** (solicitudes internas de Usuarios WeStorage, Tarea 08) y **Core 000013** y **Órdenes 000011** (Productos, Tarea 09: auditoría de productos y apartado «Productos» del registro). Tú sigues desde **Core 000014** y **Órdenes 000012**.
 
 ---
 
@@ -57,7 +57,7 @@
 | Órdenes | 000007–000008 | `order_stock_lines`, `despacho_incompleto` (`order_events.details`) | Cristopher | — |
 | Órdenes | **000009** | `000009_activity_log` | Jean (24da8ce) | Vista `activity_log` y 2 índices. Solo lectura: no copia ni borra datos |
 
-**Regla (actualizada el 08-11-2026):** Core **000011** y Órdenes **000010** son de Jean (módulo Clientes, Tarea 07: empresas, perfiles, solicitudes y la vista `activity_log` con empresas y solicitudes). Core **000012** también es de Jean (Tarea 08: `profile_requests` con `scope`, sin empresa en las internas). Tus próximas migraciones son **Core 000013** y **Órdenes 000011**. Las tablas de versión son `schema_migrations_orders` y `schema_migrations_core`.
+**Regla (actualizada el 08-11-2026):** Core **000011** y Órdenes **000010** son de Jean (módulo Clientes, Tarea 07: empresas, perfiles, solicitudes y la vista `activity_log` con empresas y solicitudes). Core **000012** también es de Jean (Tarea 08: `profile_requests` con `scope`, sin empresa en las internas). Core **000013** y Órdenes **000011** también son de Jean (Tarea 09: `user_audit.target_product_id` y la vista `activity_log` con productos). Tus próximas migraciones son **Core 000014** y **Órdenes 000012**. Las tablas de versión son `schema_migrations_orders` y `schema_migrations_core`.
 
 ### 2.3 Archivos tuyos que cambié (los únicos autorizados)
 

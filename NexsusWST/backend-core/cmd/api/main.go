@@ -122,6 +122,8 @@ func main() {
 	authhttp.NewRequestHandler(authapp.NewRequests(clientProfiles, authpg.NewRequests(db), events.New(rdb, log), mailer.FromEnv(log), cfg.AppPublicURL, log)).Register(mux, requireAuth)
 	clientshttp.NewHandler(clientsSvc).Register(mux, requireAuth)
 	productshttp.NewHandler(productsSvc).Register(mux, requireAuth)
+	productsRepo := productspg.NewRepository(db)
+	productshttp.NewCatalogHandler(productsapp.NewCatalog(productsRepo, productsRepo)).Register(mux, requireAuth) // Tarea 09: página Productos
 	catalogshttp.NewHandler(catalogsSvc).Register(mux, requireAuth)
 	// TODO: inventory, reception, billing -> mismo patrón que products.
 
