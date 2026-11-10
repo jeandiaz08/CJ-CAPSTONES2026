@@ -60,8 +60,8 @@ export const exportCompanies = (f: Omit<CompanyFilters, "limit" | "offset">) =>
   downloadFile(`/v1/companies/export${query(f)}`, "empresas.xlsx", "core");
 
 // ---------------------------------------------------------------------------------------------
-// Perfiles (Tarea 07, Fase 3). scope «client» = perfiles con rol Cliente; «internal» llega con
-// Configuración › Usuarios WeStorage.
+// Perfiles. scope «client» = perfiles con rol Cliente (Tarea 07); «internal» = Configuración ›
+// Usuarios WeStorage (Tarea 08: rol, permisos y usuario sin correo).
 // ---------------------------------------------------------------------------------------------
 export type ProfileScope = "client" | "internal";
 
@@ -69,6 +69,7 @@ export type Profile = {
   id: number;
   name: string;
   email: string;
+  username?: string; // perfil interno sin correo
   hasEmail: boolean;
   phone: string;
   jobTitle: string;
@@ -80,6 +81,7 @@ export type Profile = {
   linked: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  temporaryPassword?: string; // solo al crear un perfil interno sin correo (se muestra una vez)
 };
 
 export type ProfileFilters = {
@@ -93,7 +95,8 @@ export type ProfileFilters = {
   offset?: number;
 };
 
-export type ProfileInput = { name: string; companyId: number; phone: string; jobTitle: string; email: string };
+// companyId solo en clientes; username, role y permissions solo en el alcance interno.
+export type ProfileInput = { name: string; companyId?: number; phone: string; jobTitle: string; email?: string; username?: string; role?: string; permissions?: string[] };
 
 export type ImportResult = {
   rows: number;
@@ -108,14 +111,14 @@ export const listProfiles = (scope: ProfileScope, f: ProfileFilters) =>
 export const getProfile = (scope: ProfileScope, id: number) => api<Profile>("core", withScope(scope, `/v1/profiles/${id}`));
 export const createProfile = (scope: ProfileScope, body: ProfileInput) =>
   api<Profile>("core", withScope(scope, "/v1/profiles"), { method: "POST", body: JSON.stringify(body) });
-export const updateProfile = (scope: ProfileScope, id: number, body: Omit<ProfileInput, "email">) =>
+export const updateProfile = (scope: ProfileScope, id: number, body: Omit<ProfileInput, "email" | "username">) =>
   api<Profile>("core", withScope(scope, `/v1/profiles/${id}`), { method: "PATCH", body: JSON.stringify(body) });
 export const disableProfile = (scope: ProfileScope, id: number, reason: string) =>
   api<Profile>("core", withScope(scope, `/v1/profiles/${id}/disable`), { method: "POST", body: JSON.stringify({ reason }) });
 export const enableProfile = (scope: ProfileScope, id: number, reason: string) =>
   api<Profile>("core", withScope(scope, `/v1/profiles/${id}/enable`), { method: "POST", body: JSON.stringify({ reason }) });
 export const resetProfilePassword = (scope: ProfileScope, id: number) =>
-  api<{ emailSent: boolean }>("core", withScope(scope, `/v1/profiles/${id}/password`), { method: "POST" });
+  api<{ emailSent: boolean; temporaryPassword?: string }>("core", withScope(scope, `/v1/profiles/${id}/password`), { method: "POST" });
 export const exportProfiles = (scope: ProfileScope, f: Omit<ProfileFilters, "limit" | "offset">) =>
   downloadFile(withScope(scope, `/v1/profiles/export${query(f)}`), "perfiles.xlsx", "core");
 export const downloadProfilesTemplate = (scope: ProfileScope) =>
@@ -135,12 +138,14 @@ export type RequestStatus = "pending" | "approved" | "rejected";
 
 export type ProfileRequest = {
   id: number;
+  scope?: ProfileScope; // «internal»: solicitud de perfil WeStorage (Tarea 08), sin empresa
   companyId: number;
   companyName: string;
   kind: RequestKind;
   kindLabel: string;
   targetUserId: number | null;
-  profile: { name: string; email: string; phone: string; jobTitle: string };
+  // username, role y permissions solo en las internas (rol propuesto o el del perfil afectado).
+  profile: { name: string; email: string; phone: string; jobTitle: string; username?: string; role?: string; permissions?: string[] };
   reason: string;
   status: RequestStatus;
   requestedBy: { id: number; name: string };
@@ -149,18 +154,25 @@ export type ProfileRequest = {
   reviewedAt: string | null;
   rejectionReason: string;
   createdUserId: number | null;
+  temporaryPassword?: string; // solo al aprobar una interna de perfil sin correo (se muestra una vez)
 };
 
 export type RequestFilters = { q?: string; status?: RequestStatus; kind?: RequestKind; from?: string; to?: string; ids?: number[]; limit?: number; offset?: number };
 export type RequestCounts = { pending: number; approved: number; rejected: number };
-export type NewRequest = { kind: RequestKind; targetUserId?: number; name?: string; email?: string; phone?: string; jobTitle?: string; reason: string };
+export type NewRequest = { kind: RequestKind; targetUserId?: number; name?: string; email?: string; phone?: string; jobTitle?: string; reason: string;
+  username?: string; role?: string; permissions?: string[] }; // los tres últimos, solo internas
+export type RequestEdits = { name: string; email: string; phone: string; jobTitle: string; username?: string; role?: string; permissions?: string[] };
 
-export const listRequests = (f: RequestFilters) =>
-  api<{ data: ProfileRequest[]; total: number; counts: RequestCounts; limit: number; offset: number }>("core", `/v1/profile-requests${query(f)}`);
-export const getRequest = (id: number) => api<ProfileRequest>("core", `/v1/profile-requests/${id}`);
-export const createRequest = (body: NewRequest) => api<ProfileRequest>("core", "/v1/profile-requests", { method: "POST", body: JSON.stringify(body) });
+// Las de clientes van sin ?scope (por defecto); las de WeStorage, con ?scope=internal.
+const requestScope = (scope: ProfileScope, path: string) => (scope === "internal" ? withScope(scope, path) : path);
+
+export const listRequests = (f: RequestFilters, scope: ProfileScope = "client") =>
+  api<{ data: ProfileRequest[]; total: number; counts: RequestCounts; limit: number; offset: number }>("core", requestScope(scope, `/v1/profile-requests${query(f)}`));
+export const getRequest = (id: number, scope: ProfileScope = "client") => api<ProfileRequest>("core", requestScope(scope, `/v1/profile-requests/${id}`));
+export const createRequest = (body: NewRequest, scope: ProfileScope = "client") =>
+  api<ProfileRequest>("core", requestScope(scope, "/v1/profile-requests"), { method: "POST", body: JSON.stringify(body) });
 // Sin cuerpo acepta tal cual; con los datos del perfil es «Editar y aceptar».
-export const approveRequest = (id: number, edits?: { name: string; email: string; phone: string; jobTitle: string }) =>
-  api<ProfileRequest>("core", `/v1/profile-requests/${id}/approve`, { method: "POST", ...(edits ? { body: JSON.stringify(edits) } : {}) });
-export const rejectRequest = (id: number, reason: string) =>
-  api<ProfileRequest>("core", `/v1/profile-requests/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
+export const approveRequest = (id: number, edits?: RequestEdits, scope: ProfileScope = "client") =>
+  api<ProfileRequest>("core", requestScope(scope, `/v1/profile-requests/${id}/approve`), { method: "POST", ...(edits ? { body: JSON.stringify(edits) } : {}) });
+export const rejectRequest = (id: number, reason: string, scope: ProfileScope = "client") =>
+  api<ProfileRequest>("core", requestScope(scope, `/v1/profile-requests/${id}/reject`), { method: "POST", body: JSON.stringify({ reason }) });

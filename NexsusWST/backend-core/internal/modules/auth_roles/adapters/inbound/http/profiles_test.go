@@ -10,7 +10,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,9 +26,11 @@ import (
 // Dobles en memoria: usuarios, perfiles (contacto y empresa) y Keycloak.
 type memUsers struct {
 	ports.UserRepository
-	users  map[int64]*ports.Profile
-	audits []string
-	nextID int64
+	users      map[int64]*ports.Profile
+	audits     []string
+	nextID     int64
+	failUpdate bool       // simula una falla del Core a mitad de una edición
+	lock       sync.Mutex // candado de gestores (pg_advisory_xact_lock en PostgreSQL)
 }
 
 func (m *memUsers) GetByID(_ context.Context, id int64) (domain.User, error) {
@@ -67,13 +71,24 @@ func (m *memUsers) Insert(_ context.Context, kc string, d domain.Draft, _ *int64
 	m.nextID++
 	u := domain.User{ID: m.nextID, KeycloakID: kc, Email: d.Email, Username: d.Username, Name: d.Name, Role: d.Role,
 		Permissions: d.Permissions, Companies: d.Companies, Active: true, CreatedAt: time.Now()}
-	m.users[u.ID] = &ports.Profile{User: u, CompanyID: d.Companies[0], CompanyName: "Empresa " + string(rune('0'+d.Companies[0]))}
+	p := &ports.Profile{User: u}
+	if len(d.Companies) > 0 {
+		p.CompanyID, p.CompanyName = d.Companies[0], "Empresa "+string(rune('0'+d.Companies[0]))
+	}
+	m.users[u.ID] = p
 	return u, nil
 }
 
 func (m *memUsers) Update(_ context.Context, id int64, d domain.Draft, _ int64) error {
+	if m.failUpdate {
+		m.failUpdate = false // solo la primera: la vuelta atrás sí funciona
+		return fmt.Errorf("falla simulada del Core")
+	}
 	p := m.users[id]
-	p.Name, p.Companies, p.CompanyID = d.Name, d.Companies, d.Companies[0]
+	p.Name, p.Companies, p.Role, p.Permissions = d.Name, d.Companies, d.Role, d.Permissions
+	if len(d.Companies) > 0 {
+		p.CompanyID = d.Companies[0]
+	}
 	return nil
 }
 
@@ -92,7 +107,7 @@ type memProfiles struct{ *memUsers }
 func (m memProfiles) ListProfiles(_ context.Context, f ports.ProfileFilter) ([]ports.Profile, int, error) {
 	out := []ports.Profile{}
 	for _, p := range m.users {
-		if p.Role == "cliente" {
+		if (p.Role == "cliente") == (f.Scope == domain.ProfileScopeClient) {
 			out = append(out, *p)
 		}
 	}
@@ -135,6 +150,22 @@ func (m memProfiles) ActiveCompanies(context.Context) ([][2]string, error) {
 	return [][2]string{{"Empresa 1", "11.111.111-1"}}, nil
 }
 
+func (m memProfiles) CountManagers(_ context.Context, except int64) (int, error) {
+	n := 0
+	for _, p := range m.users {
+		if p.ID != except && p.Active && p.Role == "admin" && slices.Contains(p.Permissions, tenant.PermManageProfiles) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (m memProfiles) WithManagerLock(ctx context.Context, fn func(context.Context) error) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	return fn(ctx)
+}
+
 func (m memProfiles) AuditCompany(_ context.Context, _, _ int64, action string, _ map[string]any) error {
 	m.audits = append(m.audits, action)
 	return nil
@@ -152,11 +183,15 @@ func (memIdP) Logout(context.Context, string) error                            {
 func (memIdP) UpdateName(context.Context, string, string) error                { return nil }
 
 func newProfilesFixture() (*memUsers, *ProfileHandler) {
+	return newProfilesFixtureWith(memIdP{})
+}
+
+func newProfilesFixtureWith(idp ports.IdentityProvider) (*memUsers, *ProfileHandler) {
 	m := &memUsers{users: map[int64]*ports.Profile{}, nextID: 10}
 	m.users[1] = &ports.Profile{User: domain.User{ID: 1, Name: "Admin", Role: "admin", AllCompanies: true, Active: true}}
 	m.users[5] = &ports.Profile{User: domain.User{ID: 5, KeycloakID: "kc-5", Email: "esperanza@andes.cl", Name: "Esperanza Gómez", Role: "cliente",
 		Companies: []int64{1}, Active: true}, CompanyID: 1, CompanyName: "Andes"}
-	svc := application.NewService(m, memIdP{}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := application.NewService(m, idp, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return m, NewProfileHandler(application.NewProfiles(svc, memProfiles{m}))
 }
 
@@ -216,12 +251,12 @@ func TestProfilesAccess(t *testing.T) {
 	if rec := serveProfiles(h, other, req("GET", "/v1/profiles/5", "")); rec.Code != http.StatusNotFound {
 		t.Errorf("perfil de otra empresa: %d", rec.Code)
 	}
-	// Un perfil interno no existe para el alcance «client»; el alcance «internal» no está disponible aún.
+	// Un perfil interno no existe para el alcance «client»; un alcance desconocido es 422.
 	if rec := serveProfiles(h, reader, req("GET", "/v1/profiles/1", "")); rec.Code != http.StatusNotFound {
 		t.Errorf("perfil interno por el alcance client: %d", rec.Code)
 	}
-	if rec := serveProfiles(h, reader, req("GET", "/v1/profiles?scope=internal", "")); rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("alcance internal: %d", rec.Code)
+	if rec := serveProfiles(h, reader, req("GET", "/v1/profiles?scope=otro", "")); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("alcance desconocido: %d", rec.Code)
 	}
 }
 

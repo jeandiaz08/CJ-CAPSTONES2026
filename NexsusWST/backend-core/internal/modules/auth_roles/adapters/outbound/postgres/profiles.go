@@ -13,7 +13,7 @@ import (
 	"github.com/nexuswst/backend-core/internal/modules/auth_roles/ports"
 )
 
-// Profiles - perfiles de Clientes › Administración clientes (Tarea 07). Lee users con su teléfono,
+// Profiles - perfiles de Clientes › Administración clientes (Tarea 07) y de Usuarios WeStorage (Tarea 08). Lee users con su teléfono,
 // cargo y empresa; las altas y cambios de identidad siguen en Repository y Keycloak.
 type Profiles struct{ db *pgxpool.Pool }
 
@@ -49,7 +49,8 @@ func (r *Profiles) ListProfiles(ctx context.Context, f ports.ProfileFilter) ([]p
 	case domain.ProfileScopeClient:
 		where = append(where, "u.role = 'cliente'")
 	case domain.ProfileScopeInternal:
-		where = append(where, "u.role <> 'cliente'")
+		// Analista, KAM y SAC son perfiles futuros (regla 11): no se listan en Usuarios WeStorage.
+		add("u.role = ANY($%d)", domain.ProfileRoles)
 	default:
 		return nil, 0, fmt.Errorf("alcance de perfiles desconocido: %q", f.Scope)
 	}
@@ -136,6 +137,36 @@ func (r *Profiles) AuditCompany(ctx context.Context, actorID, companyID int64, a
 	_, err := r.db.Exec(ctx, `INSERT INTO user_audit (actor_user_id, target_company_id, action, detail) VALUES ($1, $2, $3, $4)`,
 		actorID, companyID, action, detail)
 	return err
+}
+
+// managerLockKey: candado de PostgreSQL para los cambios que pueden quitar un gestor de perfiles.
+const managerLockKey = "nexuswst:profile_managers"
+
+// WithManagerLock ejecuta fn con el candado tomado dentro de una transacción
+// (pg_advisory_xact_lock): dos cambios simultáneos sobre gestores se hacen uno tras otro, y el
+// segundo cuenta los gestores con lo que el primero ya dejó escrito. El candado se suelta al
+// terminar la transacción, después de fn. Si fn falla, el error se devuelve igual.
+func (r *Profiles) WithManagerLock(ctx context.Context, fn func(context.Context) error) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // sin efecto tras el Commit
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", managerLockKey); err != nil {
+		return err
+	}
+	if err := fn(ctx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// CountManagers cuenta los Administradores activos con «Gestionar perfiles», sin contar a exceptID.
+func (r *Profiles) CountManagers(ctx context.Context, exceptID int64) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx, `SELECT count(*) FROM users
+		WHERE role = 'admin' AND active AND 'gestionar_perfiles' = ANY(permissions) AND id <> $1`, exceptID).Scan(&n)
+	return n, err
 }
 
 func (r *Profiles) ActiveCompanies(ctx context.Context) ([][2]string, error) {

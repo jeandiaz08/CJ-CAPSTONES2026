@@ -464,7 +464,7 @@ body{line-height:1.5}h1,h2,h3{line-height:1.2}h1{font-size:28px}button,input,sel
 .config-deadline+.config-deadline{margin-top:12px}.config-days{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px}.config-days legend{font-size:13px;font-weight:500;padding:0;margin-bottom:6px}.config-days label{display:grid;justify-items:center;gap:2px;min-width:32px;font-size:13px;font-weight:500;cursor:pointer}.config-days input{width:18px;height:18px;accent-color:var(--accent)}.form-notice-warning{border-left-color:var(--warn)}.form-notice-danger{border-left-color:var(--danger)}
 
 /* Sidebar: ítems sin función en este alcance. Mismo color, sin efecto al pasar el cursor. */
-.sidebar.redesigned .nav-link.is-disabled,.sidebar.redesigned .nav-link.is-disabled:hover{background:none;cursor:default}
+.sidebar.redesigned .nav-link.is-disabled,.sidebar.redesigned .nav-link.is-disabled:hover,.sidebar.redesigned .nav-sublink.is-disabled,.sidebar.redesigned .nav-sublink.is-disabled:hover{background:none;cursor:default}.sidebar.redesigned .nav-sublink.is-disabled{opacity:.6}
 
 /* Empaque: cola de tarjetas. */
 .form-submit-highlight{background:var(--orange);color:var(--card)}.kpi-info{display:block;cursor:default}.courier-logo{object-fit:contain;object-position:left;max-height:24px;width:90px}
@@ -571,6 +571,6 @@ body{line-height:1.5}h1,h2,h3{line-height:1.2}h1{font-size:28px}button,input,sel
 .clients-toolbar::after{display:none}.clients-toolbar>.btn.order-primary:last-child{order:0;width:auto;flex:0 0 auto;margin:0}
 .detail-actions .btn.success{background:var(--resolve);border:2px solid var(--resolve);color:var(--card)}.company-detail .detail-actions>a.btn{justify-content:center;text-decoration:none}
 .clients-list table{min-width:1000px}.clients-list td{white-space:nowrap}
-.clients-view .section-title{font-size:20px;font-weight:600;line-height:1.2;margin:24px 0 16px}
+.clients-view .section-title{font-size:20px;font-weight:600;line-height:1.2;margin:24px 0 16px}.checkbox-row{display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px}.temp-password{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.temp-password code{font-size:18px;padding:8px 12px;background:var(--surface);border-radius:8px;user-select:all}.perm-chips{display:flex;flex-wrap:wrap;gap:4px}
 .notification-popover li .notice-link{display:grid;gap:2px;min-width:0;color:inherit;text-decoration:none}.notification-popover li .notice-link:hover strong{text-decoration:underline}.notice-profile_request svg{color:var(--orange)}.notice-profile_request_reviewed svg{color:var(--accent)}
 .status-cell{display:flex;gap:6px;align-items:center;flex-wrap:wrap}

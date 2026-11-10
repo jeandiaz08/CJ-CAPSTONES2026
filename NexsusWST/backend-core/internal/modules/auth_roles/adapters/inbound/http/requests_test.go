@@ -19,7 +19,8 @@ import (
 	"github.com/nexuswst/backend-core/internal/shared/tenant"
 )
 
-// memRequests imita profile_requests, incluido el índice de una sola pendiente por perfil y tipo.
+// memRequests imita profile_requests, incluido el índice de una sola pendiente por perfil y tipo
+// (uq_profile_requests_pending con NULLS NOT DISTINCT: en las internas, sin empresa, también choca).
 type memRequests struct {
 	reqs     map[int64]*domain.ProfileRequest
 	audits   []string
@@ -32,10 +33,19 @@ func (m *memRequests) Create(_ context.Context, companyID, by int64, d domain.Re
 		if r.TargetUserID != nil {
 			t = string(rune(*r.TargetUserID))
 		}
-		return string(r.Kind) + t + r.ProfileEmail
+		login := r.ProfileEmail + r.ProfileUsername
+		if login == "" {
+			login = strings.ToLower(r.ProfileName)
+		}
+		return string(r.Scope) + string(r.Kind) + t + login
 	}
-	n := &domain.ProfileRequest{ID: int64(len(m.reqs) + 1), CompanyID: companyID, CompanyName: "Andes", Kind: d.Kind, ProfileName: d.Name,
-		ProfileEmail: d.Email, ProfilePhone: d.Phone, ProfileJobTitle: d.JobTitle, Reason: d.Reason, Status: domain.RequestPending, RequestedBy: by, RequestedAt: time.Now()}
+	scope, company := domain.ProfileScopeClient, "Andes"
+	if companyID == 0 {
+		scope, company = domain.ProfileScopeInternal, ""
+	}
+	n := &domain.ProfileRequest{ID: int64(len(m.reqs) + 1), Scope: scope, CompanyID: companyID, CompanyName: company, Kind: d.Kind, ProfileName: d.Name,
+		ProfileEmail: d.Email, ProfilePhone: d.Phone, ProfileJobTitle: d.JobTitle, ProfileUsername: d.Username, ProfileRole: d.Role, ProfilePermissions: d.Permissions,
+		Reason: d.Reason, Status: domain.RequestPending, RequestedBy: by, RequestedAt: time.Now()}
 	if d.Kind != domain.RequestNewProfile {
 		t := d.TargetUserID
 		n.TargetUserID = &t
@@ -60,7 +70,9 @@ func (m *memRequests) List(_ context.Context, f ports.RequestFilter) ([]domain.P
 	m.lastList = f
 	out := []domain.ProfileRequest{}
 	for _, r := range m.reqs {
-		out = append(out, *r)
+		if f.Scope == "" || r.Scope == f.Scope {
+			out = append(out, *r)
+		}
 	}
 	return out, len(out), ports.RequestCounts{Pending: len(out)}, nil
 }

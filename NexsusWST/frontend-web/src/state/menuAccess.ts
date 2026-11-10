@@ -62,7 +62,14 @@ export const MENU: MenuEntry[] = [
   // Página de relleno («Próximamente») y destino de «Ver integraciones» de una empresa.
   { name: "Integraciones", href: "/integraciones", icon: LinkIcon, access: { admin: "yes" } },
   { name: "Ayuda", icon: CircleHelp, access: { admin: "soon", jefe_operaciones: "soon", cliente: "soon" } },
-  { name: "Configuración", icon: Settings, access: { admin: "soon" } },
+  // Tarea 08: Usuarios WeStorage solo para el Administrador (en lectura sin «Gestionar perfiles»).
+  {
+    name: "Configuración", href: "/configuracion", icon: Settings, access: { admin: "yes" },
+    children: [
+      { name: "Usuarios WeStorage", href: "/configuracion/usuarios", access: { admin: "yes" } },
+      { name: "Ajustes generales", href: "/configuracion/ajustes", access: { admin: "soon" } },
+    ],
+  },
 ];
 
 // Pantallas a las que se llega por URL. Manda la ruta más larga que coincida. Lo «Próximamente»
@@ -87,6 +94,9 @@ const ROUTES: { path: string; access: Access; orPermission?: string }[] = [
   { path: "/clientes/administracion", access: CLIENT_ADMIN, orPermission: PERM_MANAGE_PROFILES },
   { path: "/integraciones", access: { admin: "yes" } },
   { path: "/usuarios", access: INTERNAL },
+  { path: "/configuracion", access: { admin: "yes" } },
+  { path: "/configuracion/usuarios", access: { admin: "yes" } },
+  { path: "/configuracion/ajustes", access: {} },
   ...["/dashboard", "/recepciones", "/facturacion", "/logistica", "/ayuda"].map((path) => ({ path, access: {} })),
 ];
 
@@ -96,13 +106,15 @@ function allowed(access: Access, user: AccessUser, orPermission?: string) {
   return level === "yes" || level === "soon" || (level === "dispatch" && user.permissions.includes("despacho"));
 }
 
-export type VisibleEntry = Omit<MenuEntry, "children"> & { disabled: boolean; children?: MenuChild[] };
+export type VisibleChild = MenuChild & { disabled: boolean };
+export type VisibleEntry = Omit<MenuEntry, "children"> & { disabled: boolean; children?: VisibleChild[] };
 
 export function visibleMenu(user: AccessUser): VisibleEntry[] {
   return MENU.filter((entry) => allowed(entry.access, user, entry.orPermission)).map((entry) => ({
     ...entry,
     disabled: entry.access[user.role] === "soon",
-    children: entry.children?.filter((child) => allowed(child.access, user, child.orPermission)),
+    children: entry.children?.filter((child) => allowed(child.access, user, child.orPermission))
+      .map((child) => ({ ...child, disabled: child.access[user.role] === "soon" && !(child.orPermission && user.permissions.includes(child.orPermission)) })),
   }));
 }
 

@@ -15,9 +15,11 @@ import (
 	"github.com/nexuswst/backend-core/internal/shared/tenant"
 )
 
-// Requests - solicitudes de perfiles (Tarea 07, Fase 4). El Cliente solicita para su empresa; quien
-// tenga «Gestionar perfiles» aprueba (crea el perfil o aplica la activación o desactivación) o
-// rechaza con motivo. Cada paso queda en user_audit, avisa por la campana y por correo. El correo
+// Requests - solicitudes de perfiles. Clientes (Tarea 07): el Cliente solicita para su empresa.
+// WeStorage (Tarea 08, scope «internal»): el Administrador sin «Gestionar perfiles» solicita un
+// perfil interno (con rol y permisos propuestos), una activación o una desactivación. Quien tenga
+// «Gestionar perfiles» aprueba (crea el perfil o aplica la activación o desactivación) o rechaza con
+// motivo. Cada paso queda en user_audit, avisa por la campana y por correo. El correo
 // y la campana nunca bloquean: si fallan, la solicitud igual se guarda y el error queda en el log.
 type Requests struct {
 	profiles *Profiles
@@ -51,6 +53,7 @@ var (
 // RequestView es la solicitud que ve la pantalla.
 type RequestView struct {
 	ID              int64            `json:"id"`
+	Scope           string           `json:"scope"`
 	CompanyID       int64            `json:"companyId"`
 	CompanyName     string           `json:"companyName"`
 	Kind            string           `json:"kind"`
@@ -65,13 +68,18 @@ type RequestView struct {
 	ReviewedAt      *time.Time       `json:"reviewedAt"`
 	RejectionReason string           `json:"rejectionReason"`
 	CreatedUserID   *int64           `json:"createdUserId"`
+	// TemporaryPassword: solo al aprobar una solicitud interna de perfil sin correo (una vez).
+	TemporaryPassword string `json:"temporaryPassword,omitempty"`
 }
 
 type RequestedProfile struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Phone    string `json:"phone"`
-	JobTitle string `json:"jobTitle"`
+	Name        string   `json:"name"`
+	Email       string   `json:"email"`
+	Phone       string   `json:"phone"`
+	JobTitle    string   `json:"jobTitle"`
+	Username    string   `json:"username,omitempty"`    // internas: perfil sin correo
+	Role        string   `json:"role,omitempty"`        // internas: rol propuesto (o el del perfil afectado)
+	Permissions []string `json:"permissions,omitempty"` // internas: permisos propuestos
 }
 
 type Person struct {
@@ -80,8 +88,9 @@ type Person struct {
 }
 
 func requestView(r domain.ProfileRequest) RequestView {
-	v := RequestView{ID: r.ID, CompanyID: r.CompanyID, CompanyName: r.CompanyName, Kind: string(r.Kind), KindLabel: domain.KindLabel(r.Kind),
-		TargetUserID: r.TargetUserID, Profile: RequestedProfile{Name: r.ProfileName, Email: r.ProfileEmail, Phone: r.ProfilePhone, JobTitle: r.ProfileJobTitle},
+	v := RequestView{ID: r.ID, Scope: string(r.Scope), CompanyID: r.CompanyID, CompanyName: r.CompanyName, Kind: string(r.Kind), KindLabel: domain.KindLabel(r.Kind),
+		TargetUserID: r.TargetUserID, Profile: RequestedProfile{Name: r.ProfileName, Email: r.ProfileEmail, Phone: r.ProfilePhone, JobTitle: r.ProfileJobTitle,
+			Username: r.ProfileUsername, Role: r.ProfileRole, Permissions: r.ProfilePermissions},
 		Reason: r.Reason, Status: string(r.Status), RequestedBy: Person{ID: r.RequestedBy, Name: r.RequestedByName}, RequestedAt: r.RequestedAt,
 		ReviewedAt: r.ReviewedAt, RejectionReason: r.RejectionReason, CreatedUserID: r.CreatedUserID}
 	if r.ReviewedBy != nil {
@@ -98,11 +107,17 @@ func clientCompany(id tenant.Identity) (int64, error) {
 	return id.Companies[0], nil
 }
 
-// Create: el Cliente solicita un perfil nuevo, una activación o una desactivación para su empresa.
+// Create: el Cliente solicita para su empresa; en las internas (d.Scope «internal»), el
+// Administrador solicita para el personal de WeStorage (lo exige la ruta).
 func (s *Requests) Create(ctx context.Context, actor tenant.Identity, d domain.RequestDraft) (RequestView, error) {
-	companyID, err := clientCompany(actor)
-	if err != nil {
-		return RequestView{}, err
+	internal := d.Scope == domain.ProfileScopeInternal
+	var companyID int64 // 0 = interna
+	if !internal {
+		c, err := clientCompany(actor)
+		if err != nil {
+			return RequestView{}, err
+		}
+		companyID = c
 	}
 	if errs := d.Normalize(); len(errs) > 0 {
 		return RequestView{}, errs
@@ -110,13 +125,20 @@ func (s *Requests) Create(ctx context.Context, actor tenant.Identity, d domain.R
 	var target *int64
 	switch d.Kind {
 	case domain.RequestNewProfile:
-		if _, err := s.profiles.svc.users.GetByEmail(ctx, d.Email); err == nil {
-			return RequestView{}, conflictErr{domain.ValidationErrors{{Field: "email", Message: "Ese correo ya tiene un perfil."}}}
+		if d.Email != "" {
+			if _, err := s.profiles.svc.users.GetByEmail(ctx, d.Email); err == nil {
+				return RequestView{}, conflictErr{domain.ValidationErrors{{Field: "email", Message: "Ese correo ya tiene un perfil."}}}
+			}
+		} else if _, err := s.profiles.svc.users.GetByUsername(ctx, d.Username); err == nil {
+			return RequestView{}, conflictErr{domain.ValidationErrors{{Field: "username", Message: "Ese nombre de usuario ya existe."}}}
 		}
 	default:
-		p, err := s.profiles.get(ctx, domain.ProfileScopeClient, d.TargetUserID)
+		p, err := s.profiles.get(ctx, d.Scope, d.TargetUserID)
 		if err != nil || p.CompanyID != companyID {
-			return RequestView{}, errTargetOtherScope // un perfil de otra empresa no existe para este Cliente
+			return RequestView{}, errTargetOtherScope // un perfil de otra empresa (o de otro alcance) no existe aquí
+		}
+		if internal && p.ID == actor.UserID {
+			return RequestView{}, domain.ErrSelfChange // nadie solicita su propia activación o desactivación
 		}
 		if (d.Kind == domain.RequestActivation) == p.Active {
 			state := "activo"
@@ -125,7 +147,8 @@ func (s *Requests) Create(ctx context.Context, actor tenant.Identity, d domain.R
 			}
 			return RequestView{}, ValidationError{fmt.Sprintf("el perfil ya está %s", state)}
 		}
-		d.Name, d.Email, d.Phone, d.JobTitle = p.Name, "", "", "" // se leen del perfil
+		d.Name, d.Email, d.Username, d.Phone, d.JobTitle = p.Name, "", "", "", "" // se leen del perfil
+		d.Role, d.Permissions = "", nil
 		target = &p.ID
 	}
 	id, err := s.repo.Create(ctx, companyID, actor.UserID, d)
@@ -137,8 +160,13 @@ func (s *Requests) Create(ctx context.Context, actor tenant.Identity, d domain.R
 	if err != nil {
 		return RequestView{}, err
 	}
-	s.notify.Notify(ctx, events.Notice{ID: fmt.Sprintf("pr-%d-created", r.ID), CompanyID: r.CompanyID, Audience: "internal", Kind: "profile_request",
-		Title: "Nueva solicitud de perfil", Body: fmt.Sprintf("%s · %s · %s", r.CompanyName, domain.KindLabel(r.Kind), r.ProfileName), RequestID: r.ID})
+	if internal {
+		s.notify.Notify(ctx, events.Notice{ID: fmt.Sprintf("pr-%d-created", r.ID), Audience: "internal", Kind: "internal_profile_request",
+			Title: "Nueva solicitud de perfil WeStorage", Body: fmt.Sprintf("%s · %s", domain.KindLabel(r.Kind), r.ProfileName), RequestID: r.ID})
+	} else {
+		s.notify.Notify(ctx, events.Notice{ID: fmt.Sprintf("pr-%d-created", r.ID), CompanyID: r.CompanyID, Audience: "internal", Kind: "profile_request",
+			Title: "Nueva solicitud de perfil", Body: fmt.Sprintf("%s · %s · %s", r.CompanyName, domain.KindLabel(r.Kind), r.ProfileName), RequestID: r.ID})
+	}
 	s.mailManagers(r)
 	return requestView(r), nil
 }
@@ -146,6 +174,7 @@ func (s *Requests) Create(ctx context.Context, actor tenant.Identity, d domain.R
 // List: el Cliente ve las de su empresa (lo decide el servidor); Administración clientes, todas.
 func (s *Requests) List(ctx context.Context, actor tenant.Identity, f ports.RequestFilter) ([]RequestView, int, ports.RequestCounts, error) {
 	if actor.HasRole(tenant.RoleCliente) {
+		f.Scope = domain.ProfileScopeClient // el Cliente nunca ve las internas
 		f.CompanyIDs = actor.Companies
 		if f.CompanyIDs == nil {
 			f.CompanyIDs = []int64{}
@@ -166,8 +195,9 @@ func (s *Requests) List(ctx context.Context, actor tenant.Identity, f ports.Requ
 	return out, total, counts, nil
 }
 
-func (s *Requests) Get(ctx context.Context, actor tenant.Identity, id int64) (RequestView, error) {
-	r, err := s.repo.Get(ctx, id)
+// Get devuelve la solicitud solo si es del alcance pedido (otra responde 404).
+func (s *Requests) Get(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64) (RequestView, error) {
+	r, err := s.inScope(ctx, scope, id)
 	if err != nil {
 		return RequestView{}, err
 	}
@@ -177,6 +207,20 @@ func (s *Requests) Get(ctx context.Context, actor tenant.Identity, id int64) (Re
 	return requestView(r), nil
 }
 
+func (s *Requests) inScope(ctx context.Context, scope domain.ProfileScope, id int64) (domain.ProfileRequest, error) {
+	r, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return r, err
+	}
+	if scope == "" {
+		scope = domain.ProfileScopeClient
+	}
+	if r.Scope != scope {
+		return domain.ProfileRequest{}, domain.ErrNotFound
+	}
+	return r, nil
+}
+
 // PendingFor: solicitudes pendientes por perfil (el Cliente ve «Solicitud pendiente»).
 func (s *Requests) PendingFor(ctx context.Context, userIDs []int64) (map[int64][]domain.RequestKind, error) {
 	return s.repo.PendingFor(ctx, userIDs)
@@ -184,8 +228,8 @@ func (s *Requests) PendingFor(ctx context.Context, userIDs []int64) (map[int64][
 
 // Approve aplica la solicitud: un perfil nuevo se crea con los datos (o con los editados en
 // «Editar y aceptar»); una activación o desactivación se aplica al perfil con el motivo pedido.
-func (s *Requests) Approve(ctx context.Context, actor tenant.Identity, id int64, edits *domain.ProfileDraft) (RequestView, error) {
-	r, err := s.repo.Get(ctx, id)
+func (s *Requests) Approve(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64, edits *domain.ProfileDraft) (RequestView, error) {
+	r, err := s.inScope(ctx, scope, id)
 	if err != nil {
 		return RequestView{}, err
 	}
@@ -193,21 +237,26 @@ func (s *Requests) Approve(ctx context.Context, actor tenant.Identity, id int64,
 		return RequestView{}, domain.ErrRequestReviewed
 	}
 	var created, target *int64
+	temp := ""
 	detail := map[string]any{"requestKind": string(r.Kind), "name": r.ProfileName}
 	switch r.Kind {
 	case domain.RequestNewProfile:
-		d := domain.ProfileDraft{Name: r.ProfileName, CompanyID: r.CompanyID, Email: r.ProfileEmail, Phone: r.ProfilePhone, JobTitle: r.ProfileJobTitle}
+		d := domain.ProfileDraft{Name: r.ProfileName, CompanyID: r.CompanyID, Email: r.ProfileEmail, Username: r.ProfileUsername,
+			Phone: r.ProfilePhone, JobTitle: r.ProfileJobTitle, Role: r.ProfileRole, Permissions: r.ProfilePermissions}
 		if edits != nil {
 			d = *edits
-			d.CompanyID = r.CompanyID // la solicitud es de una empresa: no se cambia al aceptar
+			d.CompanyID = r.CompanyID // la solicitud es de una empresa (o de ninguna): no se cambia al aceptar
 			detail["edited"] = true
 			detail["name"] = d.Name
 		}
-		p, err := s.profiles.Create(ctx, actor, domain.ProfileScopeClient, d)
+		if r.Scope == domain.ProfileScopeInternal {
+			detail["role"], detail["permissions"] = d.Role, d.Permissions
+		}
+		p, err := s.profiles.Create(ctx, actor, r.Scope, d)
 		if err != nil {
 			return RequestView{}, err
 		}
-		created, target = &p.ID, &p.ID
+		created, target, temp = &p.ID, &p.ID, p.TemporaryPassword
 	default:
 		if edits != nil {
 			return RequestView{}, ErrEditOnlyNew
@@ -217,7 +266,7 @@ func (s *Requests) Approve(ctx context.Context, actor tenant.Identity, id int64,
 		if utf8.RuneCountInString(reason) > 500 {
 			reason = string([]rune(reason)[:500])
 		}
-		if _, err := s.profiles.SetActive(ctx, actor, domain.ProfileScopeClient, *r.TargetUserID, active, reason); err != nil {
+		if _, err := s.profiles.SetActive(ctx, actor, r.Scope, *r.TargetUserID, active, reason); err != nil {
 			if errors.Is(err, ErrSameState) {
 				return RequestView{}, ErrAlreadyInState
 			}
@@ -229,16 +278,18 @@ func (s *Requests) Approve(ctx context.Context, actor tenant.Identity, id int64,
 		return RequestView{}, err
 	}
 	_ = s.repo.AuditRequest(ctx, actor.UserID, r.ID, target, "request_approved", detail)
-	return s.answered(ctx, r.ID)
+	v, err := s.answered(ctx, r.ID)
+	v.TemporaryPassword = temp // se muestra una sola vez a quien aprueba
+	return v, err
 }
 
 // Reject rechaza con motivo obligatorio.
-func (s *Requests) Reject(ctx context.Context, actor tenant.Identity, id int64, reason string) (RequestView, error) {
+func (s *Requests) Reject(ctx context.Context, actor tenant.Identity, scope domain.ProfileScope, id int64, reason string) (RequestView, error) {
 	reason = strings.TrimSpace(reason)
 	if n := utf8.RuneCountInString(reason); n < 5 || n > 500 {
 		return RequestView{}, ErrRejectReason
 	}
-	r, err := s.repo.Get(ctx, id)
+	r, err := s.inScope(ctx, scope, id)
 	if err != nil {
 		return RequestView{}, err
 	}
@@ -260,8 +311,14 @@ func (s *Requests) answered(ctx context.Context, id int64) (RequestView, error) 
 	if r.Status == domain.RequestRejected {
 		verb = "rechazada"
 	}
-	s.notify.Notify(ctx, events.Notice{ID: fmt.Sprintf("pr-%d-%s", r.ID, r.Status), CompanyID: r.CompanyID, Audience: "client", Kind: "profile_request_reviewed",
-		Title: "Tu solicitud fue " + verb, Body: fmt.Sprintf("%s · %s", domain.KindLabel(r.Kind), r.ProfileName), RequestID: r.ID})
+	if r.Scope == domain.ProfileScopeInternal {
+		// Va por el canal interno; la pantalla la muestra solo a quien la pidió (UserID).
+		s.notify.Notify(ctx, events.Notice{ID: fmt.Sprintf("pr-%d-%s", r.ID, r.Status), Audience: "internal", Kind: "internal_profile_request_reviewed",
+			Title: "Tu solicitud fue " + verb, Body: fmt.Sprintf("%s · %s", domain.KindLabel(r.Kind), r.ProfileName), RequestID: r.ID, UserID: r.RequestedBy})
+	} else {
+		s.notify.Notify(ctx, events.Notice{ID: fmt.Sprintf("pr-%d-%s", r.ID, r.Status), CompanyID: r.CompanyID, Audience: "client", Kind: "profile_request_reviewed",
+			Title: "Tu solicitud fue " + verb, Body: fmt.Sprintf("%s · %s", domain.KindLabel(r.Kind), r.ProfileName), RequestID: r.ID})
+	}
 	s.mailRequester(r, verb)
 	return requestView(r), nil
 }
@@ -289,6 +346,12 @@ func (s *Requests) mailManagers(r domain.ProfileRequest) {
 		s.log.Error("no se pudieron leer los destinatarios de la solicitud de perfil", "request", r.ID, "err", err)
 		return
 	}
+	if r.Scope == domain.ProfileScopeInternal {
+		body := fmt.Sprintf("Hay una nueva solicitud de perfil de WeStorage en NexusWST.\n\nTipo: %s\nNombre del perfil: %s\nSolicitado por: %s\nMotivo: %s\n\nRevísala en Configuración › Usuarios WeStorage › Solicitudes:\n%s/configuracion/usuarios?tab=solicitudes&solicitud=%d\n",
+			domain.KindLabel(r.Kind), r.ProfileName, r.RequestedByName, r.Reason, s.appURL, r.ID)
+		s.send(to, "[NexusWST] Nueva solicitud de perfil WeStorage", body)
+		return
+	}
 	body := fmt.Sprintf("Hay una nueva solicitud de perfil en NexusWST.\n\nEmpresa: %s\nTipo: %s\nNombre del perfil: %s\nMotivo: %s\n\nRevísala en Clientes › Administración clientes › Solicitudes:\n%s/clientes/administracion?tab=solicitudes&solicitud=%d\n",
 		r.CompanyName, domain.KindLabel(r.Kind), r.ProfileName, r.Reason, s.appURL, r.ID)
 	s.send(to, fmt.Sprintf("[NexusWST] Nueva solicitud de perfil · %s", r.CompanyName), body)
@@ -299,11 +362,17 @@ func (s *Requests) mailRequester(r domain.ProfileRequest, verb string) {
 	if err != nil || !u.HasEmail() {
 		return
 	}
-	body := fmt.Sprintf("Tu solicitud de perfil fue %s.\n\nEmpresa: %s\nTipo: %s\nNombre del perfil: %s\nMotivo: %s\n", verb, r.CompanyName,
+	company := fmt.Sprintf("Empresa: %s\n", r.CompanyName)
+	link := fmt.Sprintf("Clientes › Perfiles empresa › Mis solicitudes:\n%s/clientes/perfiles-empresa?tab=solicitudes&solicitud=%d", s.appURL, r.ID)
+	if r.Scope == domain.ProfileScopeInternal {
+		company = ""
+		link = fmt.Sprintf("Configuración › Usuarios WeStorage › Solicitudes:\n%s/configuracion/usuarios?tab=solicitudes&solicitud=%d", s.appURL, r.ID)
+	}
+	body := fmt.Sprintf("Tu solicitud de perfil fue %s.\n\n%sTipo: %s\nNombre del perfil: %s\nMotivo: %s\n", verb, company,
 		domain.KindLabel(r.Kind), r.ProfileName, r.Reason)
 	if r.Status == domain.RequestRejected {
 		body += fmt.Sprintf("Motivo del rechazo: %s\n", r.RejectionReason)
 	}
-	body += fmt.Sprintf("\nRevísala en Clientes › Perfiles empresa › Mis solicitudes:\n%s/clientes/perfiles-empresa?tab=solicitudes&solicitud=%d\n", s.appURL, r.ID)
+	body += fmt.Sprintf("\nRevísala en %s\n", link)
 	s.send([]string{u.Email}, fmt.Sprintf("[NexusWST] Tu solicitud de perfil fue %s", verb), body)
 }

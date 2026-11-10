@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { Copy } from "lucide-react";
 import { FileDrop } from "@/components/FileDrop";
 import { FiltersModal } from "@/components/FiltersModal";
 import { FormModal } from "@/components/FormModal";
@@ -106,8 +107,33 @@ export function ImportProfilesDialog({ scope, onClose, onImported }: { scope: Pr
   }
   return (
     <FormModal title="Importar perfiles" onClose={onClose} onSubmit={submit} submitLabel="Importar" busy={busy} error={error}>
-      <p className="form-hint">Usa la plantilla de perfiles (el correo es obligatorio). Las filas válidas se crean y las inválidas se informan con su fila y motivo.</p>
+      <p className="form-hint">{scope === "internal"
+        ? "Usa la plantilla de perfiles WeStorage (correo y rol obligatorios; el personal sin correo se crea con «Nuevo perfil»). Las filas válidas se crean y las inválidas se informan con su fila y motivo."
+        : "Usa la plantilla de perfiles (el correo es obligatorio). Las filas válidas se crean y las inválidas se informan con su fila y motivo."}</p>
       <FileDrop label="Archivo de perfiles (.xlsx)" accept={[".xlsx"]} maxBytes={5 << 20} value={file} onChange={setFile} />
+    </FormModal>
+  );
+}
+
+// Contraseña temporal de un perfil interno sin correo (SCRUM-231): se muestra una sola vez y no se
+// guarda en NexusWST.
+export function TemporaryPasswordDialog({ name, login, password, onClose }: { name: string; login: string; password: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <FormModal title="Contraseña temporal" onClose={onClose} closeLabel="Listo">
+      <p>Entrégale a <strong>{name}</strong> (usuario <strong>{login}</strong>) esta contraseña. Deberá cambiarla al ingresar.</p>
+      <p className="temp-password"><code>{password}</code>
+        <button type="button" className="text-button" onClick={copy}><Copy size={16} aria-hidden="true" />{copied ? "Copiada" : "Copiar"}</button>
+      </p>
+      <p className="confirm-warning">Se muestra una sola vez: al cerrar ya no se puede volver a ver.</p>
     </FormModal>
   );
 }

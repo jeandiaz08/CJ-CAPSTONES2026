@@ -19,13 +19,16 @@ func Channel(companyID int64) string { return fmt.Sprintf("nexus:events:orders:c
 
 // Notice es el aviso de la campana. Audience: internal | client | all.
 type Notice struct {
-	ID        string    `json:"id"`
-	CompanyID int64     `json:"companyId"`
-	Audience  string    `json:"audience"`
-	Kind      string    `json:"kind"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	RequestID int64     `json:"requestId,omitempty"`
+	ID        string `json:"id"`
+	CompanyID int64  `json:"companyId"`
+	Audience  string `json:"audience"`
+	Kind      string `json:"kind"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	RequestID int64  `json:"requestId,omitempty"`
+	// UserID: si viene, el aviso es solo para ese usuario (la pantalla lo filtra; Tarea 08: respuesta a
+	// una solicitud interna, que va por el canal interno).
+	UserID    int64     `json:"userId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
