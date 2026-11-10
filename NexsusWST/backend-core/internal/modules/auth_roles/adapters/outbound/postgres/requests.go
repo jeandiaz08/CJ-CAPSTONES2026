@@ -14,46 +14,66 @@ import (
 	"github.com/nexuswst/backend-core/internal/modules/auth_roles/ports"
 )
 
-// Requests - solicitudes de perfiles (profile_requests, Core 000011; Tarea 07 Fase 4).
+// Requests - solicitudes de perfiles (profile_requests, Core 000011 y 000012): de clientes (Tarea 07)
+// e internas de WeStorage (Tarea 08, sin empresa).
 type Requests struct{ db *pgxpool.Pool }
 
 func NewRequests(db *pgxpool.Pool) *Requests { return &Requests{db: db} }
 
 // En activación y desactivación, correo, teléfono y cargo se leen del perfil afectado.
-const requestCols = `pr.id, pr.company_id, c.name, pr.kind, pr.target_user_id, pr.profile_name,
+const requestCols = `pr.id, pr.scope, COALESCE(pr.company_id, 0), COALESCE(c.name, ''), pr.kind, pr.target_user_id, pr.profile_name,
 	COALESCE(pr.profile_email::text, tu.email::text, ''), COALESCE(pr.profile_phone, tu.phone, ''), COALESCE(pr.profile_job_title, tu.job_title, ''),
 	pr.reason, pr.status, pr.requested_by, COALESCE(rb.name, ''), pr.requested_at, pr.reviewed_by, COALESCE(rv.name, ''),
-	pr.reviewed_at, COALESCE(pr.rejection_reason, ''), pr.created_user_id`
+	pr.reviewed_at, COALESCE(pr.rejection_reason, ''), pr.created_user_id,
+	COALESCE(pr.profile_username::text, tu.username::text, ''), COALESCE(pr.profile_role, tu.role, ''), COALESCE(pr.profile_permissions, tu.permissions, '{}')`
 
 const requestFrom = `FROM profile_requests pr
-	JOIN companies c ON c.id = pr.company_id
+	LEFT JOIN companies c ON c.id = pr.company_id
 	LEFT JOIN users tu ON tu.id = pr.target_user_id
 	LEFT JOIN users rb ON rb.id = pr.requested_by
 	LEFT JOIN users rv ON rv.id = pr.reviewed_by`
 
 func scanRequest(row pgx.Row) (domain.ProfileRequest, error) {
 	var r domain.ProfileRequest
-	var kind, status string
-	err := row.Scan(&r.ID, &r.CompanyID, &r.CompanyName, &kind, &r.TargetUserID, &r.ProfileName, &r.ProfileEmail, &r.ProfilePhone,
+	var kind, status, scope string
+	err := row.Scan(&r.ID, &scope, &r.CompanyID, &r.CompanyName, &kind, &r.TargetUserID, &r.ProfileName, &r.ProfileEmail, &r.ProfilePhone,
 		&r.ProfileJobTitle, &r.Reason, &status, &r.RequestedBy, &r.RequestedByName, &r.RequestedAt, &r.ReviewedBy, &r.ReviewedByName,
-		&r.ReviewedAt, &r.RejectionReason, &r.CreatedUserID)
+		&r.ReviewedAt, &r.RejectionReason, &r.CreatedUserID, &r.ProfileUsername, &r.ProfileRole, &r.ProfilePermissions)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, domain.ErrNotFound
 	}
-	r.Kind, r.Status = domain.RequestKind(kind), domain.RequestStatus(status)
+	r.Kind, r.Status, r.Scope = domain.RequestKind(kind), domain.RequestStatus(status), domain.ProfileScope(scope)
+	if r.Scope == domain.ProfileScopeClient {
+		r.ProfileUsername, r.ProfileRole, r.ProfilePermissions = "", "", nil // el Cliente no tiene rol ni permisos internos
+	}
 	return r, err
 }
 
+// Create guarda la solicitud. companyID 0 = interna (sin empresa); en las internas de perfil nuevo
+// se guardan además el usuario, el rol y los permisos propuestos.
 func (r *Requests) Create(ctx context.Context, companyID, requestedBy int64, d domain.RequestDraft) (int64, error) {
 	var target *int64
 	if d.Kind != domain.RequestNewProfile {
 		target = &d.TargetUserID
 	}
+	scope := domain.ProfileScopeClient
+	var role *string
+	var perms []string
+	if companyID == 0 {
+		scope = domain.ProfileScopeInternal
+		if d.Kind == domain.RequestNewProfile {
+			role, perms = &d.Role, d.Permissions
+			if perms == nil {
+				perms = []string{}
+			}
+		}
+	}
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO profile_requests (company_id, kind, target_user_id, profile_name, profile_email, profile_phone, profile_job_title, reason, requested_by)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), $8, $9) RETURNING id`,
-		companyID, string(d.Kind), target, d.Name, d.Email, d.Phone, d.JobTitle, d.Reason, requestedBy).Scan(&id)
+		INSERT INTO profile_requests (scope, company_id, kind, target_user_id, profile_name, profile_email, profile_phone, profile_job_title,
+			reason, requested_by, profile_username, profile_role, profile_permissions)
+		VALUES ($1, NULLIF($2, 0), $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), $9, $10, NULLIF($11, ''), $12, $13) RETURNING id`,
+		string(scope), companyID, string(d.Kind), target, d.Name, d.Email, d.Phone, d.JobTitle, d.Reason, requestedBy, d.Username, role, perms).Scan(&id)
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "uq_profile_requests_pending" {
 		return 0, domain.ErrRequestPending
@@ -72,6 +92,11 @@ func (r *Requests) List(ctx context.Context, f ports.RequestFilter) ([]domain.Pr
 		args = append(args, v)
 		where = append(where, fmt.Sprintf(cond, len(args)))
 	}
+	scope := f.Scope
+	if scope == "" {
+		scope = domain.ProfileScopeClient
+	}
+	add("pr.scope = $%d", string(scope))
 	if f.CompanyIDs != nil {
 		add("pr.company_id = ANY($%d)", f.CompanyIDs)
 	}

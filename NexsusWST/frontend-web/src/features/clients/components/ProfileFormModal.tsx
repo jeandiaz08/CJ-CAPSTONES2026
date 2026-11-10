@@ -6,7 +6,7 @@ import { ApiError, apiErrorMessage } from "@/services/api";
 import { createProfile, updateProfile, type Profile, type ProfileInput, type ProfileScope } from "@/services/clients";
 import { INTERNAL_ROLES, PERMISSION_LABELS, PROFILE_ROLE_LABELS, ROLE_PERMISSIONS } from "../access";
 
-type Field = "name" | "companyId" | "email" | "username" | "phone" | "jobTitle" | "role" | "permissions";
+type Field = "name" | "companyId" | "email" | "username" | "phone" | "jobTitle" | "role" | "permissions" | "reason";
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const USERNAME = /^[a-z0-9][a-z0-9._-]{2,39}$/;
 export type CompanyChoice = { id: number; name: string; active: boolean };
@@ -21,7 +21,9 @@ export type CompanyChoice = { id: number; name: string; active: boolean };
 // formulario (por ejemplo, «Editar y aceptar» una solicitud) y `onSaved` recibe el perfil creado o
 // editado. Con `submitData` el formulario no crea el perfil: entrega los datos y `lockCompany` deja
 // la empresa fija. `self`: el perfil es el de quien edita (no puede cambiar su rol ni sus permisos).
-export function ProfileFormModal({ scope, profile, initial, companies, title, submitLabel, lockCompany = false, self = false, submitData, onClose, onSaved }: {
+// `withReason` agrega «Motivo u observación *» y lo entrega en `submitData` (solicitar un perfil
+// interno nuevo, Tarea 08 Fase 2). `hint` reemplaza la nota del pie.
+export function ProfileFormModal({ scope, profile, initial, companies, title, submitLabel, lockCompany = false, self = false, withReason = false, hint, submitData, onClose, onSaved }: {
   scope: ProfileScope;
   profile?: Profile;
   initial?: Partial<ProfileInput>;
@@ -30,7 +32,9 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
   submitLabel?: string;
   lockCompany?: boolean;
   self?: boolean;
-  submitData?: (body: ProfileInput) => Promise<void>;
+  withReason?: boolean;
+  hint?: ReactNode;
+  submitData?: (body: ProfileInput & { reason?: string }) => Promise<void>;
   onClose: () => void;
   onSaved?: (profile: Profile) => void | Promise<void>;
 }) {
@@ -43,7 +47,8 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
     phone: profile?.phone ?? initial?.phone ?? "",
     email: initial?.email ?? "",
     username: initial?.username ?? "",
-    withoutEmail: false,
+    withoutEmail: !!initial?.username && !initial?.email,
+    reason: "",
     role: profile?.role ?? initial?.role ?? "",
     permissions: profile?.permissions ?? initial?.permissions ?? [],
   });
@@ -71,6 +76,7 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
       else if (!EMAIL.test(form.email.trim())) e.email = "Correo inválido.";
     }
     if (form.phone.trim() && (form.phone.trim().length < 6 || form.phone.trim().length > 30)) e.phone = "Teléfono inválido (entre 6 y 30 caracteres).";
+    if (withReason && form.reason.trim().length < 5) e.reason = "Indica el motivo u observación (al menos 5 caracteres).";
     return e;
   };
 
@@ -87,7 +93,7 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
     setBusy(true);
     try {
       if (submitData) {
-        await submitData({ ...base, ...login });
+        await submitData({ ...base, ...login, ...(withReason ? { reason: form.reason.trim() } : {}) });
         return;
       }
       const saved = profile ? await updateProfile(scope, profile.id, base) : await createProfile(scope, { ...base, ...login });
@@ -160,9 +166,11 @@ export function ProfileFormModal({ scope, profile, initial, companies, title, su
           </fieldset>
           {/* TODO(PV-21): campo «Bodegas» cuando exista la tabla de bodegas del usuario. */}
         </>
-      ) : (
+      ) : !hint && (
         <p className="form-hint">Rol: <strong>Cliente</strong> (sin permisos internos).</p>
       )}
+      {withReason && field("reason", "Motivo u observación *", <textarea {...aria("reason")} rows={3} maxLength={500} value={form.reason} onChange={(e) => set({ reason: e.target.value })} />)}
+      {hint && <p className="form-hint">{hint}</p>}
     </FormModal>
   );
 }

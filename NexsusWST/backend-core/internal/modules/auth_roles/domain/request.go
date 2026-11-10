@@ -8,9 +8,10 @@ import (
 	"unicode/utf8"
 )
 
-// Solicitudes de perfiles (Tarea 07, Fase 4; tabla profile_requests de Core 000011). El Cliente
-// solicita un perfil nuevo, una activación o una desactivación para su empresa; las aprueba o
-// rechaza quien tenga «Gestionar perfiles».
+// Solicitudes de perfiles (tabla profile_requests de Core 000011 y 000012). Scope «client» (Tarea 07):
+// el Cliente solicita un perfil nuevo, una activación o una desactivación para su empresa. Scope
+// «internal» (Tarea 08): el Administrador sin «Gestionar perfiles» lo solicita para el personal de
+// WeStorage, con rol y permisos propuestos. Las aprueba o rechaza quien tenga «Gestionar perfiles».
 
 type RequestKind string
 
@@ -48,7 +49,8 @@ func KindLabel(k RequestKind) string {
 
 type ProfileRequest struct {
 	ID              int64
-	CompanyID       int64
+	Scope           ProfileScope
+	CompanyID       int64 // 0 en las internas
 	CompanyName     string
 	Kind            RequestKind
 	TargetUserID    *int64
@@ -56,26 +58,35 @@ type ProfileRequest struct {
 	ProfileEmail    string
 	ProfilePhone    string
 	ProfileJobTitle string
-	Reason          string
-	Status          RequestStatus
-	RequestedBy     int64
-	RequestedByName string
-	RequestedAt     time.Time
-	ReviewedBy      *int64
-	ReviewedByName  string
-	ReviewedAt      *time.Time
-	RejectionReason string
-	CreatedUserID   *int64
+	// Solo internas: usuario sin correo, rol y permisos propuestos.
+	ProfileUsername    string
+	ProfileRole        string
+	ProfilePermissions []string
+	Reason             string
+	Status             RequestStatus
+	RequestedBy        int64
+	RequestedByName    string
+	RequestedAt        time.Time
+	ReviewedBy         *int64
+	ReviewedByName     string
+	ReviewedAt         *time.Time
+	RejectionReason    string
+	CreatedUserID      *int64
 }
 
-// RequestDraft son los datos que envía el Cliente.
+// RequestDraft son los datos que envía quien solicita (el Cliente o, en las internas, el
+// Administrador sin «Gestionar perfiles»).
 type RequestDraft struct {
+	Scope        ProfileScope // vacío = client
 	Kind         RequestKind
 	TargetUserID int64 // activación o desactivación
 	Name         string
 	Email        string
+	Username     string // internas: perfil sin correo
 	Phone        string
 	JobTitle     string
+	Role         string   // internas: rol propuesto
+	Permissions  []string // internas: permisos propuestos
 	Reason       string
 }
 
@@ -89,8 +100,19 @@ func (d *RequestDraft) Normalize() ValidationErrors {
 	d.Phone = strings.TrimSpace(d.Phone)
 	d.JobTitle = strings.Join(strings.Fields(d.JobTitle), " ")
 	d.Reason = strings.TrimSpace(d.Reason)
-	switch d.Kind {
-	case RequestNewProfile:
+	if d.Scope == "" {
+		d.Scope = ProfileScopeClient
+	}
+	internal := d.Scope == ProfileScopeInternal
+	switch {
+	case d.Scope != ProfileScopeClient && !internal:
+		add("scope", "Alcance inválido.")
+	case internal && d.Kind == RequestNewProfile:
+		// Mismas reglas que «Nuevo perfil» de WeStorage: correo o usuario, rol y permisos del rol.
+		p := ProfileDraft{Name: d.Name, Email: d.Email, Username: d.Username, Phone: d.Phone, JobTitle: d.JobTitle, Role: d.Role, Permissions: d.Permissions}
+		errs = append(errs, p.Normalize(ProfileScopeInternal, true)...)
+		d.Name, d.Email, d.Username, d.Phone, d.JobTitle, d.Permissions = p.Name, p.Email, p.Username, p.Phone, p.JobTitle, p.Permissions
+	case d.Kind == RequestNewProfile:
 		if d.Name == "" || utf8.RuneCountInString(d.Name) > 120 {
 			add("name", "El nombre es obligatorio (máximo 120 caracteres).")
 		}
@@ -105,7 +127,7 @@ func (d *RequestDraft) Normalize() ValidationErrors {
 		if utf8.RuneCountInString(d.JobTitle) > 80 {
 			add("jobTitle", "El cargo admite hasta 80 caracteres.")
 		}
-	case RequestActivation, RequestDeactivation:
+	case d.Kind == RequestActivation, d.Kind == RequestDeactivation:
 		if d.TargetUserID <= 0 {
 			add("targetUserId", "Elige el perfil.")
 		}

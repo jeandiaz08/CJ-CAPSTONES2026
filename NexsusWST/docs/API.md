@@ -134,6 +134,7 @@ Configuración › Usuarios WeStorage. Son las mismas rutas de `/v1/profiles` co
 - **Siempre queda un gestor:** si un cambio (desactivar, quitar «Gestionar perfiles» o cambiar el rol) deja **cero Administradores activos con «Gestionar perfiles»**, responde **409 `last_manager`** «Debe quedar al menos un Administrador activo con «Gestionar perfiles»…». Se comprueba en el servidor antes de tocar Keycloak.
 - **Registro:** `created`, `updated` (con `role` y `permissions` en el antes y el después), `disabled`, `enabled`, `password_reset` y `password_email_sent` quedan en `user_audit` y aparecen en Registro de acciones › Usuarios.
 - **Bodegas:** no hay tabla de bodegas del usuario; el campo y la columna quedan ocultos con `TODO(PV-21)`.
+- **Cambios simultáneos:** editar y desactivar perfiles internos corren de a uno (candado `pg_advisory_xact_lock` en una transacción), así la regla del último gestor no falla si dos cambios llegan a la vez.
 
 ### Solicitudes de perfiles (Tarea 07, RF-02) — crea: Cliente · consulta: Cliente (su empresa) y Administración clientes · responde: permiso **Gestionar perfiles**
 
@@ -148,6 +149,24 @@ Configuración › Usuarios WeStorage. Son las mismas rutas de `/v1/profiles` co
 Solicitud (respuesta): `{id, companyId, companyName, kind, kindLabel, targetUserId, profile:{name, email, phone, jobTitle}, reason, status, requestedBy:{id, name}, requestedAt, reviewedBy:{id, name}|null, reviewedAt, rejectionReason, createdUserId}`. En activación y desactivación, los datos del perfil se leen del perfil afectado.
 
 - **Registro:** `request_created`, `request_approved` (con `edited` si se editó) y `request_rejected` (con motivo) quedan en `user_audit` con `request_id` y, si hay, el perfil afectado. Salen en Registro de acciones › Usuarios («Solicitud de perfil creada/aprobada/rechazada»).
+
+#### Solicitudes de perfiles de WeStorage (Tarea 08, Core 000012) — crea: Administrador · consulta: Administrador · responde: Administrador con **Gestionar perfiles**
+
+Las mismas rutas de `/v1/profile-requests` con `?scope=internal` (también en `/{id}`, `/approve` y `/reject`). Sin `scope` (o `client`) son las de clientes; una solicitud de otro alcance responde 404. Cliente, Jefe y Empaque: 403.
+
+| Método | Ruta | Cuerpo | Diferencia con clientes |
+| --- | --- | --- | --- |
+| GET | `/v1/profile-requests?scope=internal` | mismos filtros (sin `company_id`) | `q` busca por nombre del perfil. |
+| POST | `/v1/profile-requests?scope=internal` | `{kind, targetUserId?, name?, email?, username?, phone?, jobTitle?, role?, permissions?, reason}` | Lo crea el Administrador (con o sin el permiso). `new_profile`: mismas reglas que «Nuevo perfil» interno (correo o `username`, `role` y los permisos del rol; 422 por campo; 409 si el correo o el usuario ya existe). `activation`/`deactivation`: `targetUserId` de un perfil interno (un Cliente: 404); nadie pide la suya (403). 409 `request_pending` si ya hay una pendiente igual. |
+| POST | `/v1/profile-requests/{id}/approve?scope=internal` | opcional `{name, email, username, phone, jobTitle, role, permissions}` | Crea el perfil interno o aplica la activación o desactivación (con la regla del último gestor: 409 `last_manager`, y la solicitud sigue pendiente). Si el perfil nuevo no tiene correo, la respuesta trae `temporaryPassword` una sola vez. |
+| POST | `/v1/profile-requests/{id}/reject?scope=internal` | `{reason}` | Igual que en clientes. |
+
+Solicitud (respuesta): además de lo de clientes, `scope` y, en `profile`, `username`, `role` y `permissions` (propuestos, o los del perfil afectado). `companyId` es 0 y `companyName` vacío.
+
+- **Base (Core 000012):** `profile_requests` suma `scope` (`client` | `internal`), `profile_username`, `profile_role` y `profile_permissions`; `company_id` admite nulo solo en las internas (`CHECK`). El índice `uq_profile_requests_pending` incluye `scope` y usa `NULLS NOT DISTINCT` (PostgreSQL 15+): sin eso, dos pendientes internas iguales (empresa nula) no chocarían.
+- **Campana:** la nueva sale por el canal interno con `kind: internal_profile_request` (la pantalla la muestra solo al Administrador con el permiso); la respuesta, con `kind: internal_profile_request_reviewed` y `userId` de quien la pidió (la pantalla la muestra solo a esa persona). Enlace: `/configuracion/usuarios?tab=solicitudes&solicitud={id}`.
+- **Correo:** a quienes gestionan perfiles («[NexusWST] Nueva solicitud de perfil WeStorage») y a quien la pidió al responderla.
+- **Registro:** igual que en clientes (`request_created`, `request_approved` con `role` y `permissions`, `request_rejected`), sin empresa.
 - **Campana (WebSocket de Órdenes, mismo canal de Redis por empresa):** al crearla, `{type:"notification", audience:"internal", notification:{id, kind:"profile_request", title, body, requestId, companyId, createdAt}}`; la interfaz la muestra solo a quien tiene «Gestionar perfiles». Al responderla, `audience:"client"`, `kind:"profile_request_reviewed"`, para el Cliente. Sin persistencia (como el resto de la campana).
 - **Correo (SMTP de la app, `SMTP_*` en `.env`; Mailpit en desarrollo):** al crearla, a los usuarios activos con «Gestionar perfiles» y correo; al responderla, al Cliente que la pidió. Texto simple en español con empresa, tipo, nombre del perfil, motivo (y motivo del rechazo) y un enlace a la pantalla (`APP_PUBLIC_URL`). No bloquea: si falla, la acción igual se guarda y el error queda en el log. Sin `SMTP_HOST`, no se envía.
 

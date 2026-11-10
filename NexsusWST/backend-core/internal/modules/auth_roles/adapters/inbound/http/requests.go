@@ -16,11 +16,11 @@ import (
 	"github.com/nexuswst/backend-core/internal/shared/tenant"
 )
 
-// RequestHandler - solicitudes de perfiles (Tarea 07, Fase 4).
-//   - Crear: el Cliente, para su empresa.
-//   - Consultar: el Cliente (las de su empresa, filtradas en el servidor) y Administración clientes
-//     (Administrador o quien tenga «Gestionar perfiles»).
-//   - Aprobar y rechazar: solo con «Gestionar perfiles» (403 sin él).
+// RequestHandler - solicitudes de perfiles. ?scope=client (por defecto, Tarea 07) o internal (Tarea 08).
+//   - Crear: client, el Cliente para su empresa; internal, el Administrador (con o sin el permiso).
+//   - Consultar: client, el Cliente (las de su empresa, filtradas en el servidor) y Administración
+//     clientes (Administrador o quien tenga «Gestionar perfiles»); internal, solo el Administrador.
+//   - Aprobar y rechazar: «Gestionar perfiles» (internal: además Administrador). 403 sin él.
 type RequestHandler struct{ svc *application.Requests }
 
 func NewRequestHandler(svc *application.Requests) *RequestHandler { return &RequestHandler{svc: svc} }
@@ -29,27 +29,56 @@ func (h *RequestHandler) Register(mux *http.ServeMux, auth func(http.Handler) ht
 	view := func(f http.HandlerFunc) http.Handler {
 		return auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id, _ := tenant.From(r.Context())
-			if !id.HasRole(tenant.RoleCliente) && !id.CanViewClientAdmin() {
+			if scopeOf(r) == domain.ProfileScopeInternal {
+				if !id.HasRole(tenant.RoleAdmin) {
+					httpx.Error(w, http.StatusForbidden, "forbidden", "Las solicitudes de perfiles de WeStorage son del Administrador.")
+					return
+				}
+			} else if !id.HasRole(tenant.RoleCliente) && !id.CanViewClientAdmin() {
 				httpx.Error(w, http.StatusForbidden, "forbidden", "Las solicitudes de perfiles son del Cliente y de Administración clientes.")
 				return
 			}
 			f(w, r)
 		}))
 	}
-	client := func(f http.HandlerFunc) http.Handler { return auth(tenant.RequireRole(tenant.RoleCliente)(f)) }
+	// Solicitar: el Cliente (client) o el Administrador (internal).
+	requester := func(f http.HandlerFunc) http.Handler {
+		client, admin := tenant.RequireRole(tenant.RoleCliente)(f), tenant.RequireRole(tenant.RoleAdmin)(f)
+		return auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if scopeOf(r) == domain.ProfileScopeInternal {
+				admin.ServeHTTP(w, r)
+				return
+			}
+			client.ServeHTTP(w, r)
+		}))
+	}
 	manage := func(f http.HandlerFunc) http.Handler {
-		return auth(tenant.RequireManageProfiles(tenant.ProfileScopeClient)(f))
+		client, internal := tenant.RequireManageProfiles(tenant.ProfileScopeClient)(f), tenant.RequireManageProfiles(tenant.ProfileScopeAll)(f)
+		return auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if scopeOf(r) != domain.ProfileScopeInternal {
+				client.ServeHTTP(w, r)
+				return
+			}
+			if id, _ := tenant.From(r.Context()); !id.HasRole(tenant.RoleAdmin) {
+				httpx.Error(w, http.StatusForbidden, "forbidden", tenant.ErrNoManageProfiles)
+				return
+			}
+			internal.ServeHTTP(w, r)
+		}))
 	}
 	mux.Handle("GET /v1/profile-requests", view(h.list))
 	mux.Handle("GET /v1/profile-requests/{id}", view(h.get))
-	mux.Handle("POST /v1/profile-requests", client(h.create))
+	mux.Handle("POST /v1/profile-requests", requester(h.create))
 	mux.Handle("POST /v1/profile-requests/{id}/approve", manage(h.approve))
 	mux.Handle("POST /v1/profile-requests/{id}/reject", manage(h.reject))
 }
 
 func requestFilter(r *http.Request) (ports.RequestFilter, error) {
 	q := r.URL.Query()
-	f := ports.RequestFilter{Query: q.Get("q")}
+	f := ports.RequestFilter{Scope: scopeOf(r), Query: q.Get("q")}
+	if f.Scope != domain.ProfileScopeClient && f.Scope != domain.ProfileScopeInternal {
+		return f, errors.New("alcance inválido: usa client o internal")
+	}
 	switch s := domain.RequestStatus(q.Get("status")); s {
 	case "", domain.RequestPending, domain.RequestApproved, domain.RequestRejected:
 		f.Status = s
@@ -120,7 +149,7 @@ func (h *RequestHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, _ := tenant.From(r.Context())
-	v, err := h.svc.Get(r.Context(), actor, id)
+	v, err := h.svc.Get(r.Context(), actor, scopeOf(r), id)
 	if err != nil {
 		writeRequestErr(w, err)
 		return
@@ -130,21 +159,28 @@ func (h *RequestHandler) get(w http.ResponseWriter, r *http.Request) {
 
 func (h *RequestHandler) create(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Kind         string `json:"kind"`
-		TargetUserID int64  `json:"targetUserId"`
-		Name         string `json:"name"`
-		Email        string `json:"email"`
-		Phone        string `json:"phone"`
-		JobTitle     string `json:"jobTitle"`
-		Reason       string `json:"reason"`
+		Kind         string   `json:"kind"`
+		TargetUserID int64    `json:"targetUserId"`
+		Name         string   `json:"name"`
+		Email        string   `json:"email"`
+		Username     string   `json:"username"`
+		Phone        string   `json:"phone"`
+		JobTitle     string   `json:"jobTitle"`
+		Role         string   `json:"role"`
+		Permissions  []string `json:"permissions"`
+		Reason       string   `json:"reason"`
 	}
-	if err := httpx.Decode(r, &b); err != nil {
+	err := httpx.Decode(r, &b)
+	if err == nil && scopeOf(r) != domain.ProfileScopeInternal && (b.Username != "" || b.Role != "" || b.Permissions != nil) {
+		err = errors.New("campos internos en una solicitud de cliente")
+	}
+	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido")
 		return
 	}
 	actor, _ := tenant.From(r.Context())
-	v, err := h.svc.Create(r.Context(), actor, domain.RequestDraft{Kind: domain.RequestKind(b.Kind), TargetUserID: b.TargetUserID, Name: b.Name,
-		Email: b.Email, Phone: b.Phone, JobTitle: b.JobTitle, Reason: b.Reason})
+	v, err := h.svc.Create(r.Context(), actor, domain.RequestDraft{Scope: scopeOf(r), Kind: domain.RequestKind(b.Kind), TargetUserID: b.TargetUserID,
+		Name: b.Name, Email: b.Email, Username: b.Username, Phone: b.Phone, JobTitle: b.JobTitle, Role: b.Role, Permissions: b.Permissions, Reason: b.Reason})
 	if err != nil {
 		writeRequestErr(w, err)
 		return
@@ -152,28 +188,36 @@ func (h *RequestHandler) create(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, v)
 }
 
-// approve: sin cuerpo, acepta tal cual; con {name, email, phone, jobTitle} es «Editar y aceptar».
+// approve: sin cuerpo, acepta tal cual; con {name, email, phone, jobTitle} es «Editar y aceptar» (en
+// las internas, además username, role y permissions).
 func (h *RequestHandler) approve(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	var b *struct {
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Phone    string `json:"phone"`
-		JobTitle string `json:"jobTitle"`
+		Name        string   `json:"name"`
+		Email       string   `json:"email"`
+		Username    string   `json:"username"`
+		Phone       string   `json:"phone"`
+		JobTitle    string   `json:"jobTitle"`
+		Role        string   `json:"role"`
+		Permissions []string `json:"permissions"`
 	}
-	if err := httpx.Decode(r, &b); err != nil && !errors.Is(err, io.EOF) {
+	err := httpx.Decode(r, &b)
+	if err == nil && b != nil && scopeOf(r) != domain.ProfileScopeInternal && (b.Username != "" || b.Role != "" || b.Permissions != nil) {
+		err = errors.New("campos internos en una solicitud de cliente")
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
 		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido")
 		return
 	}
 	var edits *domain.ProfileDraft
 	if b != nil {
-		edits = &domain.ProfileDraft{Name: b.Name, Email: b.Email, Phone: b.Phone, JobTitle: b.JobTitle}
+		edits = &domain.ProfileDraft{Name: b.Name, Email: b.Email, Username: b.Username, Phone: b.Phone, JobTitle: b.JobTitle, Role: b.Role, Permissions: b.Permissions}
 	}
 	actor, _ := tenant.From(r.Context())
-	v, err := h.svc.Approve(r.Context(), actor, id, edits)
+	v, err := h.svc.Approve(r.Context(), actor, scopeOf(r), id, edits)
 	if err != nil {
 		writeRequestErr(w, err)
 		return
@@ -194,7 +238,7 @@ func (h *RequestHandler) reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, _ := tenant.From(r.Context())
-	v, err := h.svc.Reject(r.Context(), actor, id, b.Reason)
+	v, err := h.svc.Reject(r.Context(), actor, scopeOf(r), id, b.Reason)
 	if err != nil {
 		writeRequestErr(w, err)
 		return

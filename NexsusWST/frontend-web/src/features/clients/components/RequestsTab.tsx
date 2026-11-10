@@ -10,12 +10,13 @@ import { Modal } from "@/components/Modal";
 import { Badge } from "@/components/StatusBadge";
 import { showToast } from "@/components/Toast";
 import { useDebounce } from "@/hooks/useDebounce";
-import { approveRequest, getRequest, listRequests, rejectRequest, type ProfileRequest, type RequestCounts, type RequestFilters, type RequestKind, type RequestStatus } from "@/services/clients";
+import { approveRequest, getRequest, listRequests, rejectRequest, type ProfileRequest, type ProfileScope, type RequestCounts, type RequestFilters, type RequestKind, type RequestStatus } from "@/services/clients";
 import { useAuth } from "@/state/auth";
 import { dateLabel } from "@/features/orders/components/OrderDetail";
 import { useOrderResource } from "@/features/orders/hooks/useOrderResources";
-import { canManageProfiles } from "../access";
+import { PROFILE_ROLE_LABELS, canManageProfiles } from "../access";
 import { usePagedList } from "../hooks/usePagedList";
+import { TemporaryPasswordDialog } from "./ProfileDialogs";
 import { ProfileFormModal } from "./ProfileFormModal";
 import { RequestDetail, STATUS_LABELS, STATUS_TONES } from "./RequestDetail";
 
@@ -26,8 +27,10 @@ type FilterValues = { kind: "" | RequestKind; status: "" | RequestStatus; from: 
 // Solicitudes de perfiles (Tarea 07). mode «admin»: Administración clientes › Solicitudes (todas las
 // empresas; con «Gestionar perfiles», Aceptar, Editar y aceptar y Rechazar). mode «client»: «Mis
 // solicitudes» del Cliente (solo su empresa, lo filtra el servidor; sin acciones). KPIs que filtran,
-// filtros en la URL y panel «Detalle de solicitud» (modal en teléfono).
-export function RequestsTab({ mode, tab = "solicitudes", refreshKey = 0 }: { mode: "admin" | "client"; tab?: string; refreshKey?: number }) {
+// filtros en la URL y panel «Detalle de solicitud» (modal en teléfono). scope «internal» (Tarea 08):
+// Configuración › Usuarios WeStorage › Solicitudes (sin empresa; rol propuesto; aprobar un perfil sin
+// correo muestra una vez su contraseña temporal).
+export function RequestsTab({ mode, scope = "client", tab = "solicitudes", refreshKey = 0 }: { mode: "admin" | "client"; scope?: ProfileScope; tab?: string; refreshKey?: number }) {
   const { session } = useAuth();
   const params = useSearchParams(), router = useRouter(), pathname = usePathname();
   const paramsKey = params.toString();
@@ -44,7 +47,9 @@ export function RequestsTab({ mode, tab = "solicitudes", refreshKey = 0 }: { mod
   const [accepting, setAccepting] = useState<ProfileRequest | null>(null);
   const [editing, setEditing] = useState<ProfileRequest | null>(null);
   const [rejecting, setRejecting] = useState<ProfileRequest | null>(null);
-  const canManage = mode === "admin" && canManageProfiles(session?.user, "client");
+  const [temp, setTemp] = useState<{ name: string; login: string; password: string } | null>(null);
+  const internal = scope === "internal";
+  const canManage = mode === "admin" && canManageProfiles(session?.user, scope);
 
   const filters = useMemo<FilterValues>(() => {
     const p = new URLSearchParams(paramsKey);
@@ -65,14 +70,14 @@ export function RequestsTab({ mode, tab = "solicitudes", refreshKey = 0 }: { mod
   const listKey = JSON.stringify({ ...apiFilters, limit, offset: page * limit, refreshKey, revision });
   const [counts, setCounts] = useState<RequestCounts | null>(null);
   const { rows, total, loading, error, reload } = usePagedList(async () => {
-    const res = await listRequests(JSON.parse(listKey));
+    const res = await listRequests(JSON.parse(listKey), scope);
     setCounts(res.counts);
     return res;
   }, listKey);
 
   const inPage = rows.find((r) => r.id === selected);
   const outside = useOrderResource<ProfileRequest | null>(
-    () => (selected && !inPage ? getRequest(selected).catch(() => null) : Promise.resolve(null)),
+    () => (selected && !inPage ? getRequest(selected, scope).catch(() => null) : Promise.resolve(null)),
     `${selected}:${!!inPage}:${revision}`, `${selected}`,
   );
   const request = inPage ?? outside.data ?? null;
@@ -106,12 +111,15 @@ export function RequestsTab({ mode, tab = "solicitudes", refreshKey = 0 }: { mod
   const clearAll = () => { lastQuery.current = ""; setQuery(""); router.push(`${pathname}?tab=${tab}`); };
   const done = (r: ProfileRequest) => {
     setAccepting(null); setEditing(null); setRejecting(null);
+    if (r.temporaryPassword) setTemp({ name: r.profile.name, login: r.profile.username ?? "", password: r.temporaryPassword });
     showToast(r.status === "approved" ? `Solicitud aceptada: ${r.kindLabel.toLowerCase()} de ${r.profile.name}.` : `Solicitud de ${r.profile.name} rechazada.`);
     setRevision((v) => v + 1);
   };
 
   const activeFilters = [filters.kind, filters.status, filters.from || filters.to].filter(Boolean).length;
-  const columns = mode === "admin"
+  const columns = internal
+    ? ["Tipo", "Nombre perfil", "Rol", "Solicitado por", "Estado", "Fecha de solicitud"]
+    : mode === "admin"
     ? ["Empresa", "Tipo", "Solicitado por", "Nombre perfil", "Estado", "Fecha de solicitud"]
     : ["Motivo", "Tipo", "Nombre perfil", "Estado", "Fecha de solicitud"];
   const detail = request
@@ -134,8 +142,8 @@ export function RequestsTab({ mode, tab = "solicitudes", refreshKey = 0 }: { mod
       <div className="orders-toolbar clients-toolbar">
         {mode === "admin" && (
           <label className="orders-search">
-            <span className="sr-only">Buscar nombre de empresa</span>
-            <input placeholder="Buscar nombre de empresa" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <span className="sr-only">{internal ? "Buscar nombre del perfil" : "Buscar nombre de empresa"}</span>
+            <input placeholder={internal ? "Buscar nombre del perfil" : "Buscar nombre de empresa"} value={query} onChange={(e) => setQuery(e.target.value)} />
           </label>
         )}
         <button className="btn ghost" onClick={() => setFiltersOpen(true)}><Filter size={18} />Filtros{activeFilters ? ` (${activeFilters})` : ""}</button>
@@ -154,12 +162,21 @@ export function RequestsTab({ mode, tab = "solicitudes", refreshKey = 0 }: { mod
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.id} onClick={() => select(r.id)} className={selected === r.id ? "order-selected" : ""}>
+                        {internal ? (
+                          <>
+                            <td><button className="order-number" aria-label={`Ver la solicitud de ${r.profile.name}`} onClick={() => select(r.id)}>{r.kindLabel}</button></td>
+                            <td>{r.profile.name}</td>
+                            <td>{r.profile.role ? PROFILE_ROLE_LABELS[r.profile.role] ?? r.profile.role : "—"}</td>
+                            <td>{r.requestedBy.name || "—"}</td>
+                          </>
+                        ) : <>
                         {mode === "admin"
                           ? <td><button className="order-number" aria-label={`Ver la solicitud de ${r.profile.name} (${r.companyName})`} onClick={() => select(r.id)}>{r.companyName}</button></td>
                           : <td title={r.reason}><button className="order-number" aria-label={`Ver la solicitud de ${r.profile.name}`} onClick={() => select(r.id)}>{r.reason}</button></td>}
                         <td>{r.kindLabel}</td>
                         {mode === "admin" && <td>{r.requestedBy.name || "—"}</td>}
                         <td>{r.profile.name}</td>
+                        </>}
                         <td><Badge tone={STATUS_TONES[r.status]} label={STATUS_LABELS[r.status]} /></td>
                         <td>{dateLabel(r.requestedAt)}</td>
                       </tr>
@@ -180,25 +197,37 @@ export function RequestsTab({ mode, tab = "solicitudes", refreshKey = 0 }: { mod
       {mobile && selected !== null && <Modal title="Detalle de solicitud" onClose={() => select(null)} panelClassName="registry-modal">{detail}</Modal>}
       {filtersOpen && <RequestFiltersModal values={filters} onApply={applyFilters} onClose={() => setFiltersOpen(false)} />}
       {accepting && (
-        <ConfirmDialog title="Aceptar solicitud" confirmLabel="Aceptar solicitud" onConfirm={async () => done(await approveRequest(accepting.id))} onClose={() => setAccepting(null)}>
-          <p>{accepting.kind === "new_profile"
+        <ConfirmDialog title="Aceptar solicitud" confirmLabel="Aceptar solicitud" onConfirm={async () => done(await approveRequest(accepting.id, undefined, scope))} onClose={() => setAccepting(null)}>
+          <p>{accepting.kind === "new_profile" && internal
+            ? `Se creará el perfil ${PROFILE_ROLE_LABELS[accepting.profile.role ?? ""] ?? ""} de ${accepting.profile.name}; ${accepting.profile.email ? `recibirá en ${accepting.profile.email} el enlace para definir su contraseña.` : "verás una sola vez su contraseña temporal para entregársela."}`
+            : accepting.kind === "new_profile"
             ? `Se creará el perfil Cliente de ${accepting.profile.name} en ${accepting.companyName}; recibirá en ${accepting.profile.email} el enlace para definir su contraseña.`
             : accepting.kind === "activation" ? `Se activará el perfil de ${accepting.profile.name}.` : `Se desactivará el perfil de ${accepting.profile.name}; no podrá ingresar a NexusWST.`}</p>
         </ConfirmDialog>
       )}
-      {editing && (
+      {editing && (internal ? (
+        <ProfileFormModal scope="internal" title="Editar y aceptar solicitud" submitLabel="Aceptar solicitud" companies={[]}
+          initial={{ name: editing.profile.name, email: editing.profile.email, username: editing.profile.username, phone: editing.profile.phone,
+            jobTitle: editing.profile.jobTitle, role: editing.profile.role, permissions: editing.profile.permissions ?? [] }}
+          submitData={async (body) => done(await approveRequest(editing.id, { name: body.name, email: body.email ?? "", username: body.username, phone: body.phone,
+            jobTitle: body.jobTitle, role: body.role, permissions: body.permissions }, scope))}
+          onClose={() => setEditing(null)} />
+      ) : (
         <ProfileFormModal scope="client" title="Editar y aceptar solicitud" submitLabel="Aceptar solicitud" lockCompany
           initial={{ name: editing.profile.name, email: editing.profile.email, phone: editing.profile.phone, jobTitle: editing.profile.jobTitle, companyId: editing.companyId }}
           companies={[{ id: editing.companyId, name: editing.companyName, active: true }]}
           submitData={async (body) => done(await approveRequest(editing.id, { name: body.name, email: body.email ?? "", phone: body.phone, jobTitle: body.jobTitle }))}
           onClose={() => setEditing(null)} />
-      )}
+      ))}
       {rejecting && (
         <ConfirmDialog title="Rechazar solicitud" reason="required" reasonLabel="Motivo del rechazo" reasonRequiredMessage="Indica el motivo del rechazo."
-          confirmLabel="Rechazar" destructive onConfirm={async (reason) => done(await rejectRequest(rejecting.id, reason))} onClose={() => setRejecting(null)}>
-          <p>{rejecting.kindLabel} de {rejecting.profile.name} ({rejecting.companyName}). El Cliente verá el motivo.</p>
+          confirmLabel="Rechazar" destructive onConfirm={async (reason) => done(await rejectRequest(rejecting.id, reason, scope))} onClose={() => setRejecting(null)}>
+          <p>{internal
+            ? `${rejecting.kindLabel} de ${rejecting.profile.name}. ${rejecting.requestedBy.name || "Quien la pidió"} verá el motivo.`
+            : `${rejecting.kindLabel} de ${rejecting.profile.name} (${rejecting.companyName}). El Cliente verá el motivo.`}</p>
         </ConfirmDialog>
       )}
+      {temp && <TemporaryPasswordDialog name={temp.name} login={temp.login} password={temp.password} onClose={() => setTemp(null)} />}
     </>
   );
 }

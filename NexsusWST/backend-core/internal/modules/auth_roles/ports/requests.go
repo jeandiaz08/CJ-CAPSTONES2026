@@ -9,7 +9,8 @@ import (
 
 // RequestFilter - Solicitudes (Administrador: todas; Cliente: las de su empresa).
 type RequestFilter struct {
-	CompanyIDs []int64 // nil = todas
+	Scope      domain.ProfileScope // client (por defecto) o internal
+	CompanyIDs []int64             // nil = todas
 	Status     domain.RequestStatus
 	Kind       domain.RequestKind
 	Query      string // empresa o nombre del perfil
@@ -28,6 +29,7 @@ type RequestCounts struct {
 
 type RequestRepository interface {
 	// Create devuelve domain.ErrRequestPending si ya hay una pendiente para el mismo perfil y tipo.
+	// companyID 0 = solicitud interna de WeStorage (sin empresa).
 	Create(ctx context.Context, companyID, requestedBy int64, d domain.RequestDraft) (int64, error)
 	Get(ctx context.Context, id int64) (domain.ProfileRequest, error)
 	List(ctx context.Context, f RequestFilter) ([]domain.ProfileRequest, int, RequestCounts, error)

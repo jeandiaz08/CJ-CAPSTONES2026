@@ -138,12 +138,14 @@ export type RequestStatus = "pending" | "approved" | "rejected";
 
 export type ProfileRequest = {
   id: number;
+  scope?: ProfileScope; // «internal»: solicitud de perfil WeStorage (Tarea 08), sin empresa
   companyId: number;
   companyName: string;
   kind: RequestKind;
   kindLabel: string;
   targetUserId: number | null;
-  profile: { name: string; email: string; phone: string; jobTitle: string };
+  // username, role y permissions solo en las internas (rol propuesto o el del perfil afectado).
+  profile: { name: string; email: string; phone: string; jobTitle: string; username?: string; role?: string; permissions?: string[] };
   reason: string;
   status: RequestStatus;
   requestedBy: { id: number; name: string };
@@ -152,18 +154,25 @@ export type ProfileRequest = {
   reviewedAt: string | null;
   rejectionReason: string;
   createdUserId: number | null;
+  temporaryPassword?: string; // solo al aprobar una interna de perfil sin correo (se muestra una vez)
 };
 
 export type RequestFilters = { q?: string; status?: RequestStatus; kind?: RequestKind; from?: string; to?: string; ids?: number[]; limit?: number; offset?: number };
 export type RequestCounts = { pending: number; approved: number; rejected: number };
-export type NewRequest = { kind: RequestKind; targetUserId?: number; name?: string; email?: string; phone?: string; jobTitle?: string; reason: string };
+export type NewRequest = { kind: RequestKind; targetUserId?: number; name?: string; email?: string; phone?: string; jobTitle?: string; reason: string;
+  username?: string; role?: string; permissions?: string[] }; // los tres últimos, solo internas
+export type RequestEdits = { name: string; email: string; phone: string; jobTitle: string; username?: string; role?: string; permissions?: string[] };
 
-export const listRequests = (f: RequestFilters) =>
-  api<{ data: ProfileRequest[]; total: number; counts: RequestCounts; limit: number; offset: number }>("core", `/v1/profile-requests${query(f)}`);
-export const getRequest = (id: number) => api<ProfileRequest>("core", `/v1/profile-requests/${id}`);
-export const createRequest = (body: NewRequest) => api<ProfileRequest>("core", "/v1/profile-requests", { method: "POST", body: JSON.stringify(body) });
+// Las de clientes van sin ?scope (por defecto); las de WeStorage, con ?scope=internal.
+const requestScope = (scope: ProfileScope, path: string) => (scope === "internal" ? withScope(scope, path) : path);
+
+export const listRequests = (f: RequestFilters, scope: ProfileScope = "client") =>
+  api<{ data: ProfileRequest[]; total: number; counts: RequestCounts; limit: number; offset: number }>("core", requestScope(scope, `/v1/profile-requests${query(f)}`));
+export const getRequest = (id: number, scope: ProfileScope = "client") => api<ProfileRequest>("core", requestScope(scope, `/v1/profile-requests/${id}`));
+export const createRequest = (body: NewRequest, scope: ProfileScope = "client") =>
+  api<ProfileRequest>("core", requestScope(scope, "/v1/profile-requests"), { method: "POST", body: JSON.stringify(body) });
 // Sin cuerpo acepta tal cual; con los datos del perfil es «Editar y aceptar».
-export const approveRequest = (id: number, edits?: { name: string; email: string; phone: string; jobTitle: string }) =>
-  api<ProfileRequest>("core", `/v1/profile-requests/${id}/approve`, { method: "POST", ...(edits ? { body: JSON.stringify(edits) } : {}) });
-export const rejectRequest = (id: number, reason: string) =>
-  api<ProfileRequest>("core", `/v1/profile-requests/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
+export const approveRequest = (id: number, edits?: RequestEdits, scope: ProfileScope = "client") =>
+  api<ProfileRequest>("core", requestScope(scope, `/v1/profile-requests/${id}/approve`), { method: "POST", ...(edits ? { body: JSON.stringify(edits) } : {}) });
+export const rejectRequest = (id: number, reason: string, scope: ProfileScope = "client") =>
+  api<ProfileRequest>("core", requestScope(scope, `/v1/profile-requests/${id}/reject`), { method: "POST", body: JSON.stringify({ reason }) });

@@ -4,7 +4,7 @@ import { act } from 'react';
 import { canAccessPath, visibleMenu } from '@/state/menuAccess';
 
 // Tarea 08 · Fase 1: Configuración › Usuarios WeStorage (perfiles con scope=internal).
-const h = vi.hoisted(() => ({ session: null, calls: [], profiles: [], created: null, reset: null }));
+const h = vi.hoisted(() => ({ session: null, calls: [], profiles: [], created: null, reset: null, requests: [], approved: null }));
 vi.mock('@/state/auth', () => ({ ROLE_LABELS: {}, useAuth: () => ({ session: h.session, companyId: null, logout: () => {} }) }));
 vi.mock('@/services/api', () => {
   class ApiError extends Error { constructor(m, status, code, fields = []) { super(m); this.status = status; this.code = code; this.fields = fields; } }
@@ -16,6 +16,9 @@ vi.mock('@/services/api', () => {
       if (!init?.method && path.startsWith('/v1/profiles?')) return { data: h.profiles, total: h.profiles.length, limit: 20, offset: 0 };
       if (init?.method === 'POST' && path.startsWith('/v1/profiles?scope')) return h.created(body);
       if (/^\/v1\/profiles\/\d+\/password/.test(path)) return h.reset;
+      if (!init?.method && path.startsWith('/v1/profile-requests?')) return { data: h.requests, total: h.requests.length, counts: { pending: h.requests.length, approved: 0, rejected: 0 }, limit: 20, offset: 0 };
+      if (/^\/v1\/profile-requests\/\d+\/approve/.test(path)) return h.approved;
+      if (init?.method === 'POST' && path.startsWith('/v1/profile-requests')) return { id: 50, kind: body.kind, profile: { name: body.name ?? '' }, status: 'pending' };
       return { data: [] };
     },
   };
@@ -140,5 +143,74 @@ describe('Usuarios WeStorage › Perfiles', () => {
     expect(confirm.textContent).toContain('contraseña temporal');
     await click(button(confirm, 'Restablecer'));
     expect(document.body.textContent).toContain('Tmp-ABCDEFGH');
+  });
+});
+
+const request = (id, extra = {}) => ({ id, scope: 'internal', companyId: 0, companyName: '', kind: 'new_profile', kindLabel: 'Nuevo perfil', targetUserId: null,
+  profile: { name: 'Pedro Bodega', email: '', phone: '', jobTitle: '', username: 'pedro.bodega', role: 'empaque', permissions: ['despacho'] },
+  reason: 'Nuevo operario', status: 'pending', requestedBy: { id: 8, name: 'Admin Lectura' }, requestedAt: '2026-11-09T13:00:00Z', reviewedBy: null, reviewedAt: null,
+  rejectionReason: '', createdUserId: null, ...extra });
+
+describe('Usuarios WeStorage › Solicitudes (Fase 2)', () => {
+  let root, host;
+  const mount = async (search) => {
+    globalThis.__nav = { params: new URLSearchParams(search), calls: [], pathname: '/configuracion/usuarios' };
+    const { InternalUsersView } = await import('@/features/settings');
+    await act(async () => root.render(<InternalUsersView />));
+    await settle();
+  };
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    h.calls.length = 0;
+    h.profiles = [profile(2, { name: 'María Rojas', role: 'jefe_operaciones' }), profile(8, { name: 'Admin Lectura', role: 'admin', permissions: [] })];
+    h.requests = [request(40)];
+    h.session = user('admin', [], 8);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  });
+  afterEach(async () => { await act(async () => root.unmount()); host.remove(); document.body.innerHTML = ''; });
+
+  it('sin el permiso: «Solicitar nuevo perfil» con rol, permisos y motivo', async () => {
+    await mount('');
+    expect(button(host, 'Nuevo perfil')).toBeUndefined();
+    await click(button(host, 'Solicitar nuevo perfil'));
+    const modal = document.querySelector('.form-modal');
+    await click(button(modal, 'Enviar solicitud'));
+    expect([...modal.querySelectorAll('.modal-field-error')].map((e) => e.textContent)).toContain('Indica el motivo u observación (al menos 5 caracteres).');
+    await setValue(modal.querySelector('input'), 'Ana Torres');
+    await setValue(modal.querySelector('input[type=email]'), 'ana@westorage.cl');
+    await setValue(modal.querySelector('select'), 'jefe_operaciones');
+    await click(checkbox(modal, 'Despacho'));
+    const reason = modal.querySelector('textarea');
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(reason, 'Nueva supervisora de turno'); reason.dispatchEvent(new Event('input', { bubbles: true })); });
+    await click(button(modal, 'Enviar solicitud'));
+    const post = h.calls.find(([m, p]) => m === 'POST' && p === '/v1/profile-requests?scope=internal');
+    expect(post[2]).toEqual({ kind: 'new_profile', name: 'Ana Torres', email: 'ana@westorage.cl', phone: '', jobTitle: '', role: 'jefe_operaciones', permissions: ['despacho'], reason: 'Nueva supervisora de turno' });
+  });
+
+  it('sin el permiso: el panel ofrece solicitar desactivación, salvo del propio perfil', async () => {
+    await mount('perfil=2');
+    expect(button(host.querySelector('.clients-panel'), 'Solicitar desactivación')).toBeTruthy();
+    await act(async () => root.unmount()); root = createRoot(host);
+    await mount('perfil=8');
+    expect(button(host.querySelector('.clients-panel'), 'Solicitar desactivación')).toBeUndefined();
+  });
+
+  it('pestaña Solicitudes: columnas internas y, con el permiso, aprobar muestra la contraseña temporal una vez', async () => {
+    h.session = user('admin', ['gestionar_perfiles'], 1);
+    h.approved = { ...request(40, { status: 'approved' }), temporaryPassword: 'Tmp-SOLICITUD' };
+    await mount('tab=solicitudes&solicitud=40');
+    expect([...host.querySelectorAll('.clients-list th')].map((t) => t.textContent)).toEqual(['Tipo', 'Nombre perfil', 'Rol', 'Solicitado por', 'Estado', 'Fecha de solicitud']);
+    expect([...host.querySelectorAll('.clients-list tbody td')].slice(0, 4).map((c) => c.textContent)).toEqual(['Nuevo perfil', 'Pedro Bodega', 'Empaque', 'Admin Lectura']);
+    expect(h.calls.some(([, p]) => p.startsWith('/v1/profile-requests?') && p.includes('scope=internal'))).toBe(true);
+    const facts = Object.fromEntries([...host.querySelectorAll('.clients-panel dl > div')].map((d) => [d.querySelector('dt').textContent, d.querySelector('dd').textContent]));
+    expect(facts).toMatchObject({ Usuario: 'pedro.bodega', Rol: 'Empaque', Permisos: 'Despacho' });
+    expect(facts.Empresa).toBeUndefined();
+    await click(button(host.querySelector('.clients-panel'), 'Aceptar solicitud'));
+    const confirm = [...document.querySelectorAll('[role=dialog]')].at(-1);
+    expect(confirm.textContent).toContain('contraseña temporal');
+    await click(button(confirm, 'Aceptar solicitud'));
+    expect(h.calls.some(([m, p]) => m === 'POST' && p === '/v1/profile-requests/40/approve?scope=internal')).toBe(true);
+    expect(document.body.textContent).toContain('Tmp-SOLICITUD');
   });
 });

@@ -9,7 +9,8 @@ import { useOrdersSocket, type OrderChanged } from "./useOrdersSocket";
 // Avisos de la campana: los que llegan por WebSocket mientras la app está abierta. Se guardan
 // solo en memoria (los últimos 20); recargar la página los borra.
 // TODO(api): GET /v1/notifications ya guarda los avisos; usarlo para no perderlos al recargar.
-export type NoticeKind = "incident" | "label_ready" | "delivered" | "despacho_incompleto" | "profile_request" | "profile_request_reviewed";
+export type NoticeKind = "incident" | "label_ready" | "delivered" | "despacho_incompleto" | "profile_request" | "profile_request_reviewed"
+  | "internal_profile_request" | "internal_profile_request_reviewed";
 // href: a dónde lleva el aviso (las solicitudes de perfiles abren su pantalla).
 export type Notice = { key: string; kind: NoticeKind; title: string; body: string; orderId: number | null; at: string; read: boolean; href?: string };
 
@@ -36,12 +37,21 @@ export function clearNotices() {
 }
 
 type NotificationMessage = OrderChanged & {
-  notification?: { id: number | string; kind: string; title: string; body: string; orderId?: number | null; requestId?: number; createdAt: string };
+  notification?: { id: number | string; kind: string; title: string; body: string; orderId?: number | null; requestId?: number; userId?: number; createdAt: string };
 };
 
 // Solicitudes de perfiles (Tarea 07): la nueva solicitud solo la ve quien tiene «Gestionar perfiles»;
 // la respuesta, solo el Cliente (el servidor ya no le envía al Cliente los avisos internos).
-function requestNotice(n: NonNullable<NotificationMessage["notification"]>, user: AccessUser | null) {
+// WeStorage (Tarea 08): la nueva, solo el Administrador con el permiso; la respuesta va por el canal
+// interno y la muestra solo quien la pidió (userId).
+function requestNotice(n: NonNullable<NotificationMessage["notification"]>, user: (AccessUser & { id?: number }) | null) {
+  const internalHref = `/configuracion/usuarios?tab=solicitudes&solicitud=${n.requestId}`;
+  if (n.kind === "internal_profile_request" && user?.role === "admin" && user.permissions.includes("gestionar_perfiles")) {
+    return { kind: n.kind, href: internalHref } as const;
+  }
+  if (n.kind === "internal_profile_request_reviewed" && user?.id !== undefined && user.id === n.userId) {
+    return { kind: n.kind, href: internalHref } as const;
+  }
   if (n.kind === "profile_request" && user?.permissions.includes("gestionar_perfiles")) {
     return { kind: n.kind, href: `/clientes/administracion?tab=solicitudes&solicitud=${n.requestId}` } as const;
   }
@@ -51,7 +61,7 @@ function requestNotice(n: NonNullable<NotificationMessage["notification"]>, user
   return null;
 }
 
-async function handle(message: NotificationMessage, user: AccessUser | null) {
+async function handle(message: NotificationMessage, user: (AccessUser & { id?: number }) | null) {
   const n = message.notification;
   const request = message.type === "notification" && n ? requestNotice(n, user) : null;
   if (n && request) {

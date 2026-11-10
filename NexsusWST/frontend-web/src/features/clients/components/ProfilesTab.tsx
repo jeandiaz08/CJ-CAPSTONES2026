@@ -10,8 +10,8 @@ import { Badge } from "@/components/StatusBadge";
 import { showToast } from "@/components/Toast";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
-  disableProfile, downloadProfilesTemplate, enableProfile, exportProfiles, getProfile, listProfiles, resetProfilePassword,
-  type Profile, type ProfileFilters, type ProfileScope,
+  createRequest, disableProfile, downloadProfilesTemplate, enableProfile, exportProfiles, getProfile, listProfiles, resetProfilePassword,
+  type Profile, type ProfileFilters, type ProfileScope, type RequestKind,
 } from "@/services/clients";
 import { listCompanies } from "@/services/core";
 import { useAuth } from "@/state/auth";
@@ -28,7 +28,9 @@ const PAGE_SIZES = [20, 50, 100];
 // Tabla de perfiles con su panel de detalle. Alcance «client»: Administración clientes › Perfiles
 // («Todos los perfiles», Tarea 07). Alcance «internal»: Configuración › Usuarios WeStorage («Perfiles
 // WeStorage», Tarea 08: correo o usuario, rol y permisos; sin empresa). Búsqueda, filtros, página y
-// perfil abierto (?perfil=) viven en la URL. Sin «Gestionar perfiles» queda en lectura.
+// perfil abierto (?perfil=) viven en la URL. Sin «Gestionar perfiles» queda en lectura; en Usuarios
+// WeStorage, el Administrador sin el permiso puede solicitar un perfil nuevo, una activación o una
+// desactivación (Tarea 08, Fase 2), y las aprueba quien tenga el permiso.
 export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; tab?: string }) {
   const { session } = useAuth();
   const params = useSearchParams(), router = useRouter(), pathname = usePathname();
@@ -47,10 +49,14 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
   const [resetting, setResetting] = useState<Profile | null>(null);
   const [importing, setImporting] = useState(false);
   const [temp, setTemp] = useState<{ name: string; login: string; password: string } | null>(null);
+  const [requesting, setRequesting] = useState(false);
+  const [asking, setAsking] = useState<{ profile: Profile; kind: RequestKind } | null>(null);
   const [mobile, setMobile] = useState(false);
   const [revision, setRevision] = useState(0);
   const canManage = canManageProfiles(session?.user, scope);
   const internal = scope === "internal";
+  const canRequest = internal && !canManage && session?.user.role === "admin";
+  const requestSent = () => showToast("Solicitud enviada; la revisará un Administrador con «Gestionar perfiles».");
 
   const filters = useMemo<ProfileFilterValues>(() => {
     const p = new URLSearchParams(paramsKey);
@@ -144,8 +150,13 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
     { label: `Exportar seleccionados${checks.size ? ` (${checks.size})` : ""}`, icon: <Download size={18} aria-hidden="true" />, disabled: checks.size === 0, onSelect: () => run(() => exportProfiles(scope, { ids: [...checks] }), "Exportación descargada.") },
     { label: "Exportar (filtros actuales)", icon: <Download size={18} aria-hidden="true" />, disabled: total === 0, onSelect: () => run(() => exportProfiles(scope, apiFilters), "Exportación descargada.") },
   ];
+  // Nadie solicita su propia activación o desactivación (el servidor responde 403).
+  const requestAction = (p: Profile) => canRequest && p.id !== session?.user.id
+    ? <button type="button" className={p.active ? "btn danger" : "btn success"} onClick={() => setAsking({ profile: p, kind: p.active ? "deactivation" : "activation" })}>
+      {p.active ? "Solicitar desactivación" : "Solicitar activación"}</button>
+    : undefined;
   const detail = profile
-    ? <ProfileDetail profile={profile} scope={scope} canManage={canManage} inModal={mobile} onEdit={() => setEditing(profile)} onToggle={() => setToggling(profile)} onPassword={() => setResetting(profile)} />
+    ? <ProfileDetail profile={profile} scope={scope} canManage={canManage} actions={requestAction(profile)} inModal={mobile} onEdit={() => setEditing(profile)} onToggle={() => setToggling(profile)} onPassword={() => setResetting(profile)} />
     : selected && outside.loading ? <div className="detail-skeleton" aria-label="Cargando perfil" />
     : selected ? <p className="detail-empty">Este perfil no existe.</p>
     : <p className="detail-empty">Selecciona un perfil para ver su detalle</p>;
@@ -162,6 +173,7 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
         <button className="btn ghost" onClick={clearAll}><FilterX size={18} />Limpiar filtros</button>
         <DropdownMenu className="excel-actions" triggerClassName="btn excel" trigger={<><FileSpreadsheet size={18} aria-hidden="true" />Excel acciones</>} items={excelItems} />
         {canManage && <button className="btn order-primary" onClick={() => setEditing("new")}><CirclePlus size={18} />Nuevo perfil</button>}
+        {canRequest && <button className="btn order-primary" onClick={() => setRequesting(true)}><CirclePlus size={18} />Solicitar nuevo perfil</button>}
       </div>
       <div className="orders-workspace">
         <section className="orders-list clients-list" aria-label="Perfiles">
@@ -246,6 +258,25 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
           <p>{resetting.hasEmail
             ? `Le enviaremos a ${resetting.email} un enlace para definir una contraseña nueva.`
             : "Se generará una contraseña temporal que verás una sola vez; sus sesiones abiertas se cerrarán."}</p>
+        </ConfirmDialog>
+      )}
+      {requesting && (
+        <ProfileFormModal scope="internal" title="Solicitar nuevo perfil" submitLabel="Enviar solicitud" companies={[]} withReason
+          hint="Lo revisa un Administrador con «Gestionar perfiles». Si sale sin correo, quien la apruebe le entregará la contraseña temporal."
+          submitData={async (body) => {
+            await createRequest({ kind: "new_profile", name: body.name, email: body.email, username: body.username, phone: body.phone, jobTitle: body.jobTitle,
+              role: body.role, permissions: body.permissions, reason: body.reason ?? "" }, "internal");
+            setRequesting(false);
+            requestSent();
+          }}
+          onClose={() => setRequesting(false)} />
+      )}
+      {asking && (
+        <ConfirmDialog title={asking.kind === "activation" ? `Solicitar activación de ${asking.profile.name}` : `Solicitar desactivación de ${asking.profile.name}`}
+          reason="required" reasonLabel="Motivo" reasonRequiredMessage="Indica el motivo de la solicitud." confirmLabel="Enviar solicitud"
+          onConfirm={async (reason) => { await createRequest({ kind: asking.kind, targetUserId: asking.profile.id, reason }, "internal"); setAsking(null); requestSent(); }}
+          onClose={() => setAsking(null)}>
+          <p>La revisará un Administrador con «Gestionar perfiles». Mientras tanto, el perfil sigue {asking.profile.active ? "activo" : "inactivo"}.</p>
         </ConfirmDialog>
       )}
       {temp && <TemporaryPasswordDialog name={temp.name} login={temp.login} password={temp.password} onClose={() => setTemp(null)} />}
