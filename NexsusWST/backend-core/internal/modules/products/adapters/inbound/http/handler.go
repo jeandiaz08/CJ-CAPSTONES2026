@@ -21,11 +21,10 @@ func NewHandler(svc *application.Service) *Handler { return &Handler{svc: svc} }
 // Register monta las rutas del módulo. "auth" verifica el JWT.
 func (h *Handler) Register(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	// Tarea 09: GET /v1/products, GET /v1/products/{id} y POST /v1/products los atiende CatalogHandler
-	// (catalog.go). Escrituras solo del Administrador (matriz v1.2).
-	write := tenant.RequireRole(tenant.RoleAdmin)
-	mux.Handle("PATCH /v1/products/{id}/wave", auth(write(http.HandlerFunc(h.setWave))))
+	// (catalog.go). PATCH …/wave y PUT …/components se quitaron (nada los usaba): la ola y la
+	// composición se editan con PATCH /v1/products/{id}, que deja la acción en el registro.
+	// TODO(limpieza): list, get, create, setWave y setComponents quedan sin uso en este archivo.
 	mux.Handle("GET /v1/products/{id}/components", auth(http.HandlerFunc(h.components)))
-	mux.Handle("PUT /v1/products/{id}/components", auth(write(http.HandlerFunc(h.setComponents))))
 }
 
 type productDTO struct {

@@ -155,6 +155,11 @@ func waveText(w *string) string {
 
 // Create da de alta un producto o un kit (con su composición) en una transacción.
 func (c *Catalog) Create(ctx context.Context, actorID int64, companyIDs []int64, d domain.ProductDraft, in []domain.ComponentInput) (ProductView, error) {
+	return c.create(ctx, actorID, companyIDs, d, in, nil)
+}
+
+// create: extra se suma al detalle de la acción (por ejemplo, el origen «Carga masiva»).
+func (c *Catalog) create(ctx context.Context, actorID int64, companyIDs []int64, d domain.ProductDraft, in []domain.ComponentInput, extra map[string]any) (ProductView, error) {
 	errs := d.Normalize(true)
 	w, werrs := waveErrors(d.WaveCode)
 	errs = append(errs, werrs...)
@@ -186,6 +191,9 @@ func (c *Catalog) Create(ctx context.Context, actorID int64, companyIDs []int64,
 	detail := map[string]any{"sku": p.SKU, "description": p.Description, "productType": string(p.Type), "waveCode": waveText(w)}
 	if len(comps) > 0 {
 		detail["components"] = compositionText(comps)
+	}
+	for k, v := range extra {
+		detail[k] = v
 	}
 	created, err := c.repo.CreateProduct(ctx, p, comps, ports.Audit{ActorID: actorID, Action: "product_created", Detail: detail})
 	if errors.Is(err, domain.ErrDuplicateSKU) {

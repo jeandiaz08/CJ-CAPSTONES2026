@@ -49,4 +49,8 @@ type CatalogRepository interface {
 	ActiveKitsUsing(ctx context.Context, componentID int64) ([]string, error)
 	// Company: nombre y si está activa (para validar el cliente del formulario).
 	Company(ctx context.Context, id int64) (name string, active bool, err error)
+	// CompanyByTaxID busca el cliente por RUT (con o sin puntos y guion), para la importación.
+	CompanyByTaxID(ctx context.Context, taxID string) (id int64, name string, active bool, err error)
+	// ActiveCompanies: nombre y RUT de los clientes activos (hoja «Instrucciones» de la plantilla).
+	ActiveCompanies(ctx context.Context) ([][2]string, error)
 }

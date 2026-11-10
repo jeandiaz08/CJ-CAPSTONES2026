@@ -2,7 +2,8 @@
 // Usa el seed: Empresa Demo Uno (11.111.111-1, SKU-001…) del de desarrollo y Andes Outdoor
 // (SEED-76.100.001-1, AO-1001…) del de demostración. Lo que crean estas pruebas usa SKU «E2E-…».
 import { expect, test, type Page } from "@playwright/test";
-import { coreApi, login, ordersApi } from "./helpers";
+import { readFileSync } from "node:fs";
+import { BASE, coreApi, login, ordersApi, password } from "./helpers";
 
 type Product = { id: number; companyId: number; sku: string; type: string; active: boolean; waveCode: string | null; updatedBy: string;
   components?: { sku: string; quantity: number }[] };
@@ -24,7 +25,9 @@ test.describe("Productos · Fase 1: API", () => {
     const body = { companyId: 1, sku: `E2E-X-${Date.now()}`, description: "No debe crearse", type: "simple", waveCode: null };
     expect((await jefe("POST", "/v1/products", body)).status).toBe(403);
     expect((await cliente("POST", "/v1/products", body)).status).toBe(403);
-    expect((await jefe("PATCH", "/v1/products/1/wave", { waveCode: "AM" })).status).toBe(403); // ruta antigua: solo Administrador
+    // Rutas antiguas quitadas: la ola y la composición se editan con PATCH /v1/products/{id}.
+    expect([404, 405]).toContain((await admin("PATCH", "/v1/products/1/wave", { waveCode: "AM" })).status);
+    expect([404, 405]).toContain((await admin("PUT", "/v1/products/1/components", { components: [] })).status);
     expect((await empaque("GET", "/v1/products")).status).toBe(403);
     const mine = await cliente<{ data: Product[]; total: number }>("GET", "/v1/products?limit=200");
     expect(mine.status).toBe(200);
@@ -124,5 +127,61 @@ test.describe("Productos · Fase 1: pantalla", () => {
     await form.getByLabel("SKU").first().fill("SKU-00");
     await expect(form.locator("datalist option[value='SKU-001']")).toHaveCount(1);
     await cliente.close();
+  });
+});
+
+test.describe("Productos · Fase 2: Excel y seed", () => {
+  test("API: importa artículos válidos e informa las filas inválidas con fila y motivo", async () => {
+    const admin = await coreApi("admin@nexus.local");
+    const res = await fetch(`${BASE}/auth/realms/nexuswst/protocol/openid-connect/token`, {
+      method: "POST",
+      body: new URLSearchParams({ grant_type: "password", client_id: "nexus-web", username: "admin@nexus.local", password: password("admin@nexus.local") }),
+    });
+    const { access_token: token } = await res.json();
+    const form = new FormData();
+    form.append("file", new Blob([readFileSync("e2e/fixtures/productos-import.xlsx")]), "productos-import.xlsx");
+    const imp = await fetch(`${BASE}/api/core/v1/products/import`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+    expect(imp.status).toBe(200);
+    const body = (await imp.json()) as { rows: number; created: { row: number }[]; errors: { row: number; field: string }[] };
+    expect(body.rows).toBe(9);
+    expect(body.created.map((c) => c.row)).toEqual([3, 4]);
+    expect(body.errors.map((e) => `${e.row}:${e.field}`)).toEqual(["5:companyId", "6:companyId", "7:companyId", "8:sku", "9:sku", "10:sku", "11:waveCode"]);
+    const list = await admin<{ data: Product[] }>("GET", "/v1/products?q=E2E-IMP-00");
+    expect(list.body.data.map((p) => [p.sku, p.type, p.waveCode]).sort()).toEqual([["E2E-IMP-001", "simple", null], ["E2E-IMP-002", "simple", "PM"]]);
+    // El Jefe y el Cliente no importan ni descargan la plantilla.
+    expect((await (await coreApi("jefe@nexus.local"))("GET", "/v1/products/template")).status).toBe(403);
+  });
+
+  test("seed: kits como composición, el inactivo y el Cliente exporta solo su empresa", async ({ page }) => {
+    const admin = await coreApi("admin@nexus.local");
+    const kits = await admin<{ data: Product[] }>("GET", "/v1/products?type=kit&q=KIT-01");
+    expect(kits.body.data.map((p) => p.sku).sort()).toEqual(["AO-KIT-01", "CB-KIT-01"]);
+    const kit = await admin<Product>("GET", `/v1/products/${kits.body.data.find((p) => p.sku === "AO-KIT-01")!.id}`);
+    expect(kit.body.components!.map((c) => c.sku)).toEqual(["AO-1001", "AO-1002"]);
+    expect((await admin<{ data: Product[] }>("GET", "/v1/products?q=AO-1006&status=inactive")).body.data).toHaveLength(1);
+
+    await login(page, "cliente1@nexus.local");
+    await page.goto("/productos");
+    await page.getByRole("button", { name: /Excel acciones/ }).click();
+    await expect(page.getByRole("menuitem", { name: "Importar productos" })).toHaveCount(0);
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: "Exportar (filtros actuales)" }).click()]);
+    expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
+  });
+
+  test("UI: el Administrador importa desde el menú Excel y ve el resultado", async ({ page }) => {
+    await login(page, "admin@nexus.local");
+    await page.goto("/productos");
+    await page.getByRole("button", { name: /Excel acciones/ }).click();
+    const [template] = await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: "Descargar plantilla" }).click()]);
+    expect(template.suggestedFilename()).toBe("plantilla-productos.xlsx");
+    await page.getByRole("button", { name: /Excel acciones/ }).click();
+    await page.getByRole("menuitem", { name: "Importar productos" }).click();
+    const modal = page.locator(".form-modal");
+    await modal.locator("input[type=file]").setInputFiles("e2e/fixtures/productos-import.xlsx");
+    await modal.getByRole("button", { name: "Importar" }).click();
+    // Orden independiente de la prueba de API: las filas inválidas del archivo siempre se informan.
+    await expect(page.locator(".form-modal").getByText("Resultado de la importación")).toBeVisible();
+    await expect(page.locator(".form-modal").getByText("No hay un cliente con el RUT 99.999.999-9.")).toBeVisible();
+    await expect(page.locator(".form-modal").getByText("El cliente con RUT SEED-76.100.004-4 está desactivado.")).toBeVisible();
   });
 });

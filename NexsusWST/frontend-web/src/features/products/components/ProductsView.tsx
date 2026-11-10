@@ -2,8 +2,9 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CirclePlus, Filter, FilterX } from "lucide-react";
+import { CirclePlus, Download, FileDown, FileSpreadsheet, Filter, FilterX, Upload } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DropdownMenu } from "@/components/DropdownMenu";
 import { FiltersModal } from "@/components/FiltersModal";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
@@ -12,7 +13,11 @@ import { showToast } from "@/components/Toast";
 import { useDebounce } from "@/hooks/useDebounce";
 import { listCompanies } from "@/services/core";
 import { listWaves } from "@/services/orders";
-import { disableProduct, enableProduct, getCatalogProduct, listCatalog, type CatalogProduct, type ProductFilters, type ProductType } from "@/services/products";
+import {
+  disableProduct, downloadProductsTemplate, enableProduct, exportProducts, getCatalogProduct, importProducts, listCatalog,
+  type CatalogProduct, type ProductFilters, type ProductType,
+} from "@/services/products";
+import { ImportDialog } from "@/features/clients";
 import { useAuth } from "@/state/auth";
 import { dateLabel } from "@/features/orders/components/OrderDetail";
 import { useOrderResource } from "@/features/orders/hooks/useOrderResources";
@@ -46,6 +51,7 @@ export function ProductsView() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [editing, setEditing] = useState<CatalogProduct | "new" | null>(null);
   const [toggling, setToggling] = useState<CatalogProduct | null>(null);
+  const [importing, setImporting] = useState(false);
   const [mobile, setMobile] = useState(false);
   const [revision, setRevision] = useState(0);
   const role = session?.user.role;
@@ -124,6 +130,23 @@ export function ProductsView() {
   };
 
   const activeFilters = [filters.companyId, filters.type, filters.status, filters.wave].filter(Boolean).length;
+  const run = async (task: () => Promise<void>, ok: string) => {
+    try {
+      await task();
+      showToast(ok);
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    }
+  };
+  // Excel (Fase 2): plantilla e importación solo para quien escribe; exportar, para todos.
+  const excelItems = [
+    ...(canWrite ? [
+      { label: "Descargar plantilla", icon: <FileDown size={18} aria-hidden="true" />, onSelect: () => run(downloadProductsTemplate, "Plantilla descargada.") },
+      { label: "Importar productos", icon: <Upload size={18} aria-hidden="true" />, onSelect: () => setImporting(true) },
+    ] : []),
+    { label: `Exportar seleccionados${checks.size ? ` (${checks.size})` : ""}`, icon: <Download size={18} aria-hidden="true" />, disabled: checks.size === 0, onSelect: () => run(() => exportProducts({ ids: [...checks] }), "Exportación descargada.") },
+    { label: "Exportar (filtros actuales)", icon: <Download size={18} aria-hidden="true" />, disabled: total === 0, onSelect: () => run(() => exportProducts(apiFilters), "Exportación descargada.") },
+  ];
   const formWaves = (current?: string | null): WaveOption[] => waveOptions(waveList, current);
   const detail = product
     ? <ProductDetail product={product} canWrite={canWrite} inModal={mobile} onEdit={() => setEditing(product)} onToggle={() => setToggling(product)} />
@@ -141,7 +164,8 @@ export function ProductsView() {
         </label>
         <button className="btn ghost" onClick={() => setFiltersOpen(true)}><Filter size={18} />Filtros{activeFilters ? ` (${activeFilters})` : ""}</button>
         <button className="btn ghost" onClick={clearAll}><FilterX size={18} />Limpiar filtros</button>
-        {canWrite && <button className="btn order-primary" onClick={() => setEditing("new")}><CirclePlus size={18} />Nuevo producto</button>}
+        <DropdownMenu className="excel-actions" triggerClassName="btn excel" trigger={<><FileSpreadsheet size={18} aria-hidden="true" />Excel acciones</>} items={excelItems} />
+        {canWrite &&<button className="btn order-primary" onClick={() => setEditing("new")}><CirclePlus size={18} />Nuevo producto</button>}
       </div>
       <div className="orders-workspace">
         <section className="orders-list clients-list" aria-label="Productos">
@@ -200,6 +224,12 @@ export function ProductsView() {
             if (editing === "new") select(saved.id);
             refresh();
           }} />
+      )}
+      {importing && (
+        <ImportDialog title="Importar productos" fileLabel="Archivo de productos (.xlsx)" missingFile="Elige el archivo .xlsx con los productos."
+          hint="Usa la plantilla de productos (RUT cliente, SKU y descripción obligatorios). Solo artículos: los kits se crean con «Nuevo producto». Las filas válidas se crean y las inválidas se informan con su fila y motivo."
+          created={(n) => (n === 1 ? "producto creado" : "productos creados")}
+          onImport={importProducts} onClose={() => setImporting(false)} onImported={refresh} />
       )}
       {toggling && (
         <ConfirmDialog

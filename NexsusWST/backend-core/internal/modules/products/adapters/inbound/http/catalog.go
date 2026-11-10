@@ -1,11 +1,14 @@
 package http
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nexuswst/backend-core/internal/modules/products/application"
 	"github.com/nexuswst/backend-core/internal/modules/products/domain"
@@ -31,6 +34,9 @@ func (h *CatalogHandler) Register(mux *http.ServeMux, auth func(http.Handler) ht
 	}
 	write := func(f http.HandlerFunc) http.Handler { return auth(tenant.RequireRole(tenant.RoleAdmin)(f)) }
 	mux.Handle("GET /v1/products", view(h.list))
+	mux.Handle("GET /v1/products/export", view(h.export)) // Fase 2: exportar lo autorizado
+	mux.Handle("GET /v1/products/template", write(h.template))
+	mux.Handle("POST /v1/products/import", write(h.importFile))
 	mux.Handle("GET /v1/products/{id}", view(h.get))
 	mux.Handle("POST /v1/products", write(h.create))
 	mux.Handle("PATCH /v1/products/{id}", write(h.update))
@@ -235,8 +241,71 @@ func (h *CatalogHandler) setActive(w http.ResponseWriter, r *http.Request, activ
 	httpx.JSON(w, http.StatusOK, v)
 }
 
+const maxImportBytes = 5 << 20
+
+func sendXLSX(w http.ResponseWriter, name string, data []byte) {
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
+	_, _ = w.Write(data)
+}
+
+// export: mismos filtros de la tabla (o ?ids= los seleccionados).
+func (h *CatalogHandler) export(w http.ResponseWriter, r *http.Request) {
+	ids, ok := scope(w, r)
+	if !ok {
+		return
+	}
+	f, err := catalogFilter(r, ids)
+	if err != nil {
+		httpx.Error(w, http.StatusUnprocessableEntity, "validation_error", err.Error())
+		return
+	}
+	var buf bytes.Buffer
+	if err := h.svc.Export(r.Context(), f, &buf); err != nil {
+		writeCatalogErr(w, err)
+		return
+	}
+	sendXLSX(w, fmt.Sprintf("productos-%s.xlsx", time.Now().Format("20060102-1504")), buf.Bytes())
+}
+
+func (h *CatalogHandler) template(w http.ResponseWriter, r *http.Request) {
+	var buf bytes.Buffer
+	if err := h.svc.Template(r.Context(), &buf); err != nil {
+		writeCatalogErr(w, err)
+		return
+	}
+	sendXLSX(w, "plantilla-productos.xlsx", buf.Bytes())
+}
+
+func (h *CatalogHandler) importFile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "Adjunta el archivo .xlsx en el campo «file» (máximo 5 MB).")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "No se pudo leer el archivo.")
+		return
+	}
+	actor, _ := tenant.From(r.Context())
+	res, err := h.svc.Import(r.Context(), actor.UserID, data)
+	if err != nil {
+		writeCatalogErr(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
 func writeCatalogErr(w http.ResponseWriter, err error) {
 	var fields domain.ValidationErrors
+	var importErr application.ImportError
+	if errors.As(err, &importErr) || errors.Is(err, application.ErrExportTooBig) {
+		httpx.Error(w, http.StatusUnprocessableEntity, "validation_error", err.Error())
+		return
+	}
 	var inUse domain.InUseError
 	var inactive domain.InactiveComponentsError
 	switch {

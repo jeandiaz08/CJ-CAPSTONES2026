@@ -5,3 +5,4 @@ export { IntegrationsSoon } from "./components/IntegrationsSoon";
 export { ProfilesTab } from "./components/ProfilesTab";
 export { ProfileFormModal } from "./components/ProfileFormModal";
 export { RequestsTab } from "./components/RequestsTab";
+export { ImportDialog, type ImportOutcome } from "./components/ProfileDialogs";

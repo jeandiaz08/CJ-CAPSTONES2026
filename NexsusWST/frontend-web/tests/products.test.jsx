@@ -3,14 +3,15 @@ import { createRoot } from 'react-dom/client';
 import { act } from 'react';
 
 // Tarea 09 · Fase 1: página Productos (patrón de Clientes › Todos los perfiles).
-const h = vi.hoisted(() => ({ session: null, calls: [], products: [], detail: {}, created: null }));
+const h = vi.hoisted(() => ({ session: null, calls: [], products: [], detail: {}, created: null, downloads: [], importResult: null }));
 vi.mock('@/state/auth', () => ({ ROLE_LABELS: {}, useAuth: () => ({ session: h.session, companyId: null, logout: () => {} }) }));
 vi.mock('@/services/api', () => {
   class ApiError extends Error { constructor(m, status, code, fields = []) { super(m); this.status = status; this.code = code; this.fields = fields; } }
   return {
-    ApiError, apiErrorMessage: (e) => e.message, withCompany: (p) => p, downloadFile: async () => {},
+    ApiError, apiErrorMessage: (e) => e.message, withCompany: (p) => p, downloadFile: async (path, name, service) => { h.downloads.push([path, name, service]); },
     api: async (service, path, init) => {
-      const body = init?.body ? JSON.parse(init.body) : undefined;
+      const body = init?.body instanceof FormData ? 'form' : init?.body ? JSON.parse(init.body) : undefined;
+      if (path === '/v1/products/import') return h.importResult;
       h.calls.push([init?.method ?? 'GET', path, body]);
       if (path === '/v1/clients') return { data: [{ id: 1, name: 'Andes', active: true }, { id: 2, name: 'Montaña Sur', active: false }] };
       if (path === '/v1/waves') return { data: [{ id: 'w1', code: 'AM', name: 'Mañana', type: '' }] };
@@ -126,5 +127,37 @@ describe('Productos', () => {
     const modal = document.querySelector('.form-modal');
     for (const l of ['Cliente *', 'SKU *', 'Tipo *']) expect(field(modal, l).disabled).toBe(true);
     expect(field(modal, 'Ola').value).toBe('AM');
+  });
+
+  it('menú Excel: plantilla e importación solo para el Administrador; exportar seleccionados o con filtros', async () => {
+    h.downloads.length = 0;
+    await mount('tipo=kit');
+    await click(button(host, 'Excel acciones'));
+    expect([...document.querySelectorAll('[role=menuitem]')].map((b) => b.textContent)).toEqual(['Descargar plantilla', 'Importar productos', 'Exportar seleccionados', 'Exportar (filtros actuales)']);
+    await click(button(document.body, 'Exportar (filtros actuales)'));
+    expect(h.downloads.at(-1)).toEqual(['/v1/products/export?type=kit', 'productos.xlsx', 'core']);
+    await act(async () => root.unmount()); root = createRoot(host);
+    h.session = user('cliente', [1]);
+    await mount('');
+    await click(button(host, 'Excel acciones'));
+    expect([...document.querySelectorAll('[role=menuitem]')].map((b) => b.textContent)).toEqual(['Exportar seleccionados', 'Exportar (filtros actuales)']);
+  });
+
+  it('Importar productos: reutiliza el resultado de la carga masiva con fila y motivo', async () => {
+    h.importResult = { rows: 3, created: [{ row: 2, id: 60, name: 'AO-60 · Mochila' }], errors: [{ row: 3, field: 'sku', message: 'Ese SKU ya existe para el cliente.' }, { row: 4, field: 'companyId', message: 'No hay un cliente con el RUT 9.' }] };
+    await mount('');
+    await click(button(host, 'Excel acciones'));
+    await click(button(document.body, 'Importar productos'));
+    const modal = document.querySelector('.form-modal');
+    expect(modal.textContent).toContain('Solo artículos');
+    const input = modal.querySelector('input[type=file]');
+    await act(async () => {
+      Object.defineProperty(input, 'files', { value: [new File(['x'], 'productos.xlsx')], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await click(button(modal, 'Importar'));
+    const result = document.querySelector('.form-modal');
+    expect(result.textContent).toContain('1 producto creado');
+    expect([...result.querySelectorAll('tbody tr')].map((r) => r.textContent)).toEqual(['3Ese SKU ya existe para el cliente.', '4No hay un cliente con el RUT 9.']);
   });
 });

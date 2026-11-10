@@ -1,6 +1,6 @@
 // Productos (Core, Tarea 09, H-04). Contrato en docs/API.md, «Productos».
 // listProducts de services/core.ts (formulario de órdenes) usa la misma ruta GET /v1/products.
-import { api } from "./api";
+import { api, downloadFile } from "./api";
 
 export type ProductType = "simple" | "kit";
 
@@ -56,3 +56,17 @@ export const disableProduct = (id: number, reason: string) =>
   api<CatalogProduct>("core", `/v1/products/${id}/disable`, { method: "POST", body: JSON.stringify({ reason }) });
 export const enableProduct = (id: number, reason: string) =>
   api<CatalogProduct>("core", `/v1/products/${id}/enable`, { method: "POST", body: JSON.stringify({ reason }) });
+
+// Excel (Fase 2): exportar lo autorizado (filtros o seleccionados), plantilla e importación de artículos.
+export type ProductImportResult = {
+  rows: number;
+  created: { row: number; id: number; name: string }[];
+  errors: { row: number; field?: string; message: string }[];
+};
+export const exportProducts = (f: Omit<ProductFilters, "limit" | "offset">) => downloadFile(`/v1/products/export${query(f)}`, "productos.xlsx", "core");
+export const downloadProductsTemplate = () => downloadFile("/v1/products/template", "plantilla-productos.xlsx", "core");
+export const importProducts = (file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  return api<ProductImportResult>("core", "/v1/products/import", { method: "POST", body: form });
+};

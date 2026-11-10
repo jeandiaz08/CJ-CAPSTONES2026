@@ -26,6 +26,7 @@
 3. Tu rama `cristopher_dev`, en 7803d1f, se integró en `jean_dev` con el merge **6473d39**, sin conflictos. Desde entonces `cristopher_dev` no tiene commits nuevos, así que `git log jean_dev..origin/cristopher_dev` sale vacío.
 4. `jean_dev` va 17 commits (sin contar merges) por delante de `cristopher_dev`: de bf5d74e (Retiro, Fase 1) a este documento. `test` = `jean_dev` (último merge cfd6016 más el de este documento). `main` no se tocó.
 5. **Numeración de migraciones (actualizada el 10-11-2026):** Jean toma **Core 000011** y **Órdenes 000010** (Clientes, Tarea 07), **Core 000012** (solicitudes internas de Usuarios WeStorage, Tarea 08) y **Core 000013** y **Órdenes 000011** (Productos, Tarea 09: auditoría de productos y apartado «Productos» del registro). Tú sigues desde **Core 000014** y **Órdenes 000012**.
+6. **Productos (Tarea 09, 10-11-2026):** en `products/adapters/inbound/http/handler.go` se quitaron las rutas `PATCH /v1/products/{id}/wave` y `PUT /v1/products/{id}/components` (nada las usaba: front, e2e, scripts ni seed). La ola y la composición se editan con `PATCH /v1/products/{id}` (`catalog.go`), que deja la acción en el Registro › Productos. `GET /v1/products`, `/{id}` y `POST /v1/products` los atiende ahora `CatalogHandler`. **Limpieza pendiente (tuya):** en `handler.go` quedan sin uso `list`, `get`, `create`, `setWave` y `setComponents`; no se borraron.
 
 ---
 

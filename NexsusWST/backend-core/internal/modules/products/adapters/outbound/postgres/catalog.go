@@ -200,3 +200,32 @@ func (r *Repository) Company(ctx context.Context, id int64) (string, bool, error
 	}
 	return name, active, err
 }
+
+func (r *Repository) CompanyByTaxID(ctx context.Context, taxID string) (int64, string, bool, error) {
+	var id int64
+	var name string
+	var active bool
+	err := r.db.QueryRow(ctx, `SELECT id, name, active FROM companies
+		WHERE upper(regexp_replace(tax_id, '[^0-9kK]', '', 'g')) = upper(regexp_replace($1, '[^0-9kK]', '', 'g'))`, taxID).Scan(&id, &name, &active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", false, domain.ErrNotFound
+	}
+	return id, name, active, err
+}
+
+func (r *Repository) ActiveCompanies(ctx context.Context) ([][2]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT name, COALESCE(tax_id, '') FROM companies WHERE active ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := [][2]string{}
+	for rows.Next() {
+		var c [2]string
+		if err := rows.Scan(&c[0], &c[1]); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
