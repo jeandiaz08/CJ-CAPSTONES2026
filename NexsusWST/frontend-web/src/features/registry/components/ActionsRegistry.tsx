@@ -107,7 +107,7 @@ export function ActionsRegistry({ onLive }: { onLive: (live: boolean) => void })
       <div className="orders-toolbar">
         <label className="orders-search">
           <span className="sr-only">Buscar</span>
-          <input placeholder={section === "users" ? "Buscar usuario" : section === "dispatch" ? "Buscar n° de orden o #manifiesto" : "Buscar n° de orden"} value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input placeholder={section === "users" ? "Buscar usuario" : section === "products" ? "Buscar SKU" : section === "dispatch" ? "Buscar n° de orden o #manifiesto" : "Buscar n° de orden"} value={query} onChange={(e) => setQuery(e.target.value)} />
         </label>
         <button className="btn ghost" onClick={() => setFiltersOpen(true)}><Filter size={18} />Filtros{activeFilters ? ` (${activeFilters})` : ""}</button>
         <button className="btn ghost" onClick={clearAll}><FilterX size={18} />Limpiar filtros</button>

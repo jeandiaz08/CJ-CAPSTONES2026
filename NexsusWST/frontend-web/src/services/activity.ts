@@ -2,7 +2,7 @@ import { api, downloadFile } from "./api";
 import type { RegistryActor } from "./registry";
 
 // Registro de acciones (Tarea 06, RF-28): GET /v1/activity. Solo Administrador y Jefe de Operaciones.
-export type ActivitySection = "orders" | "packing" | "dispatch" | "users";
+export type ActivitySection = "orders" | "packing" | "dispatch" | "users" | "products";
 
 export type ActivityItem = {
   id: string;

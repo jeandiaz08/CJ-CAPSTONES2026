@@ -42,6 +42,10 @@ var activityActions = map[string]string{
 	// solicitudes de perfiles (Tarea 07)
 	"request_created": "Solicitud de perfil creada", "request_approved": "Solicitud de perfil aprobada",
 	"request_rejected": "Solicitud de perfil rechazada",
+	// productos y kits (Tarea 09)
+	"product_created": "Producto creado", "product_updated": "Producto editado",
+	"product_enabled": "Producto activado", "product_disabled": "Producto desactivado",
+	"products_imported": "Carga masiva de productos",
 }
 
 func actionLabel(a string) string {
@@ -121,6 +125,14 @@ func detailLines(module string, d map[string]any) []string {
 		"taxId": "RUT", "email": "Correo", "phone": "Teléfono", "waveCode": "Ola", "wmsCode": "Código Invas",
 		"active": "Estado", "jobTitle": "Cargo", "companyName": "Empresa", "created": "Perfiles creados", "rows": "Filas leídas", "failed": "Filas con error",
 		"requestKind": "Tipo de solicitud", "edited": "Editada al aceptar",
+	}
+	if module == "products" {
+		// El SKU y el tipo ya tienen su columna; la empresa también.
+		for k, v := range map[string]string{"description": "Descripción", "components": "Composición", "waveCode": "Ola"} {
+			labels[k] = v
+		}
+		delete(labels, "companyName")
+		delete(labels, "reason") // tiene su columna
 	}
 	if module == "dispatch" {
 		for k, v := range map[string]string{"pickerName": "Quien retira", "pickerId": "RUT", "vehiclePlate": "Patente", "notes": "Notas"} {
@@ -214,10 +226,25 @@ var activityExport = map[string]struct {
 			return []any{at, it.Actor.Name, RoleLabels[it.Actor.Role], it.ActionLabel, manifest, it.CourierName, listText(it.Details["orders"]), listText(it.Details["packages"]),
 				listText(it.Details["pickerName"]), listText(it.Details["pickerId"]), listText(it.Details["vehiclePlate"]), it.TransportCompany, obs}
 		}},
+	"products": {"Productos", []string{"Fecha y hora", "Actor", "Perfil", "Acción", "SKU", "Tipo", "Cliente", "Motivo", "Detalle"},
+		func(it ActivityItem, at string) []any {
+			return []any{at, it.Actor.Name, RoleLabels[it.Actor.Role], it.ActionLabel, it.Entity.Label, productTypeText(it.Details["productType"]), it.CompanyName, it.Reason, strings.Join(it.DetailLines, " · ")}
+		}},
 	"users": {"Usuarios", []string{"Fecha y hora", "Actor", "Perfil", "Acción", "Usuario afectado", "Perfil afectado", "Detalle"},
 		func(it ActivityItem, at string) []any {
 			return []any{at, it.Actor.Name, RoleLabels[it.Actor.Role], it.ActionLabel, it.Entity.Label, roleText(it.Details["targetRole"]), strings.Join(it.DetailLines, " · ")}
 		}},
+}
+
+// productTypeText: «Kit» o «Artículo» (Tarea 09).
+func productTypeText(v any) string {
+	switch v {
+	case "kit":
+		return "Kit"
+	case "simple":
+		return "Artículo"
+	}
+	return ""
 }
 
 func kindText(k string) string {
@@ -231,7 +258,7 @@ func kindText(k string) string {
 func (a *Activity) Export(ctx context.Context, id tenant.Identity, f ports.ActivityFilter, w io.Writer) error {
 	spec, ok := activityExport[f.Module]
 	if !ok {
-		return fail(domain.ErrInvalid, "Elige el apartado que quieres exportar: orders, packing, dispatch o users.")
+		return fail(domain.ErrInvalid, "Elige el apartado que quieres exportar: orders, packing, dispatch, users o products.")
 	}
 	f.Limit, f.Offset = MaxExportRows, 0
 	items, total, err := a.list(ctx, id, f)

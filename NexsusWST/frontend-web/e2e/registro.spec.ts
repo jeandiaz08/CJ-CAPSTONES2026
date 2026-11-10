@@ -164,7 +164,7 @@ test.describe.serial("Registro histórico", () => {
     await page.locator(".view-tabs a", { hasText: "Registro de acciones" }).click();
     await expect(page).toHaveURL(/tab=acciones/);
     const chips = page.locator(".activity-chips .packing-chip");
-    await expect(chips).toHaveText(["Órdenes", "Empaque", "Retiro y entrega", "Usuarios"], { timeout: 60_000 });
+    await expect(chips).toHaveText(["Órdenes", "Empaque", "Retiro y entrega", "Usuarios", "Productos"], { timeout: 60_000 });
     await expect(chips.first()).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(".activity-title")).toHaveText(/^Órdenes · \d+ acci(ón|ones)$/);
     await expect(page.locator(".activity-list thead th")).toHaveText(["Fecha y hora", "Actor", "Perfil", "Humano/Sistema", "Acción", "N° orden", "Cliente", "Estado anterior → nuevo", "Motivo u observación", "Detalle"]);

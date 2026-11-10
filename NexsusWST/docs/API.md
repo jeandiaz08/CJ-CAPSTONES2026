@@ -170,16 +170,25 @@ Solicitud (respuesta): además de lo de clientes, `scope` y, en `profile`, `user
 - **Campana (WebSocket de Órdenes, mismo canal de Redis por empresa):** al crearla, `{type:"notification", audience:"internal", notification:{id, kind:"profile_request", title, body, requestId, companyId, createdAt}}`; la interfaz la muestra solo a quien tiene «Gestionar perfiles». Al responderla, `audience:"client"`, `kind:"profile_request_reviewed"`, para el Cliente. Sin persistencia (como el resto de la campana).
 - **Correo (SMTP de la app, `SMTP_*` en `.env`; Mailpit en desarrollo):** al crearla, a los usuarios activos con «Gestionar perfiles» y correo; al responderla, al Cliente que la pidió. Texto simple en español con empresa, tipo, nombre del perfil, motivo (y motivo del rechazo) y un enlace a la pantalla (`APP_PUBLIC_URL`). No bloquea: si falla, la acción igual se guarda y el error queda en el log. Sin `SMTP_HOST`, no se envía.
 
-### Productos y kits (H-04, RF-06) — Administrador, Jefe de Operaciones y Cliente (su empresa)
+### Productos y kits (H-04, RF-06; página Productos, Tarea 09) — consulta: Administrador, Jefe de Operaciones, Analista y Cliente (su empresa) · cambios: Administrador
+
+El Cliente ve solo los productos de su empresa (lo fija el servidor); `company_id` de otra empresa responde 403. Empaque: 403. **TODO(matriz):** la escritura del Cliente está «Por validar» en la matriz v1.2; se confirma con Ismael.
 
 | Método | Ruta | Cuerpo / filtros | Descripción |
 | --- | --- | --- | --- |
-| GET | `/v1/products` | `?search=&limit=&offset=&company_id=` | Listado `{data}` acotado a las empresas autorizadas |
-| GET | `/v1/products/{id}` | | Detalle |
-| POST | `/v1/products` | `{companyId, sku, description, type: simple\|kit, waveCode?}` | Crea. 409 si el SKU ya existe en la empresa. `waveCode` solo lo envían Administrador o Jefe (403 para el cliente) |
-| PATCH | `/v1/products/{id}/wave` | `{waveCode: "AM" \| null}` | Ola propia del producto (PV-19). Solo Administrador y Jefe de Operaciones; `null` la quita |
+| GET | `/v1/products` | `?q=` (o `search=`) `&company_id=&type=simple\|kit&status=active\|inactive&wave=general\|<código>&ids=&limit=&offset=` | `{data, total, limit, offset}`. `q` busca por SKU o descripción. Cada producto: `{id, companyId, companyName, sku, description, type, active, waveCode, createdAt, updatedAt, updatedBy}`. `updatedBy` = quien hizo la última acción del registro. |
+| GET | `/v1/products/{id}` | | Detalle; si es kit, `components: [{productId, sku, description, quantity}]`. **Nunca stock.** |
+| POST | `/v1/products` | `{companyId, sku, description, type, waveCode, components?}` | Crea (201). SKU en mayúsculas, sin espacios, máx. 60, **único por empresa** (409 con `fields: [{field: "sku"}]`). Cliente activo. `waveCode` null = «General (según reglas)». Un kit exige `components` (al menos uno); un artículo no los admite. 422 con `fields` por campo. |
+| PATCH | `/v1/products/{id}` | `{description, waveCode, components?}` | Edita descripción, ola y, si es kit, la composición. Cliente, SKU y tipo **no se editan** (400). Una sola acción `product_updated` con el antes y el después. |
+| POST | `/v1/products/{id}/disable` | `{reason}` obligatorio (5 a 500) | **Sin borrado físico.** 409 `in_use` si es componente de kits activos (los nombra); 409 `same_state` si ya estaba inactivo. |
+| POST | `/v1/products/{id}/enable` | `{reason}` opcional | 409 `inactive_components` si es un kit con componentes inactivos. |
+| GET | `/v1/products/export` | mismos filtros (o `ids`) | Excel «Productos» (máx. 10.000): SKU, Descripción, Tipo, Cliente, Ola, Estado, Composición (kits), Fecha de creación, Fecha de actualización, Modificado por. Consulta: quien puede ver (el Cliente, su empresa). |
+| GET | `/v1/products/template` | | Solo Administrador. Plantilla: hoja «Productos» (RUT cliente, SKU, Descripción, Ola; la fila `EJEMPLO…` no se importa) y hoja «Instrucciones» con los clientes activos. |
+| POST | `/v1/products/import` | multipart `file` (.xlsx, máx. 5 MB, 500 filas) | Solo Administrador. **Solo artículos** (los kits se crean a mano). `{rows, created:[{row, id, name}], errors:[{row, field, message}]}`: crea las filas válidas e informa las inválidas (sin RUT, cliente inexistente o desactivado, sin SKU, SKU repetido en el archivo o ya existente en el cliente, sin descripción, ola inválida). Cada producto creado queda en el registro con origen «Carga masiva». |
 | GET | `/v1/products/{id}/components` | | Composición del kit: `{kit, components: [{productId, sku, description, quantity}]}` |
-| PUT | `/v1/products/{id}/components` | `{components: [{sku, quantity}]}` | **Reemplaza** la composición completa (transacción). Responde igual que el GET |
+
+- **Rutas quitadas (Tarea 09):** `PATCH /v1/products/{id}/wave` y `PUT /v1/products/{id}/components`; la ola y la composición se editan con `PATCH /v1/products/{id}`.
+- **Registro (Core 000013):** `product_created`, `product_updated`, `product_disabled` y `product_enabled` quedan en `user_audit` con `target_product_id`, en la misma transacción que el cambio. Salen en Registro de acciones › **Productos** (`GET /api/orders/v1/activity?module=products`, Órdenes 000011): SKU, tipo, cliente, motivo y detalle (descripción, ola, composición).
 
 Reglas de la composición (SCRUM-100): solo para productos `kit` (409 `not_kit` si es simple); de 1 a 50 componentes; cada componente debe existir en la **misma empresa**, estar activo y ser `simple` (no se permiten kits dentro de kits); cantidad > 0 y sin SKU repetidos. Si algo no se cumple responde 422 `invalid_component` con el SKU y el motivo, y no se guarda nada. Un kit de otra empresa responde 404.
 

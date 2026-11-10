@@ -28,7 +28,7 @@ describe('Registro de acciones',()=>{
 
   it('Órdenes por defecto: chips, título con total, últimos 7 días y columnas del apartado',async()=>{
     nav('tab=acciones');await mount();
-    expect([...host.querySelectorAll('.activity-chips button')].map(b=>[b.textContent,b.getAttribute('aria-pressed')])).toEqual([['Órdenes','true'],['Empaque','false'],['Retiro y entrega','false'],['Usuarios','false']]);
+    expect([...host.querySelectorAll('.activity-chips button')].map(b=>[b.textContent,b.getAttribute('aria-pressed')])).toEqual([['Órdenes','true'],['Empaque','false'],['Retiro y entrega','false'],['Usuarios','false'],['Productos','false']]);
     expect(host.querySelector('.activity-title').textContent).toBe('Órdenes · 2 acciones');
     const call=new URLSearchParams(h.calls.find(c=>c.startsWith('/v1/activity?')).split('?')[1]);
     expect(call.get('module')).toBe('orders');expect(call.get('from')).toMatch(/^\d{4}-\d{2}-\d{2}$/);

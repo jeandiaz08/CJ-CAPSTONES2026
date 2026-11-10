@@ -18,7 +18,7 @@ import (
 const ActivityRetention = 365 * 24 * time.Hour
 
 var (
-	ActivityModules = []string{"orders", "packing", "dispatch", "users"}
+	ActivityModules = []string{"orders", "packing", "dispatch", "users", "products"}
 	activityKinds   = []string{"human", "system"}
 )
 
@@ -39,6 +39,8 @@ var activityFields = map[string]bool{
 	"jobTitle": true, "companyName": true, "requestId": true, "requestKind": true,
 	"created": true, "rows": true, "failed": true, // carga masiva de perfiles
 	"edited": true, // solicitud aceptada con datos editados
+	// productos y kits (Tarea 09, Core 000013)
+	"sku": true, "description": true, "productType": true, "components": true,
 }
 
 // Dentro de un campo permitido, un cambio viene como {from, to} (por ejemplo, el perfil).
@@ -115,7 +117,7 @@ func (a *Activity) list(ctx context.Context, id tenant.Identity, f ports.Activit
 		return nil, 0, fail(domain.ErrForbidden, "El registro de acciones es solo para Administrador y Jefe de Operaciones.")
 	}
 	if f.Module != "" && !slices.Contains(ActivityModules, f.Module) {
-		return nil, 0, fail(domain.ErrInvalid, "Apartado desconocido: usa orders, packing, dispatch o users.")
+		return nil, 0, fail(domain.ErrInvalid, "Apartado desconocido: usa orders, packing, dispatch, users o products.")
 	}
 	if f.Kind != "" && !slices.Contains(activityKinds, f.Kind) {
 		return nil, 0, fail(domain.ErrInvalid, "Tipo de actor desconocido: usa human o system.")

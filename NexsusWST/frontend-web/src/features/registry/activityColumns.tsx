@@ -13,6 +13,7 @@ export const SECTIONS: { value: ActivitySection; label: string }[] = [
   { value: "packing", label: "Empaque" },
   { value: "dispatch", label: "Retiro y entrega" },
   { value: "users", label: "Usuarios" },
+  { value: "products", label: "Productos" }, // Tarea 09
 ];
 
 const value = (v: unknown) => (v === undefined || v === null || v === "" ? "—" : Array.isArray(v) ? v.join(", ") : String(v));
@@ -52,6 +53,12 @@ export const COLUMNS: Record<ActivitySection, ActivityColumn[]> = {
     { label: "Patente", width: 110, text: (it) => value(it.details.vehiclePlate) },
     { label: "Empresa del transporte", width: 190, text: (it) => value(it.transportCompany) },
     { label: "Observación", width: 260, text: (it) => value(it.observation || it.reason) }],
+  // Productos (Tarea 09): el SKU abre el producto en la página Productos.
+  products: [when, actor, profile, action,
+    { label: "SKU", width: 150, text: (it) => it.entity.label,
+      cell: (it) => <Link className="activity-link" href={`/productos?producto=${it.entity.id}`} onClick={(e) => e.stopPropagation()}>{it.entity.label}</Link> },
+    { label: "Tipo", width: 100, text: (it) => (it.details.productType === "kit" ? "Kit" : it.details.productType === "simple" ? "Artículo" : "—") },
+    client, { label: "Motivo", width: 220, text: (it) => value(it.reason) }, { ...detail, width: 340 }],
   users: [when, actor, profile, action,
     { label: "Usuario afectado", width: 190, text: (it) => it.entity.label },
     { label: "Perfil afectado", width: 170, text: (it) => roleLabel(it.details.targetRole as string | undefined) }, { ...detail, width: 340 }],
