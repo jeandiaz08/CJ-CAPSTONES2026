@@ -576,7 +576,7 @@ body{line-height:1.5}h1,h2,h3{line-height:1.2}h1{font-size:28px}button,input,sel
 .status-cell{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 
 /* Integraciones (Tarea 10) */
-.integration-cards{list-style:none;padding:0;margin:0 0 8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.integration-cards{list-style:none;padding:0;margin:0 0 8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(345px,100%),345px));gap:20px;align-items:start}
 .integration-card{background:var(--card);border-radius:12px;padding:20px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px;min-width:0}
 .integration-card>header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px}
 .integration-card h3{font-size:16px;font-weight:600;line-height:1.2;margin:4px 0 0}.integration-card p{margin:0;font-size:14px;line-height:1.5;color:var(--muted);flex:1}
