@@ -59,7 +59,7 @@ export const MENU: MenuEntry[] = [
       { name: "Administración clientes", href: "/clientes/administracion", access: CLIENT_ADMIN, orPermission: PERM_MANAGE_PROFILES },
     ],
   },
-  // Página de relleno («Próximamente») y destino de «Ver integraciones» de una empresa.
+  // Tarea 10: solo Administrador (RF-05). También es el destino de «Ver integraciones» de una empresa.
   { name: "Integraciones", href: "/integraciones", icon: LinkIcon, access: { admin: "yes" } },
   { name: "Ayuda", icon: CircleHelp, access: { admin: "soon", jefe_operaciones: "soon", cliente: "soon" } },
   // Tarea 08: Usuarios WeStorage solo para el Administrador (en lectura sin «Gestionar perfiles»).
