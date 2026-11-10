@@ -13,7 +13,7 @@ import (
 	"github.com/nexuswst/backend-core/internal/modules/auth_roles/ports"
 )
 
-// Profiles - perfiles de Clientes › Administración clientes (Tarea 07). Lee users con su teléfono,
+// Profiles - perfiles de Clientes › Administración clientes (Tarea 07) y de Usuarios WeStorage (Tarea 08). Lee users con su teléfono,
 // cargo y empresa; las altas y cambios de identidad siguen en Repository y Keycloak.
 type Profiles struct{ db *pgxpool.Pool }
 
@@ -49,7 +49,8 @@ func (r *Profiles) ListProfiles(ctx context.Context, f ports.ProfileFilter) ([]p
 	case domain.ProfileScopeClient:
 		where = append(where, "u.role = 'cliente'")
 	case domain.ProfileScopeInternal:
-		where = append(where, "u.role <> 'cliente'")
+		// Analista, KAM y SAC son perfiles futuros (regla 11): no se listan en Usuarios WeStorage.
+		add("u.role = ANY($%d)", domain.ProfileRoles)
 	default:
 		return nil, 0, fmt.Errorf("alcance de perfiles desconocido: %q", f.Scope)
 	}
@@ -136,6 +137,14 @@ func (r *Profiles) AuditCompany(ctx context.Context, actorID, companyID int64, a
 	_, err := r.db.Exec(ctx, `INSERT INTO user_audit (actor_user_id, target_company_id, action, detail) VALUES ($1, $2, $3, $4)`,
 		actorID, companyID, action, detail)
 	return err
+}
+
+// CountManagers cuenta los Administradores activos con «Gestionar perfiles», sin contar a exceptID.
+func (r *Profiles) CountManagers(ctx context.Context, exceptID int64) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx, `SELECT count(*) FROM users
+		WHERE role = 'admin' AND active AND 'gestionar_perfiles' = ANY(permissions) AND id <> $1`, exceptID).Scan(&n)
+	return n, err
 }
 
 func (r *Profiles) ActiveCompanies(ctx context.Context) ([][2]string, error) {

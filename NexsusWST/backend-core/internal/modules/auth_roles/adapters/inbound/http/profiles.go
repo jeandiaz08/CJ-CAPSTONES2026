@@ -17,11 +17,11 @@ import (
 	"github.com/nexuswst/backend-core/internal/shared/tenant"
 )
 
-// ProfileHandler - Clientes › Administración clientes › Perfiles (Tarea 07). Consultan el
-// Administrador y quien gestione perfiles, y el Cliente solo los de su empresa (Perfiles empresa,
-// Fase 5: el servidor fija la empresa); crear, editar, activar, desactivar, restablecer la
-// contraseña e importar exige «Gestionar perfiles» (403 sin él). ?scope=client (por defecto); los
-// perfiles de WeStorage (scope=internal) llegan con Configuración › Usuarios WeStorage.
+// ProfileHandler - perfiles. ?scope=client (por defecto): Clientes › Administración clientes
+// (Tarea 07); consultan el Administrador y quien gestione perfiles, y el Cliente solo los de su
+// empresa (Perfiles empresa: el servidor fija la empresa). ?scope=internal: Configuración › Usuarios
+// WeStorage (Tarea 08); consulta solo el Administrador. Crear, editar, activar, desactivar,
+// restablecer la contraseña e importar exige «Gestionar perfiles» (403 sin él).
 type ProfileHandler struct{ svc *application.Profiles }
 
 func NewProfileHandler(svc *application.Profiles) *ProfileHandler { return &ProfileHandler{svc: svc} }
@@ -32,16 +32,33 @@ func (h *ProfileHandler) Register(mux *http.ServeMux, auth func(http.Handler) ht
 	view := func(f http.HandlerFunc) http.Handler {
 		return auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id, _ := tenant.From(r.Context())
-			if !id.CanViewClientAdmin() && !id.HasRole(tenant.RoleCliente) {
+			if scopeOf(r) == domain.ProfileScopeInternal {
+				if !id.HasRole(tenant.RoleAdmin) {
+					httpx.Error(w, http.StatusForbidden, "forbidden", "Usuarios WeStorage es solo para el Administrador.")
+					return
+				}
+			} else if !id.CanViewClientAdmin() && !id.HasRole(tenant.RoleCliente) {
 				httpx.Error(w, http.StatusForbidden, "forbidden", "Administración clientes es solo para el Administrador o quien tenga el permiso Gestionar perfiles.")
 				return
 			}
 			f(w, r)
 		}))
 	}
-	// TODO(futuro): con KAM y SAC, el alcance del permiso saldrá de ?scope (client | internal).
+	// Perfiles de WeStorage: el permiso debe cubrir todo (ProfileScopeAll) y ser Administrador.
+	// TODO(futuro): KAM y SAC tendrán un permiso que cubra solo ProfileScopeClient.
 	manage := func(f http.HandlerFunc) http.Handler {
-		return auth(tenant.RequireManageProfiles(tenant.ProfileScopeClient)(f))
+		client, internal := tenant.RequireManageProfiles(tenant.ProfileScopeClient)(f), tenant.RequireManageProfiles(tenant.ProfileScopeAll)(f)
+		return auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if scopeOf(r) != domain.ProfileScopeInternal {
+				client.ServeHTTP(w, r)
+				return
+			}
+			if id, _ := tenant.From(r.Context()); !id.HasRole(tenant.RoleAdmin) {
+				httpx.Error(w, http.StatusForbidden, "forbidden", tenant.ErrNoManageProfiles)
+				return
+			}
+			internal.ServeHTTP(w, r)
+		}))
 	}
 	mux.Handle("GET /v1/profiles", view(h.list))
 	mux.Handle("GET /v1/profiles/export", view(h.export))
@@ -157,7 +174,7 @@ func (h *ProfileHandler) export(w http.ResponseWriter, r *http.Request) {
 
 func (h *ProfileHandler) template(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
-	if err := h.svc.Template(r.Context(), &buf); err != nil {
+	if err := h.svc.Template(r.Context(), scopeOf(r), &buf); err != nil {
 		writeProfileErr(w, err)
 		return
 	}
@@ -209,22 +226,40 @@ func (h *ProfileHandler) get(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, v)
 }
 
+// profileBody: username, role y permissions solo en el alcance interno (en clientes, 400).
 type profileBody struct {
-	Name      string `json:"name"`
-	CompanyID int64  `json:"companyId"`
-	Email     string `json:"email"`
-	Phone     string `json:"phone"`
-	JobTitle  string `json:"jobTitle"`
+	Name        string   `json:"name"`
+	CompanyID   int64    `json:"companyId"`
+	Email       string   `json:"email"`
+	Username    string   `json:"username"`
+	Phone       string   `json:"phone"`
+	JobTitle    string   `json:"jobTitle"`
+	Role        string   `json:"role"`
+	Permissions []string `json:"permissions"`
 }
 
 func (b profileBody) draft() domain.ProfileDraft {
-	return domain.ProfileDraft{Name: b.Name, CompanyID: b.CompanyID, Email: b.Email, Phone: b.Phone, JobTitle: b.JobTitle}
+	return domain.ProfileDraft{Name: b.Name, CompanyID: b.CompanyID, Email: b.Email, Username: b.Username, Phone: b.Phone,
+		JobTitle: b.JobTitle, Role: b.Role, Permissions: b.Permissions}
+}
+
+// decodeProfile lee el cuerpo y rechaza los campos internos en el alcance de clientes.
+func decodeProfile(w http.ResponseWriter, r *http.Request, msg string) (profileBody, bool) {
+	var b profileBody
+	err := httpx.Decode(r, &b)
+	if err == nil && scopeOf(r) != domain.ProfileScopeInternal && (b.Username != "" || b.Role != "" || b.Permissions != nil) {
+		err = errors.New("campos internos en un perfil Cliente")
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", msg)
+		return b, false
+	}
+	return b, true
 }
 
 func (h *ProfileHandler) create(w http.ResponseWriter, r *http.Request) {
-	var b profileBody
-	if err := httpx.Decode(r, &b); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido")
+	b, ok := decodeProfile(w, r, "JSON inválido")
+	if !ok {
 		return
 	}
 	actor, _ := tenant.From(r.Context())
@@ -241,18 +276,16 @@ func (h *ProfileHandler) update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var b struct {
-		Name      string `json:"name"`
-		CompanyID int64  `json:"companyId"`
-		Phone     string `json:"phone"`
-		JobTitle  string `json:"jobTitle"`
+	b, ok := decodeProfile(w, r, "JSON inválido (el correo y el usuario no se editan)")
+	if !ok {
+		return
 	}
-	if err := httpx.Decode(r, &b); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido (el correo no se edita)")
+	if b.Email != "" || b.Username != "" {
+		httpx.Error(w, http.StatusBadRequest, "bad_request", "JSON inválido (el correo y el usuario no se editan)")
 		return
 	}
 	actor, _ := tenant.From(r.Context())
-	v, err := h.svc.Update(r.Context(), actor, scopeOf(r), id, domain.ProfileDraft{Name: b.Name, CompanyID: b.CompanyID, Phone: b.Phone, JobTitle: b.JobTitle})
+	v, err := h.svc.Update(r.Context(), actor, scopeOf(r), id, b.draft())
 	if err != nil {
 		writeProfileErr(w, err)
 		return
@@ -290,11 +323,17 @@ func (h *ProfileHandler) password(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, _ := tenant.From(r.Context())
-	if err := h.svc.ResetPassword(r.Context(), actor, scopeOf(r), id); err != nil {
+	temp, err := h.svc.ResetPassword(r.Context(), actor, scopeOf(r), id)
+	if err != nil {
 		writeProfileErr(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]bool{"emailSent": true})
+	if temp != "" { // perfil interno sin correo: la contraseña temporal se muestra una sola vez
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.JSON(w, http.StatusOK, map[string]any{"emailSent": false, "temporaryPassword": temp})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"emailSent": true})
 }
 
 func writeProfileErr(w http.ResponseWriter, err error) {
@@ -310,6 +349,8 @@ func writeProfileErr(w http.ResponseWriter, err error) {
 			"fields": domain.ValidationErrors{{Field: "reason", Message: "Indica el motivo (entre 5 y 500 caracteres)."}}})
 	case errors.Is(err, application.ErrScopeUnavailable), errors.Is(err, application.ErrExportTooBig):
 		httpx.Error(w, http.StatusUnprocessableEntity, "validation_error", err.Error())
+	case errors.Is(err, application.ErrLastManager):
+		httpx.Error(w, http.StatusConflict, "last_manager", "Debe quedar al menos un Administrador activo con «Gestionar perfiles». Asígnale el permiso a otro Administrador antes de este cambio.")
 	case errors.Is(err, application.ErrSameState):
 		httpx.Error(w, http.StatusConflict, "same_state", "El perfil ya está en ese estado; recarga la página.")
 	case errors.As(err, &ve):

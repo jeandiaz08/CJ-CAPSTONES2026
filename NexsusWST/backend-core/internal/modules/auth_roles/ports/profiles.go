@@ -7,7 +7,7 @@ import (
 	"github.com/nexuswst/backend-core/internal/modules/auth_roles/domain"
 )
 
-// ProfileFilter - Clientes › Administración clientes › Perfiles (Tarea 07).
+// ProfileFilter - perfiles de Clientes (Tarea 07) y de Usuarios WeStorage (Tarea 08).
 type ProfileFilter struct {
 	Scope     domain.ProfileScope
 	Query     string // nombre, correo, usuario o empresa
@@ -19,7 +19,8 @@ type ProfileFilter struct {
 	Offset    int
 }
 
-// Profile es el usuario más sus datos de contacto y su empresa (los perfiles Cliente tienen una).
+// Profile es el usuario más sus datos de contacto y su empresa (los perfiles Cliente tienen una;
+// los internos, ninguna).
 type Profile struct {
 	domain.User
 	Phone       string
@@ -41,4 +42,6 @@ type ProfileRepository interface {
 	ActiveCompanies(ctx context.Context) ([][2]string, error)
 	// AuditCompany deja una acción sobre una empresa en user_audit (resumen de la importación).
 	AuditCompany(ctx context.Context, actorID, companyID int64, action string, detail map[string]any) error
+	// CountManagers: Administradores activos con «Gestionar perfiles», sin contar a exceptID (Tarea 08).
+	CountManagers(ctx context.Context, exceptID int64) (int, error)
 }

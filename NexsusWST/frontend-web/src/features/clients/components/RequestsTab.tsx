@@ -190,7 +190,7 @@ export function RequestsTab({ mode, tab = "solicitudes", refreshKey = 0 }: { mod
         <ProfileFormModal scope="client" title="Editar y aceptar solicitud" submitLabel="Aceptar solicitud" lockCompany
           initial={{ name: editing.profile.name, email: editing.profile.email, phone: editing.profile.phone, jobTitle: editing.profile.jobTitle, companyId: editing.companyId }}
           companies={[{ id: editing.companyId, name: editing.companyName, active: true }]}
-          submitData={async (body) => done(await approveRequest(editing.id, { name: body.name, email: body.email, phone: body.phone, jobTitle: body.jobTitle }))}
+          submitData={async (body) => done(await approveRequest(editing.id, { name: body.name, email: body.email ?? "", phone: body.phone, jobTitle: body.jobTitle }))}
           onClose={() => setEditing(null)} />
       )}
       {rejecting && (

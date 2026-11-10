@@ -17,17 +17,18 @@ import { listCompanies } from "@/services/core";
 import { useAuth } from "@/state/auth";
 import { dateLabel } from "@/features/orders/components/OrderDetail";
 import { useOrderResource } from "@/features/orders/hooks/useOrderResources";
-import { canManageProfiles } from "../access";
+import { PERMISSION_LABELS, PROFILE_ROLE_LABELS, canManageProfiles } from "../access";
 import { usePagedList } from "../hooks/usePagedList";
-import { ImportProfilesDialog, ProfileFiltersModal, countProfileFilters, type ProfileFilterValues } from "./ProfileDialogs";
+import { ImportProfilesDialog, ProfileFiltersModal, TemporaryPasswordDialog, countProfileFilters, type ProfileFilterValues } from "./ProfileDialogs";
 import { ProfileDetail } from "./ProfileDetail";
 import { ProfileFormModal } from "./ProfileFormModal";
 
 const PAGE_SIZES = [20, 50, 100];
 
-// Administración clientes › Perfiles («Todos los perfiles», Tarea 07, Fase 3). Recibe el alcance
-// (client | internal) para reutilizarse en Configuración › Usuarios WeStorage. Búsqueda, filtros,
-// página y perfil abierto (?perfil=) viven en la URL. Sin «Gestionar perfiles» queda en lectura.
+// Tabla de perfiles con su panel de detalle. Alcance «client»: Administración clientes › Perfiles
+// («Todos los perfiles», Tarea 07). Alcance «internal»: Configuración › Usuarios WeStorage («Perfiles
+// WeStorage», Tarea 08: correo o usuario, rol y permisos; sin empresa). Búsqueda, filtros, página y
+// perfil abierto (?perfil=) viven en la URL. Sin «Gestionar perfiles» queda en lectura.
 export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; tab?: string }) {
   const { session } = useAuth();
   const params = useSearchParams(), router = useRouter(), pathname = usePathname();
@@ -45,9 +46,11 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
   const [toggling, setToggling] = useState<Profile | null>(null);
   const [resetting, setResetting] = useState<Profile | null>(null);
   const [importing, setImporting] = useState(false);
+  const [temp, setTemp] = useState<{ name: string; login: string; password: string } | null>(null);
   const [mobile, setMobile] = useState(false);
   const [revision, setRevision] = useState(0);
   const canManage = canManageProfiles(session?.user, scope);
+  const internal = scope === "internal";
 
   const filters = useMemo<ProfileFilterValues>(() => {
     const p = new URLSearchParams(paramsKey);
@@ -64,7 +67,8 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
   const filtersKey = JSON.stringify(apiFilters);
   const listKey = JSON.stringify({ scope, ...apiFilters, limit, offset: page * limit });
   const { rows, total, loading, error, reload } = usePagedList(() => listProfiles(scope, JSON.parse(listKey)), listKey);
-  const companiesRes = useOrderResource(listCompanies, "clients-companies");
+  // Los perfiles de WeStorage no tienen empresa: no se pide la lista.
+  const companiesRes = useOrderResource(() => (internal ? Promise.resolve({ data: [] }) : listCompanies()), `clients-companies:${scope}`);
   const companies = (companiesRes.data?.data ?? []).map((c) => ({ id: c.id, name: c.name, active: c.active }));
 
   const inPage = rows.find((r) => r.id === selected);
@@ -120,12 +124,18 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
   };
   const confirmReset = async () => {
     if (!resetting) return;
-    await resetProfilePassword(scope, resetting.id);
+    const res = await resetProfilePassword(scope, resetting.id);
     setResetting(null);
-    showToast(`Enviamos a ${resetting.email} el enlace para definir una contraseña nueva.`);
+    if (res.temporaryPassword) setTemp({ name: resetting.name, login: resetting.username ?? "", password: res.temporaryPassword });
+    else showToast(`Enviamos a ${resetting.email} el enlace para definir una contraseña nueva.`);
   };
 
   const activeFilters = countProfileFilters(filters);
+  const searchLabel = internal ? "Buscar nombre o usuario" : "Buscar nombre del perfil o empresa";
+  // TODO(PV-21): columna «Bodegas» en Usuarios WeStorage cuando exista la tabla de bodegas del usuario.
+  const headers = internal
+    ? ["Nombre completo", "Correo o usuario", "Rol", "Permisos", "Estado", "Fecha de creación"]
+    : ["Nombre perfil", "Nombre empresa", "Correo", "Teléfono", "Estado", "Fecha de creación"];
   const excelItems = [
     ...(canManage ? [
       { label: "Descargar plantilla", icon: <FileDown size={18} aria-hidden="true" />, onSelect: () => run(() => downloadProfilesTemplate(scope), "Plantilla descargada.") },
@@ -135,18 +145,18 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
     { label: "Exportar (filtros actuales)", icon: <Download size={18} aria-hidden="true" />, disabled: total === 0, onSelect: () => run(() => exportProfiles(scope, apiFilters), "Exportación descargada.") },
   ];
   const detail = profile
-    ? <ProfileDetail profile={profile} canManage={canManage} inModal={mobile} onEdit={() => setEditing(profile)} onToggle={() => setToggling(profile)} onPassword={() => setResetting(profile)} />
+    ? <ProfileDetail profile={profile} scope={scope} canManage={canManage} inModal={mobile} onEdit={() => setEditing(profile)} onToggle={() => setToggling(profile)} onPassword={() => setResetting(profile)} />
     : selected && outside.loading ? <div className="detail-skeleton" aria-label="Cargando perfil" />
     : selected ? <p className="detail-empty">Este perfil no existe.</p>
     : <p className="detail-empty">Selecciona un perfil para ver su detalle</p>;
 
   return (
     <>
-      <h2 className="section-title">Todos los perfiles</h2>
+      <h2 className="section-title">{internal ? "Perfiles WeStorage" : "Todos los perfiles"}</h2>
       <div className="orders-toolbar clients-toolbar">
         <label className="orders-search">
-          <span className="sr-only">Buscar nombre del perfil o empresa</span>
-          <input placeholder="Buscar nombre del perfil o empresa" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <span className="sr-only">{searchLabel}</span>
+          <input placeholder={searchLabel} value={query} onChange={(e) => setQuery(e.target.value)} />
         </label>
         <button className="btn ghost" onClick={() => setFiltersOpen(true)}><Filter size={18} />Filtros{activeFilters ? ` (${activeFilters})` : ""}</button>
         <button className="btn ghost" onClick={clearAll}><FilterX size={18} />Limpiar filtros</button>
@@ -165,7 +175,7 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
                   <thead>
                     <tr>
                       <th><input aria-label="Seleccionar todos los perfiles de la página" type="checkbox" checked={rows.every((r) => checks.has(r.id))} onChange={(e) => setChecks(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} /></th>
-                      {["Nombre perfil", "Nombre empresa", "Correo", "Teléfono", "Estado", "Fecha de creación"].map((h) => <th key={h}>{h}</th>)}
+                      {headers.map((h) => <th key={h}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -173,9 +183,19 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
                       <tr key={p.id} onClick={() => select(p.id)} className={selected === p.id ? "order-selected" : ""}>
                         <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Seleccionar perfil ${p.name}`} checked={checks.has(p.id)} onChange={() => toggle(p.id)} /></td>
                         <td><button className="order-number" aria-label={`Ver detalle del perfil ${p.name}`} onClick={() => select(p.id)}>{p.name}</button></td>
-                        <td>{p.companyName || "—"}</td>
-                        <td title={p.email}>{p.email || "—"}</td>
-                        <td>{p.phone || "—"}</td>
+                        {internal ? (
+                          <>
+                            <td title={p.email || p.username}>{p.email || (p.username ? `Usuario: ${p.username}` : "—")}</td>
+                            <td>{PROFILE_ROLE_LABELS[p.role] ?? p.role}</td>
+                            <td><span className="perm-chips">{p.permissions.length ? p.permissions.map((perm) => <Badge key={perm} tone="info" label={PERMISSION_LABELS[perm] ?? perm} />) : "—"}</span></td>
+                          </>
+                        ) : (
+                          <>
+                            <td>{p.companyName || "—"}</td>
+                            <td title={p.email}>{p.email || "—"}</td>
+                            <td>{p.phone || "—"}</td>
+                          </>
+                        )}
                         <td><Badge tone={p.active ? "ok" : "neutral"} label={p.active ? "Activo" : "Inactivo"} /></td>
                         <td>{dateLabel(p.createdAt)}</td>
                       </tr>
@@ -196,13 +216,17 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
       {mobile && selected !== null && (
         <Modal title={`Detalle de perfil ${profile?.name ?? ""}`} onClose={() => select(null)} panelClassName="registry-modal">{detail}</Modal>
       )}
-      {filtersOpen && <ProfileFiltersModal values={filters} companies={companies} onApply={applyFilters} onClose={() => setFiltersOpen(false)} />}
+      {filtersOpen && <ProfileFiltersModal values={filters} companies={internal ? undefined : companies} onApply={applyFilters} onClose={() => setFiltersOpen(false)} />}
       {editing && (
         <ProfileFormModal scope={scope} profile={editing === "new" ? undefined : editing} companies={companies} onClose={() => setEditing(null)}
+          self={editing !== "new" && editing.id === session?.user.id}
           onSaved={(saved) => {
             setEditing(null);
             if (editing === "new") {
-              showToast(`Perfil ${saved.name} creado. Le enviamos el enlace para definir su contraseña.`);
+              if (saved.temporaryPassword) {
+                setTemp({ name: saved.name, login: saved.username ?? "", password: saved.temporaryPassword });
+                showToast(`Perfil ${saved.name} creado.`);
+              } else showToast(`Perfil ${saved.name} creado. Le enviamos el enlace para definir su contraseña.`);
               select(saved.id);
             } else showToast(`Perfil ${saved.name} actualizado.`);
             refresh();
@@ -219,9 +243,12 @@ export function ProfilesTab({ scope, tab = "perfiles" }: { scope: ProfileScope; 
       )}
       {resetting && (
         <ConfirmDialog title={`Restablecer contraseña de ${resetting.name}`} confirmLabel="Restablecer" onConfirm={confirmReset} onClose={() => setResetting(null)}>
-          <p>Le enviaremos a {resetting.email} un enlace para definir una contraseña nueva.</p>
+          <p>{resetting.hasEmail
+            ? `Le enviaremos a ${resetting.email} un enlace para definir una contraseña nueva.`
+            : "Se generará una contraseña temporal que verás una sola vez; sus sesiones abiertas se cerrarán."}</p>
         </ConfirmDialog>
       )}
+      {temp && <TemporaryPasswordDialog name={temp.name} login={temp.login} password={temp.password} onClose={() => setTemp(null)} />}
       {importing && <ImportProfilesDialog scope={scope} onClose={() => setImporting(false)} onImported={refresh} />}
     </>
   );
