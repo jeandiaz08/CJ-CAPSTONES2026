@@ -1,6 +1,6 @@
 // Productos (Tarea 09, H-04). Fase 1: CRUD de productos y kits, permisos y registro.
 // Usa el seed: Empresa Demo Uno (11.111.111-1, SKU-001…) del de desarrollo y Andes Outdoor
-// (SEED-76.100.001-1, AO-1001…) del de demostración. Lo que crean estas pruebas usa SKU «E2E-…».
+// (Andes Outdoor SpA, AO-1001…) del de demostración. Lo que crean estas pruebas usa SKU «E2E-…».
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { BASE, coreApi, login, ordersApi, password } from "./helpers";
