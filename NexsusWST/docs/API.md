@@ -51,6 +51,20 @@ Toda ruta que trae datos acepta `?company_id=N` para acotar a una empresa (se co
 | GET | `/v1/auth/me` | todos | Perfil: `id, email, name, role, permissions, companies, allCompanies, modules[{module, actions}]`. **Crea el perfil en el primer ingreso** de un usuario creado en la consola de Keycloak. |
 | GET | `/v1/roles` | todos | Roles base y permisos (`despacho`, `gestionar_perfiles`) |
 
+### Recordatorios del Home (Tarea 11) — todos los perfiles, cada uno solo sus notas
+
+Notas personales (`user_notes`, Core 000006). El servidor filtra siempre por el usuario del token: la nota de otro usuario responde 404.
+
+| Método | Ruta | Cuerpo / respuesta |
+|---|---|---|
+| GET | `/v1/me/notes` | `{data: [nota]}`, primero las pendientes y por fecha. |
+| POST | `/v1/me/notes` | `{body, dueDate?}` → 201 con la nota. `body` de 1 a 140 caracteres (se recortan los espacios); `dueDate` `AAAA-MM-DD` o `null`. |
+| PATCH | `/v1/me/notes/{id}` | `{body?, dueDate?, done?}` (al menos uno) → la nota. `dueDate: null` quita la fecha. |
+| DELETE | `/v1/me/notes/{id}` | 204. |
+
+- **Nota:** `id, body, dueDate, done, doneAt, createdAt, updatedAt`.
+- **Home por perfil:** las tarjetas usan `GET /api/orders/v1/orders/summary`, `GET /api/orders/v1/integrations` (solo Administrador) y `counts.pending` de `GET /v1/profile-requests`. Sin endpoints nuevos.
+
 ### Usuarios (H-02, CU-10) — consulta: Administrador · cambios: permiso **Gestionar perfiles**
 
 Desde la Tarea 07 (Matriz de perfiles v1.2), los `GET` siguen abiertos al perfil Administrador (con o sin el permiso: «Lectura»), y **todas las escrituras** (`POST /v1/users`, `PATCH`, `disable`, `enable`, `password-email` y `password-reset`) exigen el **permiso `gestionar_perfiles`**, no el perfil. Sin él responden **403** `forbidden`: «Necesitas el permiso Gestionar perfiles para crear o modificar perfiles, empresas o solicitudes.». Se valida por permiso para que, a futuro, KAM y SAC reciban un permiso parecido limitado a perfiles con rol Cliente (`TODO(futuro)` en `tenant.CanManageProfiles`).
