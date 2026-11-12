@@ -199,7 +199,7 @@ test.describe.serial("Clientes · Fase 2: Empresas", () => {
 
 // ---------------------------------------------------------------------------------------------
 // Fase 3: Administración clientes › Perfiles. Los perfiles de prueba van en las empresas demo
-// («SEED-…»): el seed los borra al recargar. Sus cuentas de Keycloak quedan (solo desarrollo).
+// (Andes Outdoor, id fijo 900001, y las «SEED-…»): el seed los borra al recargar. Sus cuentas de Keycloak quedan (solo desarrollo).
 // ---------------------------------------------------------------------------------------------
 type Profile = { id: number; name: string; email: string; username?: string; role: string; permissions: string[]; companyName: string; active: boolean; temporaryPassword?: string };
 
@@ -222,7 +222,7 @@ test.describe.serial("Clientes · Fase 3: Perfiles", () => {
 
     const created = await admin<Profile>("POST", "/v1/profiles", { name: "E2E Perfil Correo", companyId: andes, email, phone: "+56 9 1234 5678", jobTitle: "Bodega" });
     expect(created.status).toBe(201);
-    expect(created.body).toMatchObject({ role: "cliente", permissions: [], companyName: "Andes Outdoor SpA (demo)", active: true });
+    expect(created.body).toMatchObject({ role: "cliente", permissions: [], companyName: "Andes Outdoor SpA", active: true });
     expect(created.body.temporaryPassword).toBeUndefined();
     // Keycloak envía el enlace para definir la contraseña.
     await expect.poll(() => mailSubjects(email), { timeout: 20_000 }).not.toHaveLength(0);
@@ -270,7 +270,7 @@ test.describe.serial("Clientes · Fase 3: Perfiles", () => {
     await page.getByRole("button", { name: "Ver detalle del perfil Esperanza Gómez", exact: true }).click();
     const panel = page.locator(".clients-panel");
     await expect(panel.getByRole("heading", { name: "Detalle de perfil Esperanza Gómez" })).toBeVisible();
-    for (const text of ["Recursos humanos", "Cliente", "Ninguno", "Andes Outdoor SpA (demo)"]) await expect(panel.getByText(text, { exact: true })).toBeVisible();
+    for (const text of ["Recursos humanos", "Cliente", "Ninguno", "Andes Outdoor SpA"]) await expect(panel.getByText(text, { exact: true })).toBeVisible();
     await expect(panel.getByRole("button", { name: "Desactivar" })).toBeVisible();
     await expect(panel.getByRole("button", { name: "Activar", exact: true })).toHaveCount(0);
     await page.close();
