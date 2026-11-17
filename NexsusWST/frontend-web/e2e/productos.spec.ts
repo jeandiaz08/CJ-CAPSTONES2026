@@ -28,7 +28,14 @@ test.describe("Productos · Fase 1: API", () => {
     // Rutas antiguas quitadas: la ola y la composición se editan con PATCH /v1/products/{id}.
     expect([404, 405]).toContain((await admin("PATCH", "/v1/products/1/wave", { waveCode: "AM" })).status);
     expect([404, 405]).toContain((await admin("PUT", "/v1/products/1/components", { components: [] })).status);
-    expect((await empaque("GET", "/v1/products")).status).toBe(403);
+    // Empaque solo lista (para ver la descripción de cada SKU al empacar); no escribe, no exporta
+    // ni ve el detalle.
+    expect((await empaque("GET", "/v1/products")).status).toBe(200);
+    expect((await empaque("POST", "/v1/products", body)).status).toBe(403);
+    expect((await empaque("PATCH", "/v1/products/1", { description: "No debe cambiar" })).status).toBe(403);
+    expect((await empaque("POST", "/v1/products/1/disable", { reason: "No debe desactivarse" })).status).toBe(403);
+    expect((await empaque("GET", "/v1/products/export")).status).toBe(403);
+    expect((await empaque("GET", "/v1/products/1")).status).toBe(403);
     const mine = await cliente<{ data: Product[]; total: number }>("GET", "/v1/products?limit=200");
     expect(mine.status).toBe(200);
     expect(mine.body.data.length).toBeGreaterThan(0);

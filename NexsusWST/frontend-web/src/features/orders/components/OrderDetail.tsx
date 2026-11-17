@@ -4,7 +4,7 @@ import { CompactTable } from "@/components/CompactTable";
 import { TrackingSection } from "./TrackingSection";
 import { EventTimeline } from "./EventTimeline";
 import { Modal } from "@/components/Modal";
-import {originLabel,channelLabel,dispatchLabel,warehouseLabel} from "../format";
+import {actorName,originLabel,channelLabel,dispatchLabel,warehouseLabel} from "../format";
 import {useState} from "react";
 import { getOrder,downloadOrderDocument,type Order } from "@/services/orders";
 import { productsForCompany } from "@/services/orderReference";
@@ -65,7 +65,7 @@ export function OrderDetail({ id, companyId, role, revision, labels, inModal = f
     <h3>Historial de estados</h3>
     <button onClick={()=>setHistory(true)} className="text-button" disabled={!events.length}>Ver todo</button>
     </header>{last ? <>
-        <div className="state-history"><div><strong>{labels[last.fromStatus]||"Creación"}</strong><small>{previous?.actor||"—"}</small><small>{previous?dateLabel(previous.occurredAt):"—"}</small></div><ArrowBigRight aria-label="Cambió a"/><div><strong>{labels[last.toStatus]||order.statusLabel}</strong><small>{last.actor}</small><small>{dateLabel(last.occurredAt)}</small></div></div>
+        <div className="state-history"><div><strong>{labels[last.fromStatus]||"Creación"}</strong><small>{previous?actorName(previous.actor):"—"}</small><small>{previous?dateLabel(previous.occurredAt):"—"}</small></div><ArrowBigRight aria-label="Cambió a"/><div><strong>{labels[last.toStatus]||order.statusLabel}</strong><small>{actorName(last.actor)}</small><small>{dateLabel(last.occurredAt)}</small></div></div>
         </> : <p>Sin cambios registrados</p>}</section>
     <section>
     <h3>Líneas de orden</h3>{products.error && <p role="status">No se pudieron cargar los nombres de productos.</p>}<div className="detail-scroll">
