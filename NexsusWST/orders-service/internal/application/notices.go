@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/nexuswst/orders-service/internal/domain"
 	"github.com/nexuswst/orders-service/internal/ports"
@@ -26,14 +27,14 @@ func (n *Notices) OnStatus(ctx context.Context, o domain.Order, reason string) {
 	if n == nil || n.repo == nil {
 		return
 	}
-	ref := fmt.Sprintf("#%d (%s)", o.ID, o.ExternalRef)
+	ref := orderRef(o)
 	switch o.Status {
 	case domain.StatusIncident:
 		label := domain.IncidentLabels[o.IncidentKind]
 		if label == "" {
 			label = "Incidencia"
 		}
-		n.add(ctx, o, "all", "incident", "Orden "+ref+" en Incidencia", fmt.Sprintf("%s. %s", label, reason), false)
+		n.add(ctx, o, "all", "incident", "Orden "+ref+" en Incidencia", incidentBody(label, reason), false)
 	case domain.StatusVoided:
 		n.add(ctx, o, "all", "voided", "Orden "+ref+" Anulada por falta de stock",
 			"La orden quedó Anulada porque el stock disponible no alcanza. "+reason+
@@ -43,9 +44,56 @@ func (n *Notices) OnStatus(ctx context.Context, o domain.Order, reason string) {
 	}
 }
 
+// orderRef: el número que ve la gente en la campana es el de la orden (#20006), no el id interno.
+func orderRef(o domain.Order) string {
+	if o.ExternalRef == "" {
+		return fmt.Sprintf("#%d", o.ID)
+	}
+	return "#" + o.ExternalRef
+}
+
+// incidentBody antepone el tipo de incidencia al motivo, salvo que el motivo ya lo traiga
+// (ReportIncident guarda «Otro: …»): así no queda «Otro. Otro: …».
+func incidentBody(label, reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return label + "."
+	}
+	if strings.HasPrefix(strings.ToLower(reason), strings.ToLower(label)) {
+		return reason
+	}
+	return label + ". " + reason
+}
+
+// OnLabel avisa al personal interno el resultado de una etiqueta que se pidió sola.
+func (n *Notices) OnLabel(ctx context.Context, o domain.Order, ready bool) {
+	if n == nil || n.repo == nil {
+		return
+	}
+	ref := orderRef(o)
+	if ready {
+		n.add(ctx, o, "internal", "label_ready", "Etiqueta lista: orden "+ref, "Ya se puede imprimir.", false)
+		return
+	}
+	n.add(ctx, o, "internal", "label_failed", "Sin etiqueta: orden "+ref,
+		fmt.Sprintf("%s no entregó la etiqueta. Reinténtala desde la orden.", o.Courier), false)
+}
+
+// OnIncompleteDispatch avisa al Jefe y al Admin (audiencia interna) que una
+// orden salió con bultos faltantes (H-13-T08).
+func (n *Notices) OnIncompleteDispatch(ctx context.Context, o domain.Order, d IncompleteDispatch, who string) {
+	if n == nil || n.repo == nil {
+		return
+	}
+	ref := orderRef(o)
+	n.add(ctx, o, "internal", "despacho_incompleto", "Despacho incompleto: orden "+ref,
+		fmt.Sprintf("Salió en el manifiesto #%d con %d de %d bulto(s). Faltan: %s. Autorizó %s. Motivo: %s",
+			d.ManifestID, len(d.ScannedPackages), d.PackagesTotal, strings.Join(d.MissingPackages, ", "), who, d.Reason), false)
+}
+
 func (n *Notices) add(ctx context.Context, o domain.Order, audience, kind, title, body string, email bool) {
 	oid := o.ID
-	saved, err := n.repo.Add(ctx, ports.Notification{CompanyID: o.CompanyID, Audience: audience, OrderID: &oid, Kind: kind, Title: title, Body: body})
+	saved, err := n.repo.Add(ctx, ports.Notification{CompanyID: o.CompanyID, Warehouse: o.Warehouse, Audience: audience, OrderID: &oid, Kind: kind, Title: title, Body: body})
 	if err != nil {
 		n.log.Warn("no se pudo guardar el aviso", "err", err, "order_id", o.ID)
 		return

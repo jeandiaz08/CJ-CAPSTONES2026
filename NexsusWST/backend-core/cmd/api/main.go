@@ -16,7 +16,9 @@ import (
 	"github.com/nexuswst/backend-core/internal/platform/cache"
 	"github.com/nexuswst/backend-core/internal/platform/config"
 	"github.com/nexuswst/backend-core/internal/platform/database"
+	"github.com/nexuswst/backend-core/internal/platform/events"
 	"github.com/nexuswst/backend-core/internal/platform/httpserver"
+	"github.com/nexuswst/backend-core/internal/platform/mailer"
 	"github.com/nexuswst/backend-core/internal/shared/httpx"
 	"github.com/nexuswst/backend-core/internal/shared/tenant"
 
@@ -114,8 +116,14 @@ func main() {
 	})
 
 	authhttp.NewHandler(authSvc).Register(mux, requireAuth)
+	// Clientes › Perfiles y Solicitudes (Tarea 07, Jean).
+	clientProfiles := authapp.NewProfiles(authSvc, authpg.NewProfiles(db))
+	authhttp.NewProfileHandler(clientProfiles).Register(mux, requireAuth)
+	authhttp.NewRequestHandler(authapp.NewRequests(clientProfiles, authpg.NewRequests(db), events.New(rdb, log), mailer.FromEnv(log), cfg.AppPublicURL, log)).Register(mux, requireAuth)
 	clientshttp.NewHandler(clientsSvc).Register(mux, requireAuth)
 	productshttp.NewHandler(productsSvc).Register(mux, requireAuth)
+	productsRepo := productspg.NewRepository(db)
+	productshttp.NewCatalogHandler(productsapp.NewCatalog(productsRepo, productsRepo)).Register(mux, requireAuth) // Tarea 09: página Productos
 	catalogshttp.NewHandler(catalogsSvc).Register(mux, requireAuth)
 	// TODO: inventory, reception, billing -> mismo patrón que products.
 

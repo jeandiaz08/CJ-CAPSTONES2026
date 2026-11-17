@@ -268,3 +268,44 @@ func (a *Admin) DeleteUser(ctx context.Context, id string) error {
 	}
 	return err
 }
+
+// CreateLocalUser da de alta un usuario sin correo (H-02-T09): ingresa con su
+// nombre de usuario y una contraseña temporal que Keycloak le pide cambiar.
+func (a *Admin) CreateLocalUser(ctx context.Context, username, name string) (string, error) {
+	first, last := splitName(name)
+	res, err := a.do(ctx, http.MethodPost, "/users", nil, map[string]any{
+		"username": username, "firstName": first, "lastName": last, "enabled": true,
+		"requiredActions": []string{"UPDATE_PASSWORD"},
+	}, nil)
+	if status(err) == http.StatusConflict {
+		return "", domain.ErrUsernameTaken
+	}
+	if err != nil {
+		return "", err
+	}
+	loc := res.Header.Get("Location")
+	if i := strings.LastIndex(loc, "/"); i >= 0 && i < len(loc)-1 {
+		return loc[i+1:], nil
+	}
+	var users []struct {
+		ID       string `json:"id"`
+		Username string `json:"username"`
+	}
+	if _, err := a.do(ctx, http.MethodGet, "/users", url.Values{"username": {username}, "exact": {"true"}}, nil, &users); err != nil {
+		return "", err
+	}
+	for _, u := range users {
+		if strings.EqualFold(u.Username, username) {
+			return u.ID, nil
+		}
+	}
+	return "", domain.ErrNotFound
+}
+
+// SetTemporaryPassword fija una contraseña que se debe cambiar en el siguiente
+// ingreso. La valida la política de contraseñas del realm.
+func (a *Admin) SetTemporaryPassword(ctx context.Context, id, password string) error {
+	_, err := a.do(ctx, http.MethodPut, "/users/"+url.PathEscape(id)+"/reset-password", nil,
+		map[string]any{"type": "password", "value": password, "temporary": true}, nil)
+	return err
+}

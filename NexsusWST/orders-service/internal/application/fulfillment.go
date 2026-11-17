@@ -63,7 +63,8 @@ func (s *Service) PackingQueue(ctx context.Context, id tenant.Identity, scope []
 	if !canPack(id) {
 		return nil, domain.ErrForbidden
 	}
-	return s.Fulfillment.PackingQueue(ctx, scope, id.UserID)
+	// Las órdenes de usuarios deshabilitados solo las ven quienes pueden soltarlas.
+	return s.Fulfillment.PackingQueue(ctx, scope, id.UserID, id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps))
 }
 
 // TakeForPacking - Empaque toma la orden (pasa a «En empaque»). Si dos
@@ -207,6 +208,9 @@ func (s *Service) ConfirmPacking(ctx context.Context, id tenant.Identity, scope 
 	if errors.Is(err, domain.ErrConflict) {
 		return PackResult{}, fail(domain.ErrConflict, "La orden ya fue confirmada por otra persona.")
 	}
+	if err == nil {
+		s.requestLabelAfterPacking(ctx, o, id.Actor())
+	}
 	return PackResult{Order: out, Discrepancies: []string{}}, err
 }
 
@@ -318,51 +322,6 @@ func (s *Service) OpenDocument(ctx context.Context, scope []int64, orderID, docI
 	return d, rc, err
 }
 
-// PrintLabel obtiene la etiqueta del courier, la guarda como documento y
-// registra la impresión en el historial (CU-04, RF-23).
-func (s *Service) PrintLabel(ctx context.Context, id tenant.Identity, scope []int64, orderID int64) (ports.Document, error) {
-	if !canPack(id) && !id.HasPermission(tenant.PermDespacho) {
-		return ports.Document{}, domain.ErrForbidden
-	}
-	o, err := s.Orders.Get(ctx, scope, orderID)
-	if err != nil {
-		return ports.Document{}, err
-	}
-	if o.Status != domain.StatusPacking && o.Status != domain.StatusReadyPickup {
-		return ports.Document{}, fail(domain.ErrInvalidTransition, "La etiqueta se imprime en empaque o con la orden Lista para retiro.")
-	}
-	pk, err := s.Fulfillment.Packages(ctx, o.ID)
-	if err != nil {
-		return ports.Document{}, err
-	}
-	if len(pk) == 0 {
-		return ports.Document{}, domain.ValidationErrors{{Field: "packages", Message: "Registra los bultos antes de imprimir la etiqueta"}}
-	}
-	pdf, tracking, err := s.Couriers.Label(ctx, o, pk)
-	if err != nil {
-		return ports.Document{}, fail(err, "El courier no entregó la etiqueta: %v", err)
-	}
-	if o.CourierCode == "" && tracking != "" {
-		after := o
-		after.CourierCode = tracking
-		if saved, err := s.Orders.SaveEdit(ctx, o, after, []string{"Código del courier: " + tracking}, id.Actor(), "", ports.TransitionOpts{}); err == nil {
-			o = saved
-		}
-	}
-	sum := sha256.Sum256(pdf)
-	key := fmt.Sprintf("%d/%d/%s.pdf", o.CompanyID, o.ID, NewID())
-	if _, err := s.Files.Put(ctx, key, bytes.NewReader(pdf)); err != nil {
-		return ports.Document{}, err
-	}
-	doc, err := s.Fulfillment.AddDocument(ctx, ports.Document{OrderID: o.ID, CompanyID: o.CompanyID, Kind: "etiqueta",
-		Filename: fmt.Sprintf("etiqueta-%s-%d.pdf", o.Courier, o.ID), ContentType: "application/pdf",
-		SizeBytes: int64(len(pdf)), SHA256: hex.EncodeToString(sum[:]), StorageKey: key, UploadedBy: id.Actor()})
-	if err == nil {
-		_ = s.Orders.AddEvent(ctx, o.ID, "print", "label", id.Actor(), fmt.Sprintf("Etiqueta %s impresa (%d bulto/s)", o.Courier, len(pk)))
-	}
-	return doc, err
-}
-
 // ---------------------------------------------------------------------------
 // Retiro y entrega al courier (CU-05): requiere el PERMISO Despacho
 // ---------------------------------------------------------------------------
@@ -424,7 +383,12 @@ func (s *Service) Manifest(ctx context.Context, id tenant.Identity, manifestID i
 	if !canDispatch(id) && !id.HasRole(tenant.RoleAdmin, tenant.RoleJefeOps) {
 		return ports.Manifest{}, domain.ErrForbidden
 	}
-	return s.Fulfillment.Manifest(ctx, manifestID)
+	m, err := s.Fulfillment.Manifest(ctx, manifestID)
+	if err != nil {
+		return m, err
+	}
+	s.summarize(ctx, &m)
+	return m, nil
 }
 
 func (s *Service) Manifests(ctx context.Context, id tenant.Identity, status string) ([]ports.Manifest, error) {
@@ -449,12 +413,15 @@ func (s *Service) ScanPackage(ctx context.Context, id tenant.Identity, manifestI
 type CloseResult struct {
 	Delivered []int64 `json:"delivered"`
 	Pending   []int64 `json:"pending"` // bultos incompletos: quedan para el siguiente retiro
+	// Incomplete: entregadas con bultos faltantes por «Despachar igual» (también están en Delivered).
+	Incomplete []int64 `json:"incomplete"`
 }
 
 // CloseManifest - el courier retira: se registran los datos de quien retira y
-// las órdenes completas pasan a «Entregada al courier». No se confirma una
-// orden con bultos faltantes (H-13 escenario 2).
-func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifestID int64, pickerName, pickerID, plate, notes string) (CloseResult, error) {
+// las órdenes completas pasan a «Entregada al courier». Una orden con bultos
+// faltantes queda para el siguiente retiro (H-13 escenario 2), salvo que venga
+// en anyway: «Despachar igual» autorizado por Jefe o Admin con motivo (H-13-T08).
+func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifestID int64, pickerName, pickerID, plate, notes string, anyway []DispatchAnyway) (CloseResult, error) {
 	if !canDispatch(id) {
 		return CloseResult{}, fail(domain.ErrForbidden, "Necesitas el permiso Despacho.")
 	}
@@ -469,7 +436,11 @@ func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifes
 	if m.Status != "open" {
 		return CloseResult{}, fail(domain.ErrConflict, "El manifiesto ya está cerrado.")
 	}
-	res := CloseResult{Delivered: []int64{}, Pending: []int64{}}
+	authorized, err := checkDispatchAnyway(id, m, anyway)
+	if err != nil {
+		return CloseResult{}, err
+	}
+	res := CloseResult{Delivered: []int64{}, Pending: []int64{}, Incomplete: []int64{}}
 	evidence := fmt.Sprintf("Manifiesto #%d · retira %s", m.ID, pickerName)
 	if pickerID != "" {
 		evidence += " (" + pickerID + ")"
@@ -488,6 +459,17 @@ func (s *Service) CloseManifest(ctx context.Context, id tenant.Identity, manifes
 		o, err := s.Orders.Get(ctx, nil, l.OrderID)
 		if err != nil {
 			return res, err
+		}
+		if reason, ok := authorized[l.OrderID]; ok && !complete && o.Status == domain.StatusReadyPickup {
+			if err := s.dispatchIncomplete(ctx, id, m, l, o, reason, evidence); err != nil {
+				_ = s.Fulfillment.SetLineStatus(ctx, m.ID, l.OrderID, "pending_packages", "")
+				res.Pending = append(res.Pending, l.OrderID)
+				continue
+			}
+			_ = s.Fulfillment.SetLineStatus(ctx, m.ID, l.OrderID, "delivered", "")
+			res.Delivered = append(res.Delivered, l.OrderID)
+			res.Incomplete = append(res.Incomplete, l.OrderID)
+			continue
 		}
 		if !complete || o.Status != domain.StatusReadyPickup {
 			_ = s.Fulfillment.SetLineStatus(ctx, m.ID, l.OrderID, "pending_packages", "")

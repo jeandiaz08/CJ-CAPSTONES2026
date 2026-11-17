@@ -114,12 +114,13 @@ func PackingDiscrepancies(expected, counted []Item) []string {
 
 // Package - bulto registrado en empaque (RF-22).
 type Package struct {
-	ID       int64    `json:"id"`
-	Code     string   `json:"code"`
-	WeightKg *float64 `json:"weightKg,omitempty"`
-	LengthCm *float64 `json:"lengthCm,omitempty"`
-	WidthCm  *float64 `json:"widthCm,omitempty"`
-	HeightCm *float64 `json:"heightCm,omitempty"`
+	ManifestID *int64   `json:"manifestId"`
+	ID         int64    `json:"id"`
+	Code       string   `json:"code"`
+	WeightKg   *float64 `json:"weightKg,omitempty"`
+	LengthCm   *float64 `json:"lengthCm,omitempty"`
+	WidthCm    *float64 `json:"widthCm,omitempty"`
+	HeightCm   *float64 `json:"heightCm,omitempty"`
 }
 
 // ValidatePackages exige al menos un bulto y medidas razonables.

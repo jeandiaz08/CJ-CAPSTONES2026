@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,8 @@ var ImportColumns = []string{"referencia", "courier", "tipo_despacho", "destinat
 const (
 	MaxImportBytes = 5 << 20
 	MaxImportRows  = 5000
+	// ExampleRefPrefix marca las filas de ejemplo de la plantilla: no se importan si el usuario las deja.
+	ExampleRefPrefix = "EJEMPLO-"
 )
 
 type ImportResult struct {
@@ -93,8 +96,11 @@ func (s *Service) ImportOrders(ctx context.Context, id tenant.Identity, companyI
 		if isBlank(r) {
 			continue
 		}
-		res.TotalRows++
 		ref := get(r, "referencia")
+		if strings.HasPrefix(strings.ToUpper(ref), ExampleRefPrefix) {
+			continue
+		}
+		res.TotalRows++
 		if ref == "" {
 			res.Errors = append(res.Errors, ports.RowError{Row: rowNum, Message: "falta la referencia"})
 			continue
@@ -120,6 +126,10 @@ func (s *Service) ImportOrders(ctx context.Context, id tenant.Identity, companyI
 			continue
 		}
 		g.draft.Items = append(g.draft.Items, domain.Item{SKU: sku, Quantity: qty})
+	}
+
+	if res.TotalRows == 0 {
+		return ImportResult{}, fail(domain.ErrInvalid, "El archivo no tiene filas de datos. Usa la plantilla y reemplaza los ejemplos.")
 	}
 
 	uid := id.UserID
@@ -219,11 +229,127 @@ func joinInts(v []int) string {
 	return strings.Join(s, ", ")
 }
 
-// ImportTemplate - plantilla descargable con un ejemplo.
-func ImportTemplate(w io.Writer) error {
-	return xlsx.Write(w, "Órdenes", ImportColumns, [][]any{
-		{"PED-1001", "chilexpress", "domicilio", "Ana Pérez", "+56 9 1234 5678", "ana@correo.cl", "Av. Irarrázaval 1234, depto 5", "Ñuñoa", "RM", "Entregar en conserjería", "SKU-001", 2},
-		{"PED-1001", "chilexpress", "domicilio", "Ana Pérez", "+56 9 1234 5678", "ana@correo.cl", "Av. Irarrázaval 1234, depto 5", "Ñuñoa", "RM", "", "SKU-002", 1},
+// Orden de ejemplo con dos productos: muestra que una orden ocupa varias filas con la misma referencia.
+func exampleRows(courier, commune, skuA, skuB string) [][]any {
+	base := []any{ExampleRefPrefix + "1001", courier, "domicilio", "Ana Pérez", "+56 9 1234 5678", "ana@correo.cl", "Av. Irarrázaval 1234, depto 5", commune, "", "Fila de ejemplo: no se importa"}
+	return [][]any{append(slices.Clone(base), skuA, 2), append(slices.Clone(base), skuB, 1)}
+}
+
+// ImportTemplateCSV - la misma plantilla en CSV, sin listas (el formato no las admite).
+func ImportTemplateCSV() string {
+	var b strings.Builder
+	b.WriteString("\xef\xbb\xbf" + strings.Join(ImportColumns, ";") + "\n")
+	for _, row := range exampleRows("chilexpress", "Ñuñoa", "SKU-001", "SKU-002") {
+		cells := make([]string, len(row))
+		for i, v := range row {
+			cells[i] = strings.ReplaceAll(fmt.Sprint(v), ";", ",")
+		}
+		b.WriteString(strings.Join(cells, ";") + "\n")
+	}
+	return b.String()
+}
+
+var dispatchLabels = map[string]string{"domicilio": "Despacho a domicilio", "retiro_oficina": "Retiro en oficina del courier", "express": "Express (mismo día)"}
+
+// ImportTemplate - plantilla .xlsx con ejemplos, hoja «Instrucciones» y listas
+// desplegables de los catálogos activos. Con companyID > 0 también lista los SKU
+// activos de esa empresa.
+func (s *Service) ImportTemplate(ctx context.Context, id tenant.Identity, companyID int64, w io.Writer) error {
+	if companyID > 0 && !id.CanAccess(companyID) {
+		return domain.ErrForbidden
+	}
+	couriers, err := s.Catalog.ActiveCouriers(ctx)
+	if err != nil {
+		return err
+	}
+	communes, err := s.Catalog.Communes(ctx)
+	if err != nil {
+		return err
+	}
+	products := []ports.ProductOption{}
+	if companyID > 0 {
+		if products, err = s.Catalog.ActiveProducts(ctx, companyID); err != nil {
+			return err
+		}
+	}
+
+	exampleCourier, exampleCommune, skuA, skuB := "chilexpress", "Ñuñoa", "SKU-001", "SKU-002"
+	if len(couriers) > 0 {
+		exampleCourier = couriers[0].Code
+	}
+	if len(communes) > 0 && !slices.Contains(communes, exampleCommune) {
+		exampleCommune = communes[0]
+	}
+	if len(products) > 0 {
+		skuA, skuB = products[0].SKU, products[0].SKU
+	}
+	if len(products) > 1 {
+		skuB = products[1].SKU
+	}
+
+	// Hoja «Instrucciones»: campos a la izquierda y valores válidos a la derecha.
+	fields := [][]any{
+		{"referencia", "Sí", "N° de orden sin espacios. Una orden con varios productos usa varias filas con la misma referencia."},
+		{"courier", "Sí", "Código de la lista «Courier»."},
+		{"tipo_despacho", "No", "Código de la lista «Tipo de despacho». Si se omite: domicilio."},
+		{"destinatario", "Sí", "Nombre de quien recibe (máx. 120 caracteres)."},
+		{"telefono", "No", "Ejemplo: +56 9 1234 5678."},
+		{"correo", "No", "Ejemplo: nombre@correo.cl."},
+		{"direccion", "Sí", "Calle y número. Con retiro_oficina puede quedar vacía."},
+		{"comuna", "Sí", "Nombre de la lista «Comuna»."},
+		{"region", "No", "Código de región. Ejemplo: RM."},
+		{"notas", "No", "Notas del cliente (máx. 500 caracteres)."},
+		{"sku", "Sí", "SKU de un producto activo de la empresa."},
+		{"cantidad", "Sí", "Número entero mayor que 0."},
+		{nil, nil, nil},
+		{"Importante", nil, "Las filas cuya referencia empieza con " + ExampleRefPrefix + " son ejemplos: no se importan."},
+		{nil, nil, "Máximo " + strconv.Itoa(MaxImportRows) + " filas y 5 MB por archivo."},
+	}
+	const (
+		courierCol  = 4 // E, F
+		dispatchCol = 7 // H, I
+		communeCol  = 10
+		skuCol      = 12 // M, N
+	)
+	rowCount := slices.Max([]int{len(fields), len(couriers), len(domain.DispatchTypes), len(communes), len(products)})
+	rows := make([][]any, rowCount)
+	for i := range rows {
+		rows[i] = make([]any, skuCol+2)
+		if i < len(fields) {
+			copy(rows[i], fields[i])
+		}
+		if i < len(couriers) {
+			rows[i][courierCol], rows[i][courierCol+1] = couriers[i].Code, couriers[i].Name
+		}
+		if i < len(domain.DispatchTypes) {
+			rows[i][dispatchCol], rows[i][dispatchCol+1] = domain.DispatchTypes[i], dispatchLabels[domain.DispatchTypes[i]]
+		}
+		if i < len(communes) {
+			rows[i][communeCol] = communes[i]
+		}
+		if i < len(products) {
+			rows[i][skuCol], rows[i][skuCol+1] = products[i].SKU, products[i].Description
+		}
+	}
+	lastRow := MaxImportRows + 1
+	list := func(column string, source, count int, strict bool, message string) []xlsx.ListValidation {
+		if count == 0 {
+			return nil
+		}
+		col := xlsx.ColumnName(source)
+		return []xlsx.ListValidation{{Column: slices.Index(ImportColumns, column), Source: fmt.Sprintf("Instrucciones!$%s$2:$%s$%d", col, col, count+1), LastRow: lastRow, Strict: strict, Error: message}}
+	}
+	lists := slices.Concat(
+		list("courier", courierCol, len(couriers), true, "Elige un courier de la lista."),
+		list("tipo_despacho", dispatchCol, len(domain.DispatchTypes), true, "Elige un tipo de despacho de la lista."),
+		list("comuna", communeCol, len(communes), true, "Elige una comuna de la lista."),
+		list("sku", skuCol, len(products), false, "Este SKU no está entre los productos activos de la empresa."),
+	)
+	return xlsx.WriteWorkbook(w, []xlsx.Sheet{
+		{Name: "Órdenes", Header: ImportColumns, Rows: exampleRows(exampleCourier, exampleCommune, skuA, skuB), Lists: lists,
+			Widths: []int{16, 16, 16, 24, 18, 24, 34, 20, 8, 30, 16, 10}},
+		{Name: "Instrucciones", Header: []string{"Campo", "Obligatorio", "Cómo llenarlo", "", "Courier", "Nombre", "", "Tipo de despacho", "Descripción", "", "Comuna", "", "SKU", "Producto"}, Rows: rows,
+			Widths: []int{16, 12, 80, 3, 16, 18, 3, 18, 30, 3, 24, 3, 18, 40}},
 	})
 }
 

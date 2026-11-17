@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -68,8 +69,7 @@ func main() {
 	go jwks.Warmup(ctx)
 	verifier := auth.Verifier{Keys: jwks, Issuer: cfg.KeycloakIssuer, Audience: cfg.KeycloakAudience, Leeway: 30 * time.Second}
 	profiles := tenant.PGProfiles{DB: db}
-	requireAuth := tenant.Middleware(verifier, profiles, nil, false)
-	requireAuthWS := tenant.Middleware(verifier, profiles, nil, true)
+	requireAuth := tenant.Middleware(verifier, profiles, nil)
 
 	// ---- Composición --------------------------------------------------------
 	files, err := storage.NewLocal(envOr("ATTACHMENTS_DIR", "/data/attachments"))
@@ -82,7 +82,14 @@ func main() {
 		// Sin clave no se pueden crear ni verificar integraciones; el resto funciona.
 		log.Warn("integraciones deshabilitadas", "err", err)
 	}
-	simCourier := courier.NewSimulated() // [SIMULADO] hasta habilitar cada courier/canal (PV-08)
+	labelPending, _ := strconv.Atoi(envOr("COURIER_SIM_LABEL_PENDING", "1"))
+	// Reintento de etiquetas «cada N minutos» (H-16-T06): p. ej. 5m, 10m. Vacío o inválido = 5m.
+	labelEvery, err := time.ParseDuration(envOr("LABEL_RETRY_EVERY", "5m"))
+	if err != nil || labelEvery < 30*time.Second {
+		log.Warn("LABEL_RETRY_EVERY inválido (mínimo 30s); se usa 5m", "valor", os.Getenv("LABEL_RETRY_EVERY"))
+		labelEvery = 5 * time.Minute
+	}
+	simCourier := courier.NewSimulated(labelPending) // [SIMULADO] hasta habilitar cada courier/canal (PV-08)
 	svc := application.NewService(application.Deps{
 		Orders:        postgres.NewRepository(db),
 		Rules:         postgres.NewRuleRepository(db),
@@ -101,16 +108,19 @@ func main() {
 		Secrets:  secrets,
 		Log:      log,
 		DevMode:  cfg.IsDevelopment(),
+
+		LabelRetryEvery: labelEvery,
 	})
 	validator := application.NewValidator(svc)
 	rules := application.NewRulesEngine(svc)
 	picking := application.NewPickingSync(svc)
+	labels := application.NewLabelRetry(svc)
 
 	// ---- Worker (forma parte de Órdenes) --------------------------------------
 	wcfg := config.LoadWorker()
 	bgCtx, stopBg := context.WithCancel(context.Background())
 	var bg sync.WaitGroup
-	bg.Add(5)
+	bg.Add(6)
 	go func() { defer bg.Done(); workers.RunValidationLoop(bgCtx, validator, 2*time.Second) }()
 	go func() {
 		defer bg.Done()
@@ -121,6 +131,7 @@ func main() {
 		})
 	}()
 	go func() { defer bg.Done(); workers.RunEvery(bgCtx, 10*time.Second, picking.RunOnce) }()
+	go func() { defer bg.Done(); workers.RunEvery(bgCtx, 10*time.Second, labels.RunOnce) }()
 	go func() {
 		defer bg.Done()
 		workers.NewOutboxRelay(db, rdb, wcfg.Stream, wcfg.Batch, log).Run(bgCtx)
@@ -149,7 +160,8 @@ func main() {
 	})
 
 	origins := strings.Split(envOr("WS_ALLOWED_ORIGINS", envOr("APP_DOMAIN", "localhost")), ",")
-	ordershttp.NewHandler(svc, rdb, profiles, log, origins).Register(mux, requireAuth, requireAuthWS)
+	ordershttp.NewHandler(svc, rdb, profiles, log, origins).Register(mux, requireAuth)
+	ordershttp.NewHistoryHandler(application.NewRegistry(postgres.NewRegistry(db)), application.NewActivity(postgres.NewActivity(db)), log).Register(mux, requireAuth) // Registro histórico y de acciones (Tarea 06, Jean)
 	webhooks.NewHandler(svc, log).Register(mux)
 
 	handler := httpserver.Chain(mux,

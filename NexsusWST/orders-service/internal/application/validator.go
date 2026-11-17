@@ -72,9 +72,15 @@ func (v *Validator) validate(ctx context.Context, o domain.Order) {
 		return
 	}
 
-	// 2) Stock en Invas
-	skus := make([]string, 0, len(o.Items))
-	for _, it := range o.Items {
+	// 2) Stock en Invas. Un kit no tiene stock propio: se consulta el de sus
+	//    componentes (SCRUM-100).
+	lines, err := v.svc.Catalog.StockLines(ctx, o.CompanyID, o.Items)
+	if err != nil {
+		log.Warn("no se pudo expandir los kits; se reintenta", "err", err)
+		return
+	}
+	skus := make([]string, 0, len(lines))
+	for _, it := range lines {
 		skus = append(skus, it.SKU)
 	}
 	stock, err := v.svc.WMS.GetStock(ctx, o.CompanyID, skus)
@@ -124,6 +130,14 @@ func (v *Validator) dataProblems(ctx context.Context, o domain.Order) ([]string,
 	if len(missing) > 0 {
 		out = append(out, "Productos inexistentes o inactivos en el catálogo del cliente: "+strings.Join(missing, ", ")+
 			". Corrige el SKU o crea el producto")
+	}
+	empty, err := cat.EmptyKits(ctx, o.CompanyID, skus)
+	if err != nil {
+		return nil, err
+	}
+	if len(empty) > 0 {
+		out = append(out, "Kits sin composición definida: "+strings.Join(empty, ", ")+
+			". Define sus componentes en Productos")
 	}
 
 	if ok, err := cat.CourierActive(ctx, o.Courier); err != nil {

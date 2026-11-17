@@ -14,7 +14,7 @@ func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
 
 func (r *Repository) List(ctx context.Context, ids []int64, search string) ([]domain.Company, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, name, COALESCE(tax_id,''), COALESCE(wms_code,''), active, created_at
+		SELECT id, name, COALESCE(tax_id,''), COALESCE(wms_code,''), active, wave_code, created_at
 		FROM companies
 		WHERE ($1::bigint[] IS NULL OR id = ANY($1))
 		  AND ($2 = '' OR name ILIKE '%' || $2 || '%' OR tax_id ILIKE '%' || $2 || '%')
@@ -26,10 +26,19 @@ func (r *Repository) List(ctx context.Context, ids []int64, search string) ([]do
 	out := make([]domain.Company, 0)
 	for rows.Next() {
 		var c domain.Company
-		if err := rows.Scan(&c.ID, &c.Name, &c.TaxID, &c.WMSCode, &c.Active, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.TaxID, &c.WMSCode, &c.Active, &c.WaveCode, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// SetWave guarda la ola por defecto del cliente (PV-19); nil la quita.
+func (r *Repository) SetWave(ctx context.Context, id int64, code *string) error {
+	tag, err := r.db.Exec(ctx, `UPDATE companies SET wave_code=$2, updated_at=now() WHERE id=$1`, id, code)
+	if err == nil && tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return err
 }

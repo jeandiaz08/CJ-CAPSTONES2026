@@ -1,0 +1,18 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { keycloakify } from "keycloakify/vite-plugin";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    keycloakify({
+      themeName: "nexuswst",
+      accountThemeImplementation: "none",
+      environmentVariables: [{ name: "NEXUS_MAIL_FROM", default: "no-reply@westorage.cl" }],
+      keycloakVersionTargets: {
+        "22-to-25": false,
+        "all-other-versions": "nexuswst-keycloak-theme.jar",
+      },
+    }),
+  ],
+});

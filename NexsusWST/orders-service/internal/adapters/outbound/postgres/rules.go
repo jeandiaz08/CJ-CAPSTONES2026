@@ -97,8 +97,8 @@ func (r *RuleRepository) ResetChecks(ctx context.Context) error {
 // CourierSettings - sin configuración, el courier cubre todo y no limita bultos.
 func (r *RuleRepository) CourierSettings(ctx context.Context, courier string) (ports.CourierSettings, error) {
 	cs := ports.CourierSettings{Courier: courier, CoversAll: true, Communes: []string{}}
-	err := r.db.QueryRow(ctx, `SELECT COALESCE(to_char(arrival_time,'HH24:MI'),''), max_packages, covers_all FROM courier_settings WHERE courier=$1`, courier).
-		Scan(&cs.ArrivalTime, &cs.MaxPackages, &cs.CoversAll)
+	err := r.db.QueryRow(ctx, `SELECT max_packages, covers_all FROM courier_settings WHERE courier=$1`, courier).
+		Scan(&cs.MaxPackages, &cs.CoversAll)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return cs, nil
 	}
@@ -140,11 +140,11 @@ func (r *RuleRepository) ListCourierSettings(ctx context.Context) ([]ports.Couri
 func (r *RuleRepository) SaveCourierSettings(ctx context.Context, s ports.CourierSettings, actor string) error {
 	return pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO courier_settings (courier, arrival_time, max_packages, covers_all, updated_by, updated_at)
-			VALUES ($1, NULLIF($2,'')::time, $3, $4, $5, now())
-			ON CONFLICT (courier) DO UPDATE SET arrival_time=EXCLUDED.arrival_time, max_packages=EXCLUDED.max_packages,
+			INSERT INTO courier_settings (courier, max_packages, covers_all, updated_by, updated_at)
+			VALUES ($1, $2, $3, $4, now())
+			ON CONFLICT (courier) DO UPDATE SET max_packages=EXCLUDED.max_packages,
 				covers_all=EXCLUDED.covers_all, updated_by=EXCLUDED.updated_by, updated_at=now()`,
-			s.Courier, s.ArrivalTime, s.MaxPackages, s.CoversAll, actor); err != nil {
+			s.Courier, s.MaxPackages, s.CoversAll, actor); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM courier_coverage WHERE courier=$1`, s.Courier); err != nil {

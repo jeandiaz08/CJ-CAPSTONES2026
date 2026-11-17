@@ -27,6 +27,9 @@ func Chain(h http.Handler, mws ...func(http.Handler) http.Handler) http.Handler 
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
+		if !validRequestID(id) { // la de Traefik se respeta; una ajena o rara se reemplaza
+			id = ""
+		}
 		if id == "" {
 			b := make([]byte, 8)
 			_, _ = rand.Read(b)
@@ -35,6 +38,20 @@ func RequestID(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-Id", id)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDKey, id)))
 	})
+}
+
+// validRequestID evita que una cabecera externa ensucie el registro (saltos de
+// línea, textos largos): 1 a 64 caracteres [A-Za-z0-9._-].
+func validRequestID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func RequestIDFrom(ctx context.Context) string {

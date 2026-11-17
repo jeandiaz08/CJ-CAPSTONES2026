@@ -94,7 +94,23 @@ cp .env.example .env
 
 Abre `.env` y cambia los valores que dicen `CAMBIAR`. Usa contraseñas **sin** `@ : / ? #` (van dentro de una URL de conexión). Para los secretos largos (`KEYCLOAK_CORE_CLIENT_SECRET`, `INTEGRATIONS_KEY`) usa `openssl rand -hex 32`.
 
-### Paso 3. Construir y levantar
+### Paso 3. Compilar el tema de Keycloak
+
+Keycloak monta `infrastructure/keycloak/theme/dist_keycloak/nexuswst-keycloak-theme.jar`. Ese `.jar` es un artefacto y **no va en Git**: cada máquina lo compila antes de levantar Keycloak. Solo requiere Docker.
+
+```bash
+make theme
+```
+
+Sin `make` (PowerShell), desde la carpeta del repositorio:
+
+```powershell
+docker run --rm -v "${PWD}/infrastructure/keycloak/theme:/app" -w /app node:22-bookworm-slim sh docker-build.sh
+```
+
+`make up` y `make prod-up` lo compilan solos si falta. Si cambias el tema, vuelve a ejecutar `make theme` y luego `docker compose restart keycloak`.
+
+### Paso 4. Construir y levantar
 
 ```bash
 docker compose up -d --build
@@ -107,7 +123,7 @@ postgres, redis ──► migrate-core ──► migrate-orders ──► core, 
 postgres ──► keycloak-db-init ──► keycloak (importa el realm la primera vez; tarda ~1 min)
 ```
 
-### Paso 4. Verificar que todo está arriba
+### Paso 5. Verificar que todo está arriba
 
 ```bash
 docker compose ps
@@ -126,7 +142,7 @@ Debes ver `core`, `orders`, `postgres`, `redis` y `keycloak` como **healthy**, y
 | http://localhost/auth/admin | Consola de Keycloak (solo emergencias) → `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` de tu `.env` |
 | http://127.0.0.1:8025 | Mailpit: aquí llegan los correos de prueba (definir/recuperar contraseña, avisos) |
 
-### Paso 5. Guardar `go.sum` en Git
+### Paso 6. Guardar `go.sum` en Git
 
 `backend-core/go.sum` y `orders-service/go.sum` ya vienen en el repositorio (garantizan builds reproducibles). Si agregas una dependencia, regenéralos:
 
@@ -137,20 +153,33 @@ docker compose run --rm --no-deps core go mod tidy
 docker compose run --rm --no-deps orders go mod tidy
 ```
 
-### Paso 6. Entrar a la aplicación
+### Paso 7. Entrar a la aplicación
 
 Abre http://localhost → **/login** → botón **Ingresar** → pantalla de **Keycloak** (en español) → vuelves a NexusWST con tu perfil. Usuarios de prueba (existen solo en desarrollo, contraseña **`Nexus2026!`**):
 
+La sesión la maneja Auth.js: los tokens quedan en una cookie httpOnly cifrada y el navegador llama a `/bff/{core|orders}/...`. El WebSocket se abre con un ticket de un solo uso.
+
 | Correo | Rol | Qué ve |
 |---|---|---|
-| `admin@nexus.local` | Administrador | Todo |
+| `admin@nexus.local` | Administrador (permiso Gestionar perfiles) | Todo |
+| `admin.lectura@nexus.local` | Administrador sin Gestionar perfiles | Todo; Clientes › Administración clientes en solo lectura |
 | `jefe@nexus.local` | Jefe de Operaciones (permiso Despacho) | Operación, olas, incidencias, reglas |
 | `empaque@nexus.local` | Empaque (permiso Despacho) | Empaque y retiro |
 | `analista@nexus.local` | Analista | Consulta |
 | `cliente1@nexus.local` | Cliente (solo Empresa Demo Uno) | Sus órdenes y productos |
 | `cliente2@nexus.local` | Cliente (solo Empresa Demo Dos) | Sus órdenes (sirve para probar el aislamiento) |
 
-El perfil de Nexus (rol, permisos, empresas) se vincula solo la primera vez que cada usuario ingresa.
+**Realm importado antes del 07-11-2026.** Keycloak importa `nexuswst-realm.json` solo al crear el realm. Si el tuyo es anterior, su perfil de usuario todavía exige correo y no se pueden crear usuarios internos sin correo (SCRUM-231): Keycloak responde `error-user-attribute-required`. Para aplicar el perfil de usuario del repo sin recrear Keycloak (desde la raíz, en Git Bash):
+
+```bash
+python -c "import json;r=json.load(open('infrastructure/keycloak/import/nexuswst-realm.json',encoding='utf-8'));open('user-profile.json','w',encoding='utf-8').write(r['components']['org.keycloak.userprofile.UserProfileProvider'][0]['config']['kc.user.profile.config'][0])"
+docker compose cp user-profile.json keycloak:/tmp/user-profile.json && rm user-profile.json
+docker compose exec keycloak sh -c '/opt/keycloak/bin/kcadm.sh config credentials --server "http://localhost:8080${KC_HTTP_RELATIVE_PATH}" --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" && /opt/keycloak/bin/kcadm.sh update users/profile -r nexuswst -f /tmp/user-profile.json'
+```
+
+El correo deja de ser obligatorio en Keycloak; la regla «el perfil Cliente siempre tiene correo» la aplica el Core.
+
+El perfil de Nexus (rol, permisos, empresas) se vincula solo la primera vez que cada usuario ingresa. El servicio `seed-dev` crea estos perfiles al levantar; para recargarlos: `make seed-dev` o `docker compose run --rm seed-dev`.
 
 **Recorrido de prueba completo:**
 
@@ -233,6 +262,18 @@ Las páginas sin implementar muestran **qué requisito cubren y en qué archivos
 | Detener todo | `docker compose down` (los datos se conservan) |
 | Borrar la BD y empezar de cero | `docker compose down -v` ⚠️ |
 
+### Pruebas del frontend
+
+Desde `frontend-web/`:
+
+- `npm test`: pruebas de comportamiento (`tests/`, vitest + happy-dom, con los servicios simulados).
+- `npm run test:e2e`: pruebas de punta a punta (`e2e/`, Playwright con el Chrome instalado). Requieren el stack de desarrollo levantado. Antes de cada corrida, `e2e/global-setup.ts` recarga los datos: corre `seed-dev` y luego el seed de demostración (`respaldo/seed/seed_demo.sql`, solo local), así las pruebas no dependen de lo que dejó la corrida anterior. Si ese archivo no existe, avisa y sigue; `E2E_SKIP_SEED=1` omite la recarga. Otro navegador: `E2E_CHANNEL=msedge`.
+
+### Pruebas de Go y el *healthcheck* de desarrollo
+
+- `make test-core` y `make test-orders` corren `go test ./...` en un contenedor aparte, sin tocar el servicio en ejecución. Las pruebas de PostgreSQL necesitan `TEST_DATABASE_URL`; sin ella se saltan.
+- En desarrollo, Air recompila al guardar y deja el binario en `./tmp/api`. Si se guardan dos archivos casi a la vez, dos compilaciones seguidas pueden dejar `./tmp` sin el binario aunque el servidor siga corriendo. Antes el *healthcheck* ejecutaba ese binario, así que el servicio quedaba `unhealthy` y Traefik dejaba de enviarle tráfico (el front respondía en `/api/core`). Desde el 08-11-2026, en `docker-compose.override.yml`, el *healthcheck* de `core` y `orders` consulta `/health` por HTTP. Si alguna vez pasa algo parecido: `docker compose restart core`.
+
 ### Crear una migración nueva
 
 ```bash
@@ -250,21 +291,84 @@ Cada servicio migra solo **sus** tablas (cada tabla tiene un solo dueño, DA-03)
 1. Droplet Ubuntu con Docker y Compose; DNS del dominio apuntando a su IP; puertos 80/443 abiertos.
 2. Clona el repo en el servidor, crea `.env` con valores **reales** (`APP_ENV=production`, `APP_DOMAIN=nexus.tudominio.cl`, `LOG_LEVEL=info`).
 3. Edita el correo en `infrastructure/traefik/traefik.prod.yml` (Let's Encrypt).
-4. Elimina o reemplaza `backend-core/migrations/000002_seed_dev.*` y `000004_seed_dev_v11.*` (datos y perfiles ficticios). Los usuarios de prueba de Keycloak están solo en `docker-compose.override.yml`, que producción no usa.
+4. Las migraciones traen solo catálogos reales. Los datos ficticios (`infrastructure/dev-seed`, usuarios de `infrastructure/keycloak/dev-users`) y las cuentas demo de `/login` (`NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS`) los activa solo `docker-compose.override.yml`, que producción no carga.
 5. Keycloak en producción (PV-18):
    - `APP_PUBLIC_URL=https://<dominio>`, `KEYCLOAK_PUBLIC_URL=https://auth.westorage.cl/auth`, `AUTH_DOMAIN=auth.westorage.cl` (DNS apuntando al servidor).
    - `KC_WEB_DIRECT_GRANTS=false`.
    - `SMTP_*` con el correo de WeStorage (remitente `no-reply@westorage.cl`; SPF/DKIM los configura TI).
    - Secretos nuevos y largos para `KEYCLOAK_*` e `INTEGRATIONS_KEY`.
-   - Unos 1,25 GB de RAM para Keycloak.
-   - Antes de actualizar la versión de Keycloak, respalda la base (incluye el esquema `keycloak`).
-6. Levanta:
+   - Keycloak tiene un límite de memoria de 1,36 GB en `docker-compose.prod.yml` (PV-15); el stack completo usa unos 2,6–2,9 GB del plan de 4 GB.
+   - Antes de actualizar la versión de Keycloak, respalda la base (`make backup`; incluye el esquema `keycloak`).
+6. Compila el tema de Keycloak con `make theme` (paso 3).
+7. Levanta:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 En producción: imágenes compiladas sin herramientas de desarrollo, usuario sin privilegios, sin dashboard de Traefik, sin puertos de BD expuestos y la red `data` es interna. Si WeStorage entrega un PostgreSQL administrado, quita el servicio `postgres` y apunta `DATABASE_URL` a esa instancia con `sslmode=require`.
+
+### Producción detrás de Cloudflare (SCRUM-247, PV-20)
+
+Capa opcional sobre la de producción (`docker-compose.cloudflare.yml` + `infrastructure/traefik/traefik.cloudflare.yml`). Sin ella, producción sigue igual (Let's Encrypt por HTTP).
+
+1. En Cloudflare: registro `A` del dominio de Nexus apuntando al droplet, con el proxy activo (nube naranja), y en SSL/TLS el modo **Full (strict)**.
+2. Crea un token de API con permiso **Zone → DNS → Edit** sobre la zona y ponlo en `CLOUDFLARE_DNS_API_TOKEN` del `.env`. Traefik lo usa para pedir el certificado de Let's Encrypt por DNS (funciona con el proxy activo). Cambia el correo de `certificatesResolvers` en `traefik.cloudflare.yml`, igual que en `traefik.prod.yml`.
+3. `make prod-cf-up` (para bajar: `make prod-cf-down`).
+
+Qué cambia:
+
+- **Solo entra tráfico de Cloudflare**: quien vaya directo a la IP del servidor recibe 403, aunque falsee las cabeceras de Cloudflare.
+- **IP real del visitante**: Traefik solo acepta `X-Forwarded-For` de las IP de Cloudflare, así Keycloak (bloqueo por fuerza bruta) y los registros ven la IP real y nadie la puede falsear.
+- Los rangos de Cloudflare están en los dos archivos de Traefik; `make cloudflare-ips` los compara con los publicados (conviene antes de cada despliegue).
+- Recomendado además en el droplet: firewall que solo abra 80/443 a esos rangos (y 22 a quien administra).
+
+### Integración continua (SCRUM-197)
+
+El pipeline corre los mismos pasos en **GitHub Actions** (`.github/workflows/ci.yml`, en cada push a `main`, `test`, `jean_dev` o `cristopher_dev` y en cada PR) y en **GitLab CI** (`.gitlab-ci.yml`, si el proyecto se sube a GitLab). Los dos llaman a `scripts/ci.sh`:
+
+| Paso | Qué revisa |
+| --- | --- |
+| Go · core / orders | `gofmt`, `go vet` y pruebas con detector de carreras y cobertura (`coverage.out`). Las pruebas que necesitan PostgreSQL se saltan. |
+| Frontend | `npm ci`, lint, tipos (`tsc`) y build de producción |
+| Imágenes | Construye las imágenes de producción (sin publicarlas) |
+| SonarQube | Análisis con la cobertura de Go (`sonar-project.properties`). Se salta solo si no está configurado. |
+
+Para activar SonarQube: en GitHub, el secreto `SONAR_TOKEN` y las variables `SONAR_HOST_URL` (y `SONAR_ORGANIZATION` si es SonarCloud); en GitLab, las mismas como variables de CI/CD. Antes de subir puedes correr lo mismo con `make ci` (necesita Go 1.26 y Node 22).
+
+### Cambios de configuración de Keycloak en un realm ya creado
+
+Keycloak importa `infrastructure/keycloak/import/nexuswst-realm.json` **solo la primera vez**. Si el realm ya existe (tu entorno o el servidor), aplica los cambios con:
+
+```bash
+make keycloak-update        # ./scripts/keycloak-update.sh (se puede repetir sin problema)
+```
+
+- **Usuarios sin correo** (SCRUM-231): el usuario deja de ser el correo y el correo pasa a ser opcional.
+- **Correos en español** (SCRUM-80): tema `nexuswst-email` (`infrastructure/keycloak/email-theme`), con remitente `SMTP_FROM`.
+- **Microsoft 365 / Entra ID** (SCRUM-230, opcional): con `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` y `ENTRA_CLIENT_SECRET` en el `.env` se habilita «Continuar con Microsoft»; sin ellos queda deshabilitado. El administrador de Microsoft de WeStorage registra la aplicación con la URI de redirección `<KEYCLOAK_PUBLIC_URL>/realms/nexuswst/broker/microsoft/endpoint`.
+- En producción: `export COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"` antes del comando. Necesita `python3` en el servidor.
+
+### Respaldo y restauración de PostgreSQL (SCRUM-199)
+
+El respaldo incluye **toda la base**: Core, Órdenes y el esquema `keycloak` (usuarios y roles). Redis no se respalda: guarda caché (se reconstruye) y colas con AOF.
+
+```bash
+make backup                                            # ./scripts/backup.sh
+make restore file=backups/nexuswst_20261103-2100.dump  # pide escribir RESTAURAR
+```
+
+- El respaldo queda en `./backups/nexuswst_<fecha>.dump` (formato *custom* de `pg_dump`, comprimido). Se verifica con `pg_restore --list` antes de guardarlo y se conservan los últimos 7 (`BACKUP_KEEP`). La carpeta `backups/` está en `.gitignore`.
+- La restauración detiene Keycloak, Core y Órdenes, restaura **en una sola transacción** (si falla, la base queda como estaba) y los vuelve a levantar.
+- En producción, antes de cada comando: `export COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"`.
+- Respaldo diario en el servidor (cron, 03:00):
+
+```bash
+0 3 * * * cd /opt/nexuswst/NexsusWST && COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml" ./scripts/backup.sh >> backups/backup.log 2>&1
+```
+
+- Copia los respaldos **fuera del servidor** (por ejemplo, a tu PC con `scp`): si se pierde el droplet, se pierden también los respaldos que estén en él.
+- Prueba la restauración al menos una vez en el ambiente de pruebas (PV-15).
 
 ---
 
@@ -282,6 +386,7 @@ En producción: imágenes compiladas sin herramientas de desarrollo, usuario sin
 | Cambié `.env` y no se aplica | `docker compose up -d` recrea los contenedores afectados (no basta `restart`) |
 | Al ingresar: «redirect_uri inválido» o «token inválido» | `APP_PUBLIC_URL` / `KEYCLOAK_PUBLIC_URL` no coinciden con la URL que usas en el navegador (incluye el puerto si `HTTP_PORT` no es 80). El realm se importa **una sola vez**: si cambias la URL, bórralo en la consola de Keycloak o recrea el esquema |
 | 403 `profile_missing` en Órdenes | El usuario aún no entra por la app: el perfil se crea al llamar `GET /api/core/v1/auth/me` (lo hace el login) |
+| `keycloak` no arranca y `nexuswst-keycloak-theme.jar` aparece como carpeta | Se levantó sin compilar el tema y Docker creó una carpeta en su lugar. Bórrala, ejecuta `make theme` y levanta de nuevo |
 | `keycloak` tarda en quedar *healthy* | Normal la primera vez (crea sus tablas e importa el realm, ~1–2 min). `docker compose logs -f keycloak` |
 
 ---
@@ -296,10 +401,8 @@ Rotulado explícitamente para no presentarlo como funcionalidad terminada (DAS �
 | Botón "Confirmar preparación (sim.)" | Solo en desarrollo; en producción lo informa Invas | PV-03/PV-04 |
 | Etiquetas de courier y detalle de Mercado Libre (`courier.Simulated`) | PDF y datos de prueba rotulados «SIMULACIÓN» | PV-08 |
 | Catálogo de comunas | RM completa + principales comunas (113); falta el listado oficial (346) | Carga CUT/SUBDERE |
-| Login con PKCE sin librería (`src/services/oidc.ts`) | Puente funcional hasta Auth.js | H-01 T05/T06 (Jean) |
-| Tema WeStorage en el login de Keycloak | Tema por defecto con el nombre NexusWST · WeStorage | H-01 T07 (Jean) |
 | Alcance por empresa del personal interno (`all_companies`) | Propuesta | PV-02 |
-| `000002_seed_dev`, `000004_seed_dev_v11`, `dev-users` de Keycloak | Datos y usuarios ficticios | Retirar antes de producción |
+| `infrastructure/dev-seed`, `dev-users` de Keycloak | Datos y usuarios ficticios | Solo desarrollo (`docker-compose.override.yml`) |
 
 ## Próximos pasos sugeridos
 

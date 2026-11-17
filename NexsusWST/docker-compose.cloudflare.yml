@@ -1,0 +1,13 @@
+# =============================================================================
+#  NexusWST - PRODUCCIÓN DETRÁS DE CLOUDFLARE (H-17-T08 / SCRUM-247, PV-20)
+#  Capa opcional encima de la de producción:
+#    docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloudflare.yml up -d
+#  (o: make prod-cf-up). Sin esta capa, producción sigue con Let's Encrypt por HTTP.
+# =============================================================================
+services:
+  traefik:
+    environment:
+      # Token de API de Cloudflare con permiso Zone → DNS → Edit sobre westorage.cl
+      CF_DNS_API_TOKEN: ${CLOUDFLARE_DNS_API_TOKEN:?Define CLOUDFLARE_DNS_API_TOKEN en .env}
+    volumes:
+      - ./infrastructure/traefik/traefik.cloudflare.yml:/etc/traefik/traefik.yml:ro

@@ -2,7 +2,8 @@
 // PA-03 Estrategia: uno por proveedor).
 //
 // SIMULADO: no llama a ningún courier ni marketplace. Genera una etiqueta PDF
-// de prueba rotulada «SIMULACIÓN» y un código de seguimiento ficticio, y
+// de prueba rotulada «SIMULACIÓN» y un código de seguimiento ficticio (después
+// de los primeros intentos configurados, para probar «Etiqueta pendiente»), y
 // entrega el detalle de órdenes de Mercado Libre de forma determinística.
 // Crear envíos por API depende de PV-08.
 package courier
@@ -18,12 +19,18 @@ import (
 	"github.com/nexuswst/orders-service/internal/ports"
 )
 
-type Simulated struct{}
+type Simulated struct{ labelPendingAttempts int }
 
-func NewSimulated() *Simulated { return &Simulated{} }
+// NewSimulated: labelPendingAttempts es cuántos intentos responde que la etiqueta no está lista.
+func NewSimulated(labelPendingAttempts int) *Simulated {
+	return &Simulated{labelPendingAttempts: labelPendingAttempts}
+}
 
 // Label - una página por bulto con remitente, destino y código del bulto.
-func (Simulated) Label(ctx context.Context, o domain.Order, packages []domain.Package) ([]byte, string, error) {
+func (s Simulated) Label(ctx context.Context, o domain.Order, packages []domain.Package, attempt int) ([]byte, string, error) {
+	if attempt <= s.labelPendingAttempts {
+		return nil, "", domain.ErrLabelNotReady
+	}
 	tracking := o.CourierCode
 	if tracking == "" {
 		tracking = fmt.Sprintf("SIM%s%06d", strings.ToUpper(firstN(o.Courier, 3)), o.ID)

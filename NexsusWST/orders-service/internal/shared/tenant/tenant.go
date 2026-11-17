@@ -139,15 +139,11 @@ func (id Identity) Actor() string {
 	return "user:" + strconv.FormatInt(id.UserID, 10) + " " + id.Name
 }
 
-// Middleware verifica el token y carga el perfil. allowQueryToken: solo para
-// WebSocket (el navegador no puede enviar cabeceras al abrirlo).
-func Middleware(v TokenVerifier, profiles ProfileStore, prov Provisioner, allowQueryToken bool) func(http.Handler) http.Handler {
+// Middleware verifica el token y carga el perfil.
+func Middleware(v TokenVerifier, profiles ProfileStore, prov Provisioner) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if tok == "" && allowQueryToken {
-				tok = r.URL.Query().Get("access_token")
-			}
 			if tok == "" {
 				httpx.Error(w, http.StatusUnauthorized, "unauthorized", "falta el token de acceso")
 				return

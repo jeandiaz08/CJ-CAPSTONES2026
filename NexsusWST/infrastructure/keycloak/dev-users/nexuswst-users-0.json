@@ -8,6 +8,12 @@
       "realmRoles": ["admin"]
     },
     {
+      "username": "admin.lectura@nexus.local", "email": "admin.lectura@nexus.local", "emailVerified": true, "enabled": true,
+      "firstName": "Admin", "lastName": "Lectura Demo",
+      "credentials": [{ "type": "password", "value": "Nexus2026!", "temporary": false }],
+      "realmRoles": ["admin"]
+    },
+    {
       "username": "jefe@nexus.local", "email": "jefe@nexus.local", "emailVerified": true, "enabled": true,
       "firstName": "Jefe de Operaciones", "lastName": "Demo",
       "credentials": [{ "type": "password", "value": "Nexus2026!", "temporary": false }],

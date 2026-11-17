@@ -5,6 +5,7 @@ package ports
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"time"
 
@@ -19,13 +20,16 @@ type Job struct {
 	OrderID   int64
 	Priority  bool
 	Payload   map[string]any
+	// NextCutoff (HH:MM) ordena la cola de Invas; vacío va al final.
+	NextCutoff string
 }
 
 // Vistas del listado.
 const (
-	ViewTray     = ""         // bandeja de trabajo: oculta Canceladas
-	ViewRegistry = "registro" // Registro histórico: Entregadas al courier y Canceladas
-	ViewAll      = "all"
+	ViewTray       = ""         // bandeja: en curso y Entregadas de hasta 365 días; nunca Canceladas
+	ViewRegistry   = "registro" // Registro histórico: Canceladas y Entregadas de más de 365 días
+	ViewAll        = "all"
+	ViewAssignment = "asignacion"
 )
 
 // ListFilter: CompanyIDs nil = todas (solo personal interno).
@@ -36,12 +40,14 @@ type ListFilter struct {
 	Search       string // número, referencia o destinatario
 	Courier      string
 	Channel      string
+	Source       string // manual, bulk o webhook
+	Situation    string // en_cola, invas_agotado, fuera_corte o sin_regla
 	From, To     *time.Time
 	OnlyPriority bool
 	WithoutWave  bool
 	IncidentKind string
 	IDs          []int64 // exportar seleccionados
-	Sort         string  // recent (defecto), oldest, priority
+	Sort         string  // recent (defecto; en Asignación, prioridad primero), oldest, updated, priority
 	Limit        int
 	Offset       int
 }
@@ -56,6 +62,9 @@ type EventRecord struct {
 	Actor      string    `json:"actor"`
 	Reason     string    `json:"reason"`
 	OccurredAt time.Time `json:"occurredAt"`
+	// Details: datos ordenados del evento (p. ej. bultos faltantes de un
+	// «Despachar igual»). Vacío en la mayoría de los eventos.
+	Details json.RawMessage `json:"details,omitempty"`
 }
 
 // TransitionOpts - efectos que acompañan un cambio de estado en la MISMA transacción.
@@ -63,6 +72,8 @@ type TransitionOpts struct {
 	ReleaseCommitted bool  // libera el stock comprometido de la orden
 	ClearWave        bool  // quita la ola (p. ej. al volver a validar)
 	Jobs             []Job // trabajos para la cola (outbox)
+	// Details se guarda en order_events.details junto al cambio de estado.
+	Details any
 }
 
 type OrderRepository interface {
@@ -70,6 +81,7 @@ type OrderRepository interface {
 	Get(ctx context.Context, companyIDs []int64, id int64) (domain.Order, error)
 	List(ctx context.Context, f ListFilter) ([]domain.Order, int, error)
 	Summary(ctx context.Context, companyIDs []int64) (map[domain.Status]int, error)
+	Warehouses(ctx context.Context, companyIDs []int64) ([]string, error)
 	Events(ctx context.Context, orderID int64) ([]EventRecord, error)
 	AddEvent(ctx context.Context, orderID int64, typ, ev, actor, reason string) error
 
@@ -77,11 +89,15 @@ type OrderRepository interface {
 	// versión + historial + efectos, en UNA transacción. ErrConflict si otra
 	// operación ganó (p. ej. dos personas confirman a la vez).
 	Transition(ctx context.Context, o domain.Order, from domain.Status, ev domain.Event, actor, reason string, opts TransitionOpts) (domain.Order, error)
+	// SaveResolution guarda en una transacción las correcciones de una incidencia y su
+	// resolución. Si cambia el courier, la orden sale del manifiesto abierto.
+	SaveResolution(ctx context.Context, before, after domain.Order, from domain.Status, diff []string, actor, reason string, opts TransitionOpts) (domain.Order, error)
 	// SaveEdit guarda datos editados (y opcionalmente un cambio de estado).
 	SaveEdit(ctx context.Context, before, after domain.Order, diff []string, actor string, ev domain.Event, opts TransitionOpts) (domain.Order, error)
 	SetPriority(ctx context.Context, o domain.Order, priority bool, actor, reason string) (domain.Order, error)
 	// AssignWave marca la ola en órdenes Validadas sin ola y encola el envío a Invas.
-	AssignWave(ctx context.Context, companyIDs []int64, orderIDs []int64, waveID, actor, reason string) ([]int64, error)
+	// AssignWave encola las órdenes; ranks indica el corte de cada una en la cola.
+	AssignWave(ctx context.Context, companyIDs []int64, orderIDs []int64, waveID, actor, reason string, ranks map[int64]string) ([]int64, error)
 	// RetryFailedJobs vuelve a encolar los trabajos fallidos de la orden (reejecución autorizada).
 	RetryFailedJobs(ctx context.Context, orderID int64) (int, error)
 
@@ -103,12 +119,24 @@ type OrderRepository interface {
 
 // CatalogReader lee datos del Core DIRECTO de PostgreSQL (DA-12): Órdenes no
 // llama al Core ni usa su caché.
+// CourierOption y ProductOption: valores activos para las listas de la plantilla.
+type CourierOption struct{ Code, Name string }
+type ProductOption struct{ SKU, Description string }
+
 type CatalogReader interface {
 	MissingSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
-	KitSKUs(ctx context.Context, companyID int64, skus []string) ([]string, error)
+	// Kits (SCRUM-100): líneas de stock con los kits expandidos en sus
+	// componentes, y kits que aún no tienen composición.
+	StockLines(ctx context.Context, companyID int64, items []domain.Item) ([]domain.Item, error)
+	EmptyKits(ctx context.Context, companyID int64, skus []string) ([]string, error)
+	// Ola por producto o cliente (PV-19): olas distintas de los productos de
+	// la orden y ola por defecto del cliente ("" si no tiene).
+	WavePreference(ctx context.Context, orderID, companyID int64) (productWaves []string, companyWave string, err error)
 	CompanyActive(ctx context.Context, companyID int64) (bool, error)
 	CourierActive(ctx context.Context, code string) (bool, error)
 	Communes(ctx context.Context) ([]string, error)
+	ActiveCouriers(ctx context.Context) ([]CourierOption, error)
+	ActiveProducts(ctx context.Context, companyID int64) ([]ProductOption, error)
 	CompanyName(ctx context.Context, companyID int64) (string, error)
 	ClientEmails(ctx context.Context, companyID int64) ([]string, error)
 }
@@ -134,13 +162,27 @@ type WaveRule struct {
 
 type CourierSettings struct {
 	Courier     string   `json:"courier"`
-	ArrivalTime string   `json:"arrivalTime"` // HH:MM, corte del courier
 	MaxPackages *int     `json:"maxPackages"`
 	CoversAll   bool     `json:"coversAll"`
 	Communes    []string `json:"communes"` // cobertura si CoversAll = false
 }
 
+type CutoffCourier struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	ArrivalTime string `json:"arrivalTime"`
+}
+type Cutoff struct {
+	ID         int64           `json:"id"`
+	Number     int             `json:"number"`
+	Name       *string         `json:"name"`
+	CutoffTime string          `json:"cutoffTime"`
+	Couriers   []CutoffCourier `json:"couriers"`
+}
 type RuleRepository interface {
+	Cutoffs(context.Context) ([]Cutoff, error)
+	SaveCutoff(context.Context, Cutoff, string) (Cutoff, error)
+	DeleteCutoff(context.Context, int64, string) error
 	List(ctx context.Context, onlyActive bool) ([]WaveRule, error)
 	Get(ctx context.Context, id int64) (WaveRule, error)
 	Save(ctx context.Context, r WaveRule, actor string) (WaveRule, error) // crea si ID == 0
@@ -151,6 +193,10 @@ type RuleRepository interface {
 	CourierSettings(ctx context.Context, courier string) (CourierSettings, error)
 	ListCourierSettings(ctx context.Context) ([]CourierSettings, error)
 	SaveCourierSettings(ctx context.Context, s CourierSettings, actor string) error
+	AssignmentDeadline(ctx context.Context) (string, error)
+	OperationSchedule(ctx context.Context) (domain.OperationSchedule, error)
+	SaveOperationSchedule(ctx context.Context, s domain.OperationSchedule, actor string) error
+	SaveAssignmentDeadline(ctx context.Context, value, actor string) error
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +230,8 @@ type Manifest struct {
 	VehiclePlate string         `json:"vehiclePlate,omitempty"`
 	Notes        string         `json:"notes,omitempty"`
 	Lines        []ManifestLine `json:"lines"`
+	// Summary lo calcula la aplicación al leer el manifiesto.
+	Summary *ManifestSummary `json:"summary,omitempty"`
 }
 
 type ManifestLine struct {
@@ -198,6 +246,22 @@ type ManifestLine struct {
 	Packages      []ManifestBundle `json:"packages"`
 }
 
+// ManifestSummary - lo que pidió Ismael en el manifiesto (PV-09, H-13-T09):
+// cuántas órdenes y bultos salen y de qué empresas.
+type ManifestSummary struct {
+	Orders    int               `json:"orders"`
+	Packages  int               `json:"packages"`
+	Scanned   int               `json:"scanned"`
+	Companies []ManifestCompany `json:"companies"`
+}
+
+type ManifestCompany struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Orders   int    `json:"orders"`
+	Packages int    `json:"packages"`
+}
+
 type ManifestBundle struct {
 	ID      int64  `json:"id"`
 	Code    string `json:"code"`
@@ -210,10 +274,25 @@ type CourierQueue struct {
 	Packages int    `json:"packages"`
 }
 
+// LabelClaim: etiqueta pendiente que le toca a este proceso pedir.
+type LabelClaim struct {
+	OrderID int64
+	Attempt int
+}
+
 type FulfillmentRepository interface {
 	Packages(ctx context.Context, orderID int64) ([]domain.Package, error)
 	ReplacePackages(ctx context.Context, orderID int64, p []domain.Package, actor string, userID int64) ([]domain.Package, error)
-	PackingQueue(ctx context.Context, companyIDs []int64, userID int64) ([]domain.Order, error)
+	PackingQueue(ctx context.Context, companyIDs []int64, userID int64, includeDisabled bool) ([]domain.Order, error)
+
+	// Etiqueta de la orden. Reclamar deja un plazo para que nadie más la pida a la vez.
+	RequestLabel(ctx context.Context, o domain.Order, actor string) error
+	ClaimLabel(ctx context.Context, orderID int64) (attempt int, claimed bool, err error)
+	ClaimDueLabels(ctx context.Context, limit int) ([]LabelClaim, error)
+	RetryLabel(ctx context.Context, orderID int64, attempt int, delay time.Duration, reason string) error
+	FailLabel(ctx context.Context, orderID int64, attempt int, reason, actor string) error
+	ClearLabel(ctx context.Context, orderID int64) error
+	CompleteLabel(ctx context.Context, d Document, trackingCode string, packages int, actor string) (bool, error)
 
 	AddDocument(ctx context.Context, d Document) (Document, error)
 	Documents(ctx context.Context, orderID int64) ([]Document, error)
@@ -294,6 +373,7 @@ type IntegrationRepository interface {
 type Notification struct {
 	ID        int64     `json:"id"`
 	CompanyID int64     `json:"companyId"`
+	Warehouse string    `json:"warehouse,omitempty"`
 	Audience  string    `json:"audience"` // internal | client | all
 	OrderID   *int64    `json:"orderId"`
 	Kind      string    `json:"kind"`
@@ -346,9 +426,10 @@ type WMSGateway interface {
 	PickingDone(ctx context.Context, o domain.Order) (bool, error)
 }
 
-// CourierGateway - etiquetas del courier (PA-01, una estrategia por courier).
+// CourierGateway - etiquetas del courier por API (PA-01). Devuelve domain.ErrLabelNotReady
+// si todavía no está disponible; attempt parte en 1.
 type CourierGateway interface {
-	Label(ctx context.Context, o domain.Order, packages []domain.Package) (pdf []byte, trackingCode string, err error)
+	Label(ctx context.Context, o domain.Order, packages []domain.Package, attempt int) (pdf []byte, trackingCode string, err error)
 }
 
 // ChannelGateway - consulta de detalle de una orden avisada por referencia

@@ -37,14 +37,19 @@ services:
           memory: 512M
 
   keycloak:
-    # Unos 1,25 GB de RAM (DAS §7.1): revisar el tamaño del droplet.
+    # Límite de 1,36 GB acordado en la Sprint Review 1 (PV-15, SCRUM-246):
+    # con él el stack usa unos 2,6–2,9 GB del plan de 4 GB de DigitalOcean.
+    # La JVM toma el 70 % del límite para el heap y deja el resto para
+    # metaspace, hilos y memoria nativa; así el contenedor no llega al OOM.
     # Producción: auth.westorage.cl (AUTH_DOMAIN y KEYCLOAK_PUBLIC_URL en .env)
     # y SMTP real de WeStorage (SMTP_* en .env). Sin usuarios de prueba.
+    environment:
+      JAVA_OPTS_KC_HEAP: "-XX:MaxRAMPercentage=70 -XX:InitialRAMPercentage=30"
     logging: *logging
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 1392M
 
   frontend:
     logging: *logging

@@ -8,6 +8,7 @@
 #   - Keycloak en modo desarrollo con usuarios de prueba (contraseña Nexus2026!)
 #     Consola: http://localhost/auth/admin  (usuario/contraseña de .env)
 #   - Mailpit: bandeja de correos de prueba en http://127.0.0.1:8025
+#   - seed-dev: empresas, perfiles y productos ficticios
 # =============================================================================
 
 services:
@@ -20,6 +21,7 @@ services:
       target: dev
     environment:
       NODE_ENV: development
+      NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS: "true" # cuentas demo en /login; nunca en producción
       # Necesario en Windows/macOS para detectar cambios en archivos montados
       WATCHPACK_POLLING: "true"
     volumes:
@@ -29,9 +31,34 @@ services:
       - /app/node_modules
       - /app/.next
 
+  # Datos ficticios de desarrollo. Corre antes de core para que un usuario de prueba no
+  # entre sin sus empresas. Producción no carga este archivo.
+  seed-dev:
+    image: postgres:${POSTGRES_VERSION:-17-alpine}
+    command: ["psql", "-q", "-v", "ON_ERROR_STOP=1", "-h", "postgres", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}", "-f", "/seed/seed_dev.sql"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./infrastructure/dev-seed:/seed:ro
+    depends_on:
+      migrate-core:
+        condition: service_completed_successfully
+    networks:
+      - data
+    restart: "no"
+
   core:
     build:
       target: dev
+    # depends_on solo ordena «docker compose up». Si Docker o el equipo se reinician, los
+    # contenedores vuelven solos y a la vez: el servicio partía antes que PostgreSQL, salía con
+    # error y Air no lo relanza (quedaba «unhealthy» hasta reiniciarlo a mano). Por eso se
+    # espera a PostgreSQL y Redis antes de lanzar Air. En producción no hace falta: el binario
+    # sale con error y «restart: unless-stopped» lo reintenta.
+    command: ["sh", "-c", "until nc -z postgres 5432 2>/dev/null && nc -z redis 6379 2>/dev/null; do sleep 1; done; sleep 2; exec air -c .air.toml"]
+    depends_on:
+      seed-dev:
+        condition: service_completed_successfully
     environment:
       APP_ENV: development
     volumes:
@@ -39,13 +66,17 @@ services:
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
     healthcheck:
-      # En dev el binario lo genera Air en ./tmp
-      test: ["CMD", "/app/tmp/api", "-healthcheck"]
+      # En dev se consulta /health por HTTP y no el binario de Air (./tmp/api): dos
+      # recompilaciones seguidas pueden dejar ./tmp sin el archivo aunque el servidor siga
+      # corriendo, y Traefik sacaba el servicio por «unhealthy».
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       start_period: 90s
 
   orders:
     build:
       target: dev
+    # Igual que core: espera a PostgreSQL y Redis antes de lanzar Air.
+    command: ["sh", "-c", "until nc -z postgres 5432 2>/dev/null && nc -z redis 6379 2>/dev/null; do sleep 1; done; sleep 2; exec air -c .air.toml"]
     environment:
       APP_ENV: development
     volumes:
@@ -53,7 +84,8 @@ services:
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
     healthcheck:
-      test: ["CMD", "/app/tmp/api", "-healthcheck"]
+      # Igual que core: /health por HTTP, no el binario de Air.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health"]
       start_period: 90s
 
   keycloak:

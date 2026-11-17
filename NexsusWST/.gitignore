@@ -1,5 +1,7 @@
 # Secretos
 .env
+# Respaldos de la base (datos reales: nunca al repositorio)
+backups/
 *.pem
 *.key
 infrastructure/traefik/letsencrypt/
@@ -24,5 +26,12 @@ Thumbs.db
 
 # Generados por herramientas
 frontend-web/tsconfig.tsbuildinfo
+frontend-web/test-results/
+frontend-web/playwright-report/
 frontend-web/AGENTS.md
 frontend-web/CLAUDE.md
+
+# trabajo local
+respaldo/
+AGENTS.md
+CLAUDE.md

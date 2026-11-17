@@ -166,8 +166,8 @@ func NewNotificationRepository(db *pgxpool.Pool) *NotificationRepository {
 }
 
 func (r *NotificationRepository) Add(ctx context.Context, n ports.Notification) (ports.Notification, error) {
-	err := r.db.QueryRow(ctx, `INSERT INTO notifications (company_id, audience, order_id, kind, title, body)
-		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`, n.CompanyID, n.Audience, n.OrderID, n.Kind, n.Title, n.Body).
+	err := r.db.QueryRow(ctx, `INSERT INTO notifications (company_id, audience, order_id, kind, title, body, warehouse)
+		VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,'')) RETURNING id, created_at`, n.CompanyID, n.Audience, n.OrderID, n.Kind, n.Title, n.Body, n.Warehouse).
 		Scan(&n.ID, &n.CreatedAt)
 	return n, err
 }

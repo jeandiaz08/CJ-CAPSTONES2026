@@ -55,7 +55,10 @@ func (h *Handler) receive(w http.ResponseWriter, r *http.Request) {
 	}
 	inboxID, err := h.svc.ReceiveWebhook(r.Context(), provider, id, body, r.Header.Get("X-Nexus-Signature"), token)
 	if errors.Is(err, application.ErrWebhookAuth) {
-		h.log.Warn("webhook rechazado: secreto o firma inválidos", "provider", provider, "integration", id, "ip", r.RemoteAddr)
+		// X-Forwarded-For lo deja Traefik: solo conserva lo que venga de proxies de
+		// confianza (Cloudflare), así que el primer valor es la IP real del emisor.
+		h.log.Warn("webhook rechazado: secreto o firma inválidos", "provider", provider, "integration", id,
+			"ip", r.RemoteAddr, "forwarded_for", r.Header.Get("X-Forwarded-For"))
 		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "firma o secreto inválidos")
 		return
 	}

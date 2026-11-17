@@ -22,18 +22,28 @@ func NewHandler(svc *application.Service) *Handler { return &Handler{svc: svc} }
 
 func (h *Handler) Register(mux *http.ServeMux, authMW func(http.Handler) http.Handler) {
 	mux.Handle("GET /v1/auth/me", authMW(http.HandlerFunc(h.me)))
+	mux.Handle("GET /v1/me/notes", authMW(http.HandlerFunc(h.listNotes)))
+	mux.Handle("POST /v1/me/notes", authMW(http.HandlerFunc(h.createNote)))
+	mux.Handle("PATCH /v1/me/notes/{id}", authMW(http.HandlerFunc(h.updateNote)))
+	mux.Handle("DELETE /v1/me/notes/{id}", authMW(http.HandlerFunc(h.deleteNote)))
 
-	// Facultad administrativa: solo el perfil Administrador (RF-02).
+	// Consulta: el perfil Administrador (RF-02; sin el permiso, en lectura).
 	admin := func(f http.HandlerFunc) http.Handler {
 		return authMW(tenant.RequireRole(tenant.RoleAdmin)(f))
 	}
+	// Escrituras: el permiso «Gestionar perfiles», no el perfil (Matriz v1.2,
+	// regla 11). /v1/users cubre perfiles internos y de clientes: alcance «todos».
+	manage := func(f http.HandlerFunc) http.Handler {
+		return authMW(tenant.RequireManageProfiles(tenant.ProfileScopeAll)(f))
+	}
 	mux.Handle("GET /v1/users", admin(h.list))
-	mux.Handle("POST /v1/users", admin(h.create))
+	mux.Handle("POST /v1/users", manage(h.create))
 	mux.Handle("GET /v1/users/{id}", admin(h.get))
-	mux.Handle("PATCH /v1/users/{id}", admin(h.update))
-	mux.Handle("POST /v1/users/{id}/disable", admin(h.disable))
-	mux.Handle("POST /v1/users/{id}/enable", admin(h.enable))
-	mux.Handle("POST /v1/users/{id}/password-email", admin(h.passwordEmail))
+	mux.Handle("PATCH /v1/users/{id}", manage(h.update))
+	mux.Handle("POST /v1/users/{id}/disable", manage(h.disable))
+	mux.Handle("POST /v1/users/{id}/enable", manage(h.enable))
+	mux.Handle("POST /v1/users/{id}/password-email", manage(h.passwordEmail))
+	mux.Handle("POST /v1/users/{id}/password-reset", manage(h.passwordReset))
 	mux.Handle("GET /v1/users/{id}/history", admin(h.history))
 	mux.Handle("GET /v1/roles", authMW(http.HandlerFunc(h.roles)))
 }
@@ -84,6 +94,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 
 type userBody struct {
 	Email        string   `json:"email"`
+	Username     string   `json:"username"` // sin correo (H-02-T09): solo personal interno
 	Name         string   `json:"name"`
 	Role         string   `json:"role"`
 	Permissions  []string `json:"permissions"`
@@ -98,11 +109,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, _ := tenant.From(r.Context())
-	u, err := h.svc.Create(r.Context(), actor, domain.Draft{Email: b.Email, Name: b.Name, Role: b.Role,
+	u, err := h.svc.Create(r.Context(), actor, domain.Draft{Email: b.Email, Username: b.Username, Name: b.Name, Role: b.Role,
 		Permissions: b.Permissions, AllCompanies: b.AllCompanies, Companies: b.Companies})
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	if u.TemporaryPassword != "" {
+		w.Header().Set("Cache-Control", "no-store")
 	}
 	httpx.JSON(w, http.StatusCreated, u)
 }
@@ -173,6 +187,22 @@ func (h *Handler) passwordEmail(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// passwordReset (H-02-T09): contraseña temporal nueva, se muestra una sola vez.
+func (h *Handler) passwordReset(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	actor, _ := tenant.From(r.Context())
+	temp, err := h.svc.ResetPassword(r.Context(), actor, id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.JSON(w, http.StatusOK, map[string]string{"temporaryPassword": temp})
+}
+
 func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -206,11 +236,13 @@ func writeErr(w http.ResponseWriter, err error) {
 		httpx.Error(w, http.StatusNotFound, "not_found", domain.ErrNotFound.Error())
 	case errors.Is(err, domain.ErrEmailTaken):
 		httpx.Error(w, http.StatusConflict, "email_taken", err.Error())
+	case errors.Is(err, domain.ErrUsernameTaken):
+		httpx.Error(w, http.StatusConflict, "username_taken", err.Error())
 	case errors.Is(err, domain.ErrSelfChange):
 		httpx.Error(w, http.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, domain.ErrIdPUnavailable):
 		httpx.Error(w, http.StatusServiceUnavailable, "idp_unavailable", domain.ErrIdPUnavailable.Error())
 	default:
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "error inesperado")
+		httpx.Internal(w, err, "Error inesperado")
 	}
 }

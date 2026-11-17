@@ -59,7 +59,16 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      # El navegador SIEMPRE usa rutas relativas /api/... a través de Traefik.
+      # El navegador SIEMPRE usa rutas relativas: /bff/... (Next agrega el token) y /api/orders/ws.
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost}
+      AUTH_URL: ${APP_PUBLIC_URL:-http://localhost}/api/auth
+      AUTH_SECRET: ${AUTH_SECRET:?Define AUTH_SECRET en .env}
+      AUTH_TRUST_HOST: "true"
+      AUTH_KEYCLOAK_ID: nexus-web
+      AUTH_KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://localhost/auth}/realms/nexuswst
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080/auth
+      CORE_INTERNAL_URL: http://core:8080
+      ORDERS_INTERNAL_URL: http://orders:8081
     networks:
       - edge
     labels:
@@ -88,6 +97,9 @@ services:
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080/auth
       KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://localhost/auth}/realms/nexuswst
       KEYCLOAK_CORE_CLIENT_SECRET: ${KEYCLOAK_CORE_CLIENT_SECRET}
+      # También arma el enlace de los correos de solicitudes de perfiles (Tarea 07). El correo usa
+      # SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_USER, SMTP_PASSWORD y SMTP_STARTTLS, que llegan por
+      # env_file (.env), igual que en Órdenes. Sin SMTP_HOST no se envía (solo queda en el log).
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost}
     depends_on:
       postgres:
@@ -212,13 +224,21 @@ services:
       KC_SMTP_HOST: ${SMTP_HOST:-mailpit}
       KC_SMTP_PORT: ${SMTP_PORT:-1025}
       KC_SMTP_FROM: ${SMTP_FROM:-no-reply@westorage.cl}
+      NEXUS_MAIL_FROM: ${NEXUS_MAIL_FROM:-${SMTP_FROM:-no-reply@westorage.cl}}
       KC_SMTP_AUTH: ${SMTP_AUTH:-false}
       KC_SMTP_USER: ${SMTP_USER:-}
       KC_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       KC_SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
       KC_SMTP_SSL: ${SMTP_SSL:-false}
+      # Ingreso opcional con Microsoft 365 (Entra ID, H-01-T09). Vacío = botón deshabilitado.
+      KC_MS_ENABLED: ${ENTRA_ENABLED:-false}
+      KC_MS_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      KC_MS_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      KC_MS_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
     volumes:
       - ./infrastructure/keycloak/import/nexuswst-realm.json:/opt/keycloak/data/import/nexuswst-realm.json:ro
+      - ./infrastructure/keycloak/theme/dist_keycloak/nexuswst-keycloak-theme.jar:/opt/keycloak/providers/nexuswst-keycloak-theme.jar:ro
+      - ./infrastructure/keycloak/email-theme/nexuswst-email:/opt/keycloak/themes/nexuswst-email:ro   # textos de los correos (SCRUM-80)
     depends_on:
       postgres:
         condition: service_healthy
