@@ -21,6 +21,8 @@ import (
 //   - Consultar y exportar: Administrador, Jefe de Operaciones y Analista (lectura) y el Cliente,
 //     solo su empresa (lo fija el servidor con tenant.Scope).
 //   - Crear, editar, activar y desactivar (e importar, Fase 2): solo el Administrador.
+//   - Empaque: solo el listado (GET /v1/products), para mostrar la descripción de cada SKU al
+//     verificar productos en Empaque. No exporta, no ve el detalle ni escribe.
 //
 // TODO(matriz): la escritura del Cliente está «Por validar» en la matriz v1.2; se confirma con
 // Ismael. Mientras tanto, el Cliente solo consulta y exporta lo de su empresa.
@@ -32,8 +34,11 @@ func (h *CatalogHandler) Register(mux *http.ServeMux, auth func(http.Handler) ht
 	view := func(f http.HandlerFunc) http.Handler {
 		return auth(tenant.RequireRole(tenant.RoleAdmin, tenant.RoleJefeOps, tenant.RoleAnalista, tenant.RoleCliente)(f))
 	}
+	list := func(f http.HandlerFunc) http.Handler {
+		return auth(tenant.RequireRole(tenant.RoleAdmin, tenant.RoleJefeOps, tenant.RoleAnalista, tenant.RoleCliente, tenant.RoleEmpaque)(f))
+	}
 	write := func(f http.HandlerFunc) http.Handler { return auth(tenant.RequireRole(tenant.RoleAdmin)(f)) }
-	mux.Handle("GET /v1/products", view(h.list))
+	mux.Handle("GET /v1/products", list(h.list))
 	mux.Handle("GET /v1/products/export", view(h.export)) // Fase 2: exportar lo autorizado
 	mux.Handle("GET /v1/products/template", write(h.template))
 	mux.Handle("POST /v1/products/import", write(h.importFile))
