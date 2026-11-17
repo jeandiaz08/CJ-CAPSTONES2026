@@ -184,13 +184,13 @@ Solicitud (respuesta): además de lo de clientes, `scope` y, en `profile`, `user
 - **Campana (WebSocket de Órdenes, mismo canal de Redis por empresa):** al crearla, `{type:"notification", audience:"internal", notification:{id, kind:"profile_request", title, body, requestId, companyId, createdAt}}`; la interfaz la muestra solo a quien tiene «Gestionar perfiles». Al responderla, `audience:"client"`, `kind:"profile_request_reviewed"`, para el Cliente. Sin persistencia (como el resto de la campana).
 - **Correo (SMTP de la app, `SMTP_*` en `.env`; Mailpit en desarrollo):** al crearla, a los usuarios activos con «Gestionar perfiles» y correo; al responderla, al Cliente que la pidió. Texto simple en español con empresa, tipo, nombre del perfil, motivo (y motivo del rechazo) y un enlace a la pantalla (`APP_PUBLIC_URL`). No bloquea: si falla, la acción igual se guarda y el error queda en el log. Sin `SMTP_HOST`, no se envía.
 
-### Productos y kits (H-04, RF-06; página Productos, Tarea 09) — consulta: Administrador, Jefe de Operaciones, Analista y Cliente (su empresa) · cambios: Administrador
+### Productos y kits (H-04, RF-06; página Productos, Tarea 09) — consulta: Administrador, Jefe de Operaciones, Analista y Cliente (su empresa) · listado también Empaque · cambios: Administrador
 
-El Cliente ve solo los productos de su empresa (lo fija el servidor); `company_id` de otra empresa responde 403. Empaque: 403. **TODO(matriz):** la escritura del Cliente está «Por validar» en la matriz v1.2; se confirma con Ismael.
+El Cliente ve solo los productos de su empresa (lo fija el servidor); `company_id` de otra empresa responde 403. **Empaque (desde el 17-11-2026):** solo `GET /v1/products` (el listado), para mostrar la descripción de cada SKU al verificar productos en Empaque; con los mismos filtros y alcance que el resto (Empaque es personal interno: todas las empresas, o la de `company_id`). Para Empaque, `GET /v1/products/{id}`, `/export`, `/template`, `/import` y todas las escrituras siguen respondiendo 403. **TODO(matriz):** la escritura del Cliente está «Por validar» en la matriz v1.2; se confirma con Ismael.
 
 | Método | Ruta | Cuerpo / filtros | Descripción |
 | --- | --- | --- | --- |
-| GET | `/v1/products` | `?q=` (o `search=`) `&company_id=&type=simple\|kit&status=active\|inactive&wave=general\|<código>&ids=&limit=&offset=` | `{data, total, limit, offset}`. `q` busca por SKU o descripción. Cada producto: `{id, companyId, companyName, sku, description, type, active, waveCode, createdAt, updatedAt, updatedBy}`. `updatedBy` = quien hizo la última acción del registro. |
+| GET | `/v1/products` | `?q=` (o `search=`) `&company_id=&type=simple\|kit&status=active\|inactive&wave=general\|<código>&ids=&limit=&offset=` | `{data, total, limit, offset}`. `q` busca por SKU o descripción. Cada producto: `{id, companyId, companyName, sku, description, type, active, waveCode, createdAt, updatedAt, updatedBy}`. `updatedBy` = quien hizo la última acción del registro. Perfiles: Administrador, Jefe, Analista, Cliente (su empresa) y **Empaque** (solo lectura). |
 | GET | `/v1/products/{id}` | | Detalle; si es kit, `components: [{productId, sku, description, quantity}]`. **Nunca stock.** |
 | POST | `/v1/products` | `{companyId, sku, description, type, waveCode, components?}` | Crea (201). SKU en mayúsculas, sin espacios, máx. 60, **único por empresa** (409 con `fields: [{field: "sku"}]`). Cliente activo. `waveCode` null = «General (según reglas)». Un kit exige `components` (al menos uno); un artículo no los admite. 422 con `fields` por campo. |
 | PATCH | `/v1/products/{id}` | `{description, waveCode, components?}` | Edita descripción, ola y, si es kit, la composición. Cliente, SKU y tipo **no se editan** (400). Una sola acción `product_updated` con el antes y el después. |
@@ -379,6 +379,7 @@ Además se crea un aviso interno (`kind: despacho_incompleto`) para el Jefe y el
   - `{"type":"order.changed", orderId, companyId, status, version, priority}`
   - `{"type":"notification", audience, notification}`
   - Al reconectar, volver a consultar la API.
+- **Texto de los avisos de una orden (17-11-2026):** el título usa el número de la orden, sin el id interno: «Orden #20006 en Incidencia», «Etiqueta lista: orden #20006», «Despacho incompleto: orden #20006» (si la orden no tiene número externo, `#{id}`). En una incidencia, el cuerpo es «{tipo}. {motivo}», salvo que el motivo ya empiece con el tipo (lo que guarda `POST /v1/orders/{id}/incident`, «Otro: …»): entonces es solo el motivo.
 
 ### Cola de Invas y situación (regla de cortes)
 

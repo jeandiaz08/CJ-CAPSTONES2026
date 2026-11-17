@@ -68,10 +68,11 @@ describe('Seguimiento en el detalle',()=>{
     await render(undefined);expect(host.textContent).toContain('Sin seguimiento disponible');expect(host.querySelector('table')).toBeNull();
     await render({available:false,events:[]});expect(host.textContent).toContain('Sin seguimiento disponible');
   });
+  // Estado: la descripción del courier; el código crudo solo si no viene descripción.
   it('con datos: estado, origen y fecha',async()=>{
     await render({available:true,events:[{id:1,provider:'mercadoenvios',status:'in_transit',description:'En tránsito a Santiago',occurredAt:'2026-11-07T12:00:00Z'},{id:2,provider:'mercadoenvios',status:'delivered',occurredAt:'2026-11-07T18:00:00Z'}]});
     expect([...host.querySelectorAll('th')].map(t=>t.textContent)).toEqual(['Estado','Origen','Fecha']);
     const rows=[...host.querySelectorAll('tbody tr')].map(r=>[...r.querySelectorAll('td')].map(td=>td.textContent));
-    expect(rows[0].slice(0,2)).toEqual(['in_transit · En tránsito a Santiago','mercadoenvios']);expect(rows[1][0]).toBe('delivered');expect(rows[0][2]).toMatch(/07-11-(20)?26/);
+    expect(rows[0].slice(0,2)).toEqual(['En tránsito a Santiago','mercadoenvios']);expect(rows[1][0]).toBe('delivered');expect(rows[0][2]).toMatch(/07-11-(20)?26/);
   });
 });

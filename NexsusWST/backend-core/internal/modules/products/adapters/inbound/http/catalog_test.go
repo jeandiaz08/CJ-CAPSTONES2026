@@ -157,16 +157,42 @@ func serveCatalog(m *memCatalog, p tenant.Profile, method, path, body string) *h
 	return rec
 }
 
+// Empaque solo lee: crear, editar, desactivar, activar, importar y bajar la plantilla dan 403.
+func TestCatalogEmpaqueCannotWrite(t *testing.T) {
+	m := newMemCatalog()
+	writes := [][3]string{
+		{"POST", "/v1/products", `{"companyId":1,"sku":"X-1","description":"X","type":"simple"}`},
+		{"PATCH", "/v1/products/1", `{"description":"Otra"}`},
+		{"POST", "/v1/products/1/disable", `{"reason":"Descontinuado"}`},
+		{"POST", "/v1/products/3/enable", ``},
+		{"POST", "/v1/products/import", ``},
+		{"GET", "/v1/products/template", ``},
+	}
+	for _, w := range writes {
+		if rec := serveCatalog(m, empaque, w[0], w[1], w[2]); rec.Code != http.StatusForbidden {
+			t.Errorf("empaque %s %s: %d, quería 403", w[0], w[1], rec.Code)
+		}
+	}
+	// Y nada cambió: el producto 1 conserva su descripción.
+	rec := serveCatalog(m, admin, "GET", "/v1/products/1", "")
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"description":"Otra"`) {
+		t.Fatalf("el producto cambió tras las escrituras de Empaque: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCatalogAccess(t *testing.T) {
 	m := newMemCatalog()
-	// Consultan Administrador, Jefe y Cliente; Empaque no.
-	for name, p := range map[string]tenant.Profile{"admin": admin, "jefe": jefe, "cliente": cliente} {
+	// Listan Administrador, Jefe, Cliente y Empaque (este último para ver la descripción de cada
+	// SKU al empacar). Exportar y el detalle de un producto siguen cerrados para Empaque.
+	for name, p := range map[string]tenant.Profile{"admin": admin, "jefe": jefe, "cliente": cliente, "empaque": empaque} {
 		if rec := serveCatalog(m, p, "GET", "/v1/products", ""); rec.Code != http.StatusOK {
 			t.Errorf("%s consulta: %d", name, rec.Code)
 		}
 	}
-	if rec := serveCatalog(m, empaque, "GET", "/v1/products", ""); rec.Code != http.StatusForbidden {
-		t.Errorf("empaque consulta: %d", rec.Code)
+	for _, path := range []string{"/v1/products/export", "/v1/products/1"} {
+		if rec := serveCatalog(m, empaque, "GET", path, ""); rec.Code != http.StatusForbidden {
+			t.Errorf("empaque GET %s: %d, quería 403", path, rec.Code)
+		}
 	}
 	// Solo el Administrador escribe.
 	writes := [][3]string{

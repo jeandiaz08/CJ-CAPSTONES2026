@@ -27,14 +27,14 @@ func (n *Notices) OnStatus(ctx context.Context, o domain.Order, reason string) {
 	if n == nil || n.repo == nil {
 		return
 	}
-	ref := fmt.Sprintf("#%d (%s)", o.ID, o.ExternalRef)
+	ref := orderRef(o)
 	switch o.Status {
 	case domain.StatusIncident:
 		label := domain.IncidentLabels[o.IncidentKind]
 		if label == "" {
 			label = "Incidencia"
 		}
-		n.add(ctx, o, "all", "incident", "Orden "+ref+" en Incidencia", fmt.Sprintf("%s. %s", label, reason), false)
+		n.add(ctx, o, "all", "incident", "Orden "+ref+" en Incidencia", incidentBody(label, reason), false)
 	case domain.StatusVoided:
 		n.add(ctx, o, "all", "voided", "Orden "+ref+" Anulada por falta de stock",
 			"La orden quedó Anulada porque el stock disponible no alcanza. "+reason+
@@ -44,12 +44,33 @@ func (n *Notices) OnStatus(ctx context.Context, o domain.Order, reason string) {
 	}
 }
 
+// orderRef: el número que ve la gente en la campana es el de la orden (#20006), no el id interno.
+func orderRef(o domain.Order) string {
+	if o.ExternalRef == "" {
+		return fmt.Sprintf("#%d", o.ID)
+	}
+	return "#" + o.ExternalRef
+}
+
+// incidentBody antepone el tipo de incidencia al motivo, salvo que el motivo ya lo traiga
+// (ReportIncident guarda «Otro: …»): así no queda «Otro. Otro: …».
+func incidentBody(label, reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return label + "."
+	}
+	if strings.HasPrefix(strings.ToLower(reason), strings.ToLower(label)) {
+		return reason
+	}
+	return label + ". " + reason
+}
+
 // OnLabel avisa al personal interno el resultado de una etiqueta que se pidió sola.
 func (n *Notices) OnLabel(ctx context.Context, o domain.Order, ready bool) {
 	if n == nil || n.repo == nil {
 		return
 	}
-	ref := fmt.Sprintf("#%d (%s)", o.ID, o.ExternalRef)
+	ref := orderRef(o)
 	if ready {
 		n.add(ctx, o, "internal", "label_ready", "Etiqueta lista: orden "+ref, "Ya se puede imprimir.", false)
 		return
@@ -64,7 +85,7 @@ func (n *Notices) OnIncompleteDispatch(ctx context.Context, o domain.Order, d In
 	if n == nil || n.repo == nil {
 		return
 	}
-	ref := fmt.Sprintf("#%d (%s)", o.ID, o.ExternalRef)
+	ref := orderRef(o)
 	n.add(ctx, o, "internal", "despacho_incompleto", "Despacho incompleto: orden "+ref,
 		fmt.Sprintf("Salió en el manifiesto #%d con %d de %d bulto(s). Faltan: %s. Autorizó %s. Motivo: %s",
 			d.ManifestID, len(d.ScannedPackages), d.PackagesTotal, strings.Join(d.MissingPackages, ", "), who, d.Reason), false)
