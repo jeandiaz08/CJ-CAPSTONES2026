@@ -8,7 +8,8 @@
 #
 #  1. Usuarios sin correo (H-02-T09 / SCRUM-231): el nombre de usuario deja de
 #     ser el correo y el correo pasa a ser opcional en el perfil de usuario.
-#     También deja los correos de acceso con el tema «nexuswst-email» (SCRUM-80).
+#     También deja el login con el tema «nexuswst» (necesita el .jar: make theme)
+#     y los correos de acceso con el tema «nexuswst-email» (SCRUM-80).
 #  2. Ingreso con Microsoft 365 (H-01-T09 / SCRUM-230): crea o actualiza el
 #     proveedor «microsoft» con ENTRA_TENANT_ID, ENTRA_CLIENT_ID y
 #     ENTRA_CLIENT_SECRET del .env. Si falta alguno, queda deshabilitado y el
@@ -39,8 +40,8 @@ $COMPOSE exec -T keycloak sh -c '/opt/keycloak/bin/kcadm.sh config credentials -
   --server "http://localhost:8080${KC_HTTP_RELATIVE_PATH:-}" --realm master \
   --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD"' > /dev/null
 
-echo "1/2 Usuarios sin correo (usuario propio, correo opcional) y textos de los correos en español"
-kc update "realms/$REALM" -s registrationEmailAsUsername=false -s emailTheme=nexuswst-email
+echo "1/2 Usuarios sin correo (usuario propio, correo opcional), tema del login y textos de los correos en español"
+kc update "realms/$REALM" -s registrationEmailAsUsername=false -s loginTheme=nexuswst -s emailTheme=nexuswst-email
 python3 - "$REALM_FILE" <<'EOF' | kc update users/profile -r "$REALM" -f -
 import json, sys
 realm = json.load(open(sys.argv[1], encoding="utf-8"))
