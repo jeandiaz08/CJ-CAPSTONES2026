@@ -93,6 +93,15 @@
 
 ## 3. Pendientes de BACKEND (por prioridad)
 
+> **Hechos por Cristopher (18-11-2026):** A1, A2, A3 y A4 ya están en el backend
+> (ver `docs/API.md`, sección Retiro). Migraciones: Órdenes 000012 (`manifests.transport_company`
+> y vista `activity_log` con `transportCompany`), Órdenes 000013 (`orders.status_changed_at`, la
+> bandeja y el registro histórico ~50 veces más rápidos) y Core 000014 (índice de `user_audit`).
+> El front puede seguir mandando la empresa y las observaciones dentro de `notes`: el backend las
+> separa solo. Cuando el front mande `transportCompany` y `observations[]`, se pueden quitar esas
+> líneas de `notes`. `GET /v1/dispatch/manifests` ahora responde `{data, total, limit, offset}`
+> (20 por defecto) y acepta `?courier=`. Queda A5 (bodegas por usuario) a la espera de Ismael.
+
 ### Alta
 
 | # | Qué falta | Qué espera el front | TODO en el front | Qué pasa hoy |
